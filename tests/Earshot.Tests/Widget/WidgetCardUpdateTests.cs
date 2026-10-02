@@ -252,7 +252,7 @@ public sealed class WidgetCardUpdateTests
             presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
             Application.DoEvents();
             CardKit.Click(card!, card!.CurrentMainLayout.Gear);
-            CardKit.Click(card, CardKit.Part(card, SettingsRowId.CheckForUpdates, SettingsPart.Button));
+            CardKit.ClickPart(card, SettingsRowId.About, SettingsPart.Button);
 
             Assert.AreEqual(UpdateCopy.CheckingStatus, card.Model.Setup!.Status);
             Assert.IsTrue(presenter.SpinnerRunningForTest, "Checking turns the spinner.");
@@ -293,12 +293,12 @@ public sealed class WidgetCardUpdateTests
                 presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
                 Application.DoEvents();
                 CardKit.Click(card!, card!.CurrentMainLayout.Gear);
-                CardKit.Click(card, CardKit.Part(card, SettingsRowId.CheckForUpdates, SettingsPart.Button));
+                CardKit.ClickPart(card, SettingsRowId.About, SettingsPart.Button);
 
                 SetupButton button = card.Model.Setup!.Buttons.Single();
                 Assert.AreEqual(label, button.Label);
                 Assert.IsTrue(button.Primary);
-                CardKit.Click(card, card.CurrentSetupLayout!.Frame.Buttons[0]);
+                CardKit.Click(card, CardKit.ActionRect(card, 0));
 
                 Assert.AreEqual(0, host.StartUpdateCalls, label + " is not Update.");
                 Assert.AreEqual(label == "Set up Earshot" ? 1 : 0, host.SetUpCalls);
@@ -321,20 +321,20 @@ public sealed class WidgetCardUpdateTests
             presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
             Application.DoEvents();
             CardKit.Click(card!, card!.CurrentMainLayout.Gear);
-            CardKit.Click(card, CardKit.Part(card, SettingsRowId.CheckForUpdates, SettingsPart.Button));
+            CardKit.ClickPart(card, SettingsRowId.About, SettingsPart.Button);
             Assert.AreEqual(0, host.StartUpdateCalls, "A check found a version: nothing is downloaded yet.");
 
-            CardKit.Click(card, card.CurrentSetupLayout!.Frame.Buttons[0]);
+            CardKit.Click(card, CardKit.ActionRect(card, 0));
             Assert.AreEqual(1, host.StartUpdateCalls, "The page's own Update button starts it.");
 
             host.View = CardKit.Update(UpdateStage.Downloading, 10);
             host.RaiseUpdateChanged();
-            CardKit.Click(card, card.CurrentSetupLayout!.Frame.Buttons[0]);
+            CardKit.Click(card, CardKit.ActionRect(card, 0));
             Assert.AreEqual(1, host.CancelCalls, "Cancel stops the download.");
 
             host.View = CardKit.Update(UpdateStage.DownloadFailed, reason: "It stopped.");
             host.RaiseUpdateChanged();
-            CardKit.Click(card, card.CurrentSetupLayout!.Frame.Buttons[0]);
+            CardKit.Click(card, CardKit.ActionRect(card, 0));
             Assert.AreEqual(1, host.TryAgainCalls, "Try again asks the flow again.");
             Assert.AreEqual(1, host.StartUpdateCalls, "Try again is not Update.");
 
@@ -378,14 +378,16 @@ public sealed class WidgetCardUpdateTests
             Application.DoEvents();
 
             CardKit.Click(card!, card!.CurrentMainLayout.Gear);
-            CardKit.ClickPart(card, SettingsRowId.CheckAutomatically, SettingsPart.Toggle);
-            CardKit.ClickPart(card, SettingsRowId.CheckForUpdates, SettingsPart.Button);
+            CardKit.ClickPart(card, SettingsRowId.About, SettingsPart.Button);
+            Assert.AreEqual(0, host.CheckCalls, "Opening the updates page checks nothing.");
+            CardKit.Click(card, card.CurrentSetupLayout!.UpdateRows.Single(r => r.Index == 0).Surface);
             host.RaiseUpdateChanged();
             CardKit.Click(card, card.CurrentSetupLayout!.Frame.Back);
             CardKit.Click(card, card.CurrentSettingsLayout!.Frame.Back);
 
-            Assert.AreEqual(0, host.StartUpdateCalls, "Settings, the automatic switch, a check and going back never start it.");
-            Assert.AreEqual(1, host.CheckCalls);
+            Assert.AreEqual(0, host.StartUpdateCalls, "Settings, the automatic switch and going back never start it.");
+            Assert.AreEqual(0, host.CheckCalls);
+            CardKit.AssertCalls(host, "checkAuto:True");
             Assert.AreEqual(0, host.TryAgainCalls);
         });
     }

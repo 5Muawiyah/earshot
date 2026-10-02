@@ -962,9 +962,9 @@ public sealed class WidgetCardTests
                 card.SetTheme(Color.Black, highContrast: false);
                 card.Render(Model(unlinked), 96);
                 Assert.AreEqual("Open the case to show battery", card.ReadLineShort, "The same words beside the icon, however short the line.");
-                Assert.AreEqual("Open the case to show battery", card.TooltipAt(new Point(card.CurrentMainLayout.ReadLine.X + 40, card.CurrentMainLayout.ReadLine.Y + 4))!.Value.Text);
+                Assert.AreEqual("Open the case to show battery", card.StatusRow.Text, "The status row says it, in the caution ink.");
                 using Bitmap bitmap = Render(card);
-                Assert.IsTrue(HasInk(bitmap, card.CurrentMainLayout.ReadLine, bitmap.GetPixel(0, 0)), "The line is drawn.");
+                Assert.IsTrue(HasInk(bitmap, card.CurrentMainLayout.WhereLine, bitmap.GetPixel(0, 0)), "The row is drawn.");
             }
 
             Assert.AreEqual("Battery not read yet", AskFor(Snapshot(where: AirPodsWhere.Unknown) with { Selection = BroadcastSelectionState.Listening }), "Not connected: nothing to ask for.");

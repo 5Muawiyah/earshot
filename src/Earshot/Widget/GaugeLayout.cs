@@ -13,18 +13,19 @@ public enum GaugePosition
     NextToApps = 1,
 }
 
-// Every coordinate of the ring-and-number gauge, in physical pixels, for one display scale. Nothing here
-// draws or measures anything; it is the table the renderer and the placement read, so a test can check a
-// coordinate without a bitmap.
+// Every coordinate of the ring-and-number gauge, in physical pixels, for one display scale s (dpi / 96). Nothing here
+// draws or measures anything; it is the table the renderer and the placement read, so a test can check a coordinate
+// without a bitmap.
 //
-// 100%, 125% and 150% are written out, because simple rounding of the 100% figures does not reproduce the
-// intended ones (the left padding of 7 is 10 at 150%, not 11, while the right padding is 11). Any
-// other scale scales the 100% figures and rounds half away from zero.
-//
-// Left to right, all x measured from the window's left edge:
-//   | left pad | ring box | gap | number slot | charging slot | right pad |
-// The ring box holds the ring and, inside it, the earbud mark. The number slot always fits "100", so the
-// window never changes width. The charging slot is always reserved, whether or not a bolt is drawn.
+// The design's rule, for any scale:
+//   width = round(74 s), height = round(40 s)        (round half away from zero)
+//   ring box = round(24 s), number slot = round(20 s), bolt slot = round(12 s), gap = round(4 s)
+//   left padding = floor((width - content) / 2), content = ring + number + bolt + 2 gaps
+// The three pieces sit left to right in the chosen order with one gap between neighbours, vertically centred. The
+// design's table (R5 N33 B57 at 100%, R6 N41 B71 at 125%, R7 N49 B85 at 150% for ring, number, bolt) is what the rule gives.
+// The ring box holds the ring and, inside it, the earbud pair or the case mark, drawn on the design's 24 unit grid scaled
+// to the box. The number slot always fits "100", so the window never changes width; the bolt slot is always reserved,
+// whether or not a bolt is drawn; the digits are centred in their slot.
 internal readonly record struct GaugeLayout(
     int Dpi,
     int Width,
@@ -32,126 +33,104 @@ internal readonly record struct GaugeLayout(
     Rectangle RingBox,        // the square the ring is drawn in
     float RingRadius,         // of the ring's centre line
     float RingStroke,
-    Rectangle Mark,           // the earbud mark
-    Rectangle NumberSlot,     // where the digits go, left aligned
+    Rectangle Mark,           // the mark's grid: the ring box, the 24 unit grid is scaled to it
+    Rectangle NumberSlot,     // where the digits go, centred
     Rectangle ChargingSlot,   // where the bolt goes, centred
     Size Bolt,                // the bolt's own box
     int PhoneSize,            // the phone mark in the number slot
     int TypePixels,           // the number's type size, in pixels
-    int CornerRadius,         // the hover fill's corner radius
-    bool NumberAlignRight = false)   // the digits (and the phone mark) sit at the slot's right edge rather than its left
+    int CornerRadius)         // the hover fill's corner radius
 {
-    // The type is 12 px at 100%; a line box is 16 px.
+    // The design's figures at 100%.
+    public const int WidthAt96 = 74;
+    public const int HeightAt96 = 40;
+    public const int RingAt96 = 24;
+    public const int NumberSlotAt96 = 20;
+    public const int BoltSlotAt96 = 12;
+    public const int GapAt96 = 4;
+    public const float RingStrokeAt96 = 2.5f;
+
+    // The design's earbud pair on its 24 unit grid: the heads 5 by 5 at (6.5, 6) and (12.5, 6), the stems 2 by 8 at (9.5, 9) and
+    // (12.5, 9), corner radius 1.
+    public const int MarkGrid = 24;
+
     private const int TypeAt96 = 12;
     private const int PhoneAt96 = 16;
     private const int CornerAt96 = 4;
+    private const int LineAt96 = 16;
+
+    // The gauge's size, for a taskbar to be planned around, at a scale.
+    public static Size SizeFor(int dpi) => new(Round(WidthAt96, dpi), Round(HeightAt96, dpi));
+
+    // round(at96 * dpi / 96), half away from zero.
+    public static int Round(double at96, int dpi) =>
+        (int)Math.Round(at96 * (dpi > 0 ? dpi : CardPlacement.BaseDpi) / CardPlacement.BaseDpi, MidpointRounding.AwayFromZero);
 
     public static GaugeLayout For(int dpi) => For(dpi, GaugeOrder.RingNumberBolt);
 
-    // The layout with the three pieces in the given order. The window, its padding and each piece's width are the
-    // same for every order, so the gauge never changes size; only where the pieces sit changes. The gap budget (the
-    // space the default order puts between the ring and the number) goes between the ring and its neighbour when
-    // the ring is at an end, and half each side of the ring when it is in the middle (the left half rounded down).
-    // The number and the bolt touch: the bolt is centred in its slot, which already carries its margin. The number
-    // sits against the ring when it is next to it, and otherwise against the window's outer edge.
+    // The layout with the three pieces in the given order (an order that names none is the first).
     public static GaugeLayout For(int dpi, GaugeOrder order)
     {
-        GaugeLayout layout = Default(dpi);
-        GaugeOrder known = GaugeOrders.FromStored(order);
-        return known == GaugeOrder.RingNumberBolt ? layout : layout.Arranged(known);
-    }
+        int effective = dpi > 0 ? dpi : CardPlacement.BaseDpi;
+        int width = Round(WidthAt96, effective);
+        int height = Round(HeightAt96, effective);
+        int ring = Round(RingAt96, effective);
+        int number = Round(NumberSlotAt96, effective);
+        int bolt = Round(BoltSlotAt96, effective);
+        int gap = Round(GapAt96, effective);
+        int line = Round(LineAt96, effective);
+        int content = ring + number + bolt + (2 * gap);
+        int leftPad = Math.Max(0, (width - content) / 2);
 
-    private GaugeLayout Arranged(GaugeOrder order)
-    {
-        int gap = NumberSlot.X - RingBox.Right;
-        (GaugePiece first, GaugePiece second, GaugePiece third) = GaugeOrders.Sequence(order);
-        GaugePiece[] pieces = [first, second, third];
-
-        int x = RingBox.X;
+        (GaugePiece first, GaugePiece second, GaugePiece third) = GaugeOrders.Sequence(GaugeOrders.FromStored(order));
         int ringX = 0;
         int numberX = 0;
         int boltX = 0;
-        int ringIndex = Array.IndexOf(pieces, GaugePiece.Ring);
-        int numberIndex = Array.IndexOf(pieces, GaugePiece.Number);
-        for (int i = 0; i < pieces.Length; i++)
+        int x = leftPad;
+        foreach (GaugePiece piece in new[] { first, second, third })
         {
-            switch (pieces[i])
+            switch (piece)
             {
                 case GaugePiece.Ring:
-                    x += i == 0 ? 0 : i == 2 ? gap : gap / 2;
                     ringX = x;
-                    x += RingBox.Width + (i == 0 ? gap : i == 2 ? 0 : gap - (gap / 2));
+                    x += ring + gap;
                     break;
                 case GaugePiece.Number:
                     numberX = x;
-                    x += NumberSlot.Width;
+                    x += number + gap;
                     break;
                 default:
                     boltX = x;
-                    x += ChargingSlot.Width;
+                    x += bolt + gap;
                     break;
             }
         }
 
-        bool nextToRing = Math.Abs(numberIndex - ringIndex) == 1;
-        bool alignRight = nextToRing ? ringIndex > numberIndex : numberIndex == 2;
-        int shift = ringX - RingBox.X;
-        return this with
-        {
-            RingBox = RingBox with { X = ringX },
-            Mark = Mark with { X = Mark.X + shift },
-            NumberSlot = NumberSlot with { X = numberX },
-            ChargingSlot = ChargingSlot with { X = boltX },
-            NumberAlignRight = alignRight,
-        };
+        double scale = effective / (double)CardPlacement.BaseDpi;
+        float stroke = (float)(RingStrokeAt96 * scale);
+        var ringBox = new Rectangle(ringX, (height - ring) / 2, ring, ring);
+        return new GaugeLayout(
+            effective, width, height,
+            ringBox, (ring / 2f) - (stroke / 2f), stroke,
+            ringBox,
+            new Rectangle(numberX, (height - line) / 2, number, line),
+            new Rectangle(boltX, (height - bolt) / 2, bolt, bolt),
+            new Size(bolt, bolt),
+            Round(PhoneAt96, effective),
+            Round(TypeAt96, effective),
+            Round(CornerAt96, effective));
     }
-
-    private static GaugeLayout Default(int dpi) => dpi switch
-    {
-        96 => Build(96, 74, 40, 7, 24, 10.5f, 2f, (13, 14, 12), (35, 22), (57, 10), (8, 12)),
-        120 => Build(120, 93, 50, 9, 30, 13f, 2.5f, (16, 17, 15), (44, 28), (72, 12), (10, 15)),
-        144 => Build(144, 111, 60, 10, 36, 15.75f, 3f, (19, 21, 18), (52, 33), (85, 15), (12, 18)),
-        _ => Scaled(dpi),
-    };
 
     // The window's own rectangle centred on a taskbar's short axis, at x.
     public Rectangle BoundsAt(int x, Rectangle taskbar) =>
         new(x, taskbar.Top + ((taskbar.Height - Height) / 2), Width, Height);
 
-    private static GaugeLayout Build(
-        int dpi, int width, int height, int leftPad, int ringSize, float radius, float stroke,
-        (int X, int Y, int Size) mark, (int X, int Width) number, (int X, int Width) charging, (int W, int H) bolt)
+    // The earbud pair's four shapes (head, stem, head, stem) as rectangles on the ring box, with the corner radius.
+    public (RectangleF[] Shapes, float Radius) EarbudShapes()
     {
-        int ringTop = (height - ringSize) / 2;
-        int line = (int)Math.Round(16 * dpi / 96.0, MidpointRounding.AwayFromZero);
-        return new GaugeLayout(
-            dpi, width, height,
-            new Rectangle(leftPad, ringTop, ringSize, ringSize), radius, stroke,
-            new Rectangle(mark.X, mark.Y, mark.Size, mark.Size),
-            new Rectangle(number.X, (height - line) / 2, number.Width, line),
-            new Rectangle(charging.X, (height - bolt.H) / 2, charging.Width, bolt.H),
-            new Size(bolt.W, bolt.H),
-            (int)Math.Round(PhoneAt96 * dpi / 96.0, MidpointRounding.AwayFromZero),
-            (int)Math.Round(TypeAt96 * dpi / 96.0, MidpointRounding.AwayFromZero),
-            (int)Math.Round(CornerAt96 * dpi / 96.0, MidpointRounding.AwayFromZero));
-    }
-
-    private static GaugeLayout Scaled(int dpi)
-    {
-        int effective = dpi > 0 ? dpi : CardPlacement.BaseDpi;
-        int S(int at96) => CardPlacement.Scale(at96, effective);
-        int leftPad = S(7);
-        int ring = S(24);
-        int gap = S(4);
-        int numberWidth = S(22);
-        int chargeWidth = S(10);
-        int rightPad = S(7);
-        int width = leftPad + ring + gap + numberWidth + chargeWidth + rightPad;
-        float stroke = Math.Max(1f, (float)(Math.Round(2.0 * effective / CardPlacement.BaseDpi * 2, MidpointRounding.AwayFromZero) / 2));
-        return Build(
-            effective, width, S(40), leftPad, ring, 10.5f * effective / CardPlacement.BaseDpi, stroke,
-            (leftPad + S(6), ((S(40) - ring) / 2) + S(6), S(12)),
-            (leftPad + ring + gap, numberWidth), (leftPad + ring + gap + numberWidth, chargeWidth),
-            (S(8), S(12)));
+        float k = Mark.Width / (float)MarkGrid;
+        Rectangle mark = Mark;
+        RectangleF R(float gx, float gy, float gw, float gh) => new(mark.X + (gx * k), mark.Y + (gy * k), gw * k, gh * k);
+        return ([R(6.5f, 6f, 5f, 5f), R(9.5f, 9f, 2f, 8f), R(12.5f, 6f, 5f, 5f), R(12.5f, 9f, 2f, 8f)], 1f * k);
     }
 }

@@ -596,7 +596,7 @@ public sealed class HandsFreeMicrophoneRowTests
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
-            card.Render(CardKit.SettingsModel(values), dpi);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(values), dpi);
             layout = card.CurrentSettingsLayout;
         });
         return layout!;
@@ -683,7 +683,7 @@ public sealed class HandsFreeMicrophoneRowTests
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
-            card.Render(CardKit.SettingsModel(Values(true, MicrophoneRowState.OpenSettings)), 96);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(Values(true, MicrophoneRowState.OpenSettings)), 96);
             Assert.IsTrue(card.CurrentSettingsLayout!.Targets.Contains(new SettingsTarget(SettingsRowId.MicrophoneOff, SettingsPart.Toggle)));
             Assert.IsTrue(card.CurrentSettingsLayout.Targets.Contains(new SettingsTarget(SettingsRowId.SoundSettings, SettingsPart.Button)));
             var raised = new List<SettingChange>();

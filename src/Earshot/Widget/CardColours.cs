@@ -30,47 +30,65 @@ internal sealed class AccentColoursSource(IAccentColours colours) : ICardAccentS
     public Color AccentFor(bool lightTheme) => colours.AccentFor(lightTheme);
 }
 
-// The colours one card view is painted with, each a token of the design: text, secondary text, tertiary text
-// (a placeholder, "Not set"), accent and the ink on it, caution, the footer fill, divider, track and the standard control's fill and stroke. Under a
-// high-contrast theme every one of them is a system colour.
-internal sealed record CardColours(
-    Color Text,
-    Color TextSecondary,
-    Color TextTertiary,
-    Color Accent,
-    Color OnAccent,
-    Color Caution,
-    Color Footer,
-    Color Divider,
-    Color Track,
-    Color ControlFill,
-    Color ControlStroke,
-    Color SubtleHover,
-    bool HighContrast,
-    bool Dark = false)
+// The colours one card view is painted with. Every one of them is a named token of the design (DesignTokens, the one
+// place the values are written) or the accent and the text on it. Under a high-contrast theme every one of them is a
+// system colour. The names the card's painters use are kept; each is a token under another name:
+//   Footer         the settings row fill (the footer is a surface the way a row is)
+//   Track          the progress track
+//   ControlFill / ControlStroke / SubtleHover   the same tokens
+internal sealed record CardColours(DesignTokens Tokens, Color Accent)
 {
+    public Color Text => Tokens.TextPrimary;
+
+    public Color TextSecondary => Tokens.TextSecondary;
+
+    // Stale values and read times; a placeholder.
+    public Color TextTertiary => Tokens.TextTertiary;
+
+    public Color TextDisabled => Tokens.TextDisabled;
+
+    public Color OnAccent => Tokens.TextOnAccent;
+
+    public Color Caution => Tokens.Caution;
+
+    public Color Footer => Tokens.SettingsRowFill;
+
+    public Color Divider => Tokens.Divider;
+
+    public Color Track => Tokens.ProgressTrack;
+
+    public Color ControlFill => Tokens.ControlFill;
+
+    public Color ControlStroke => Tokens.ControlStroke;
+
+    public Color ControlStrokeBottom => Tokens.ControlStrokeBottom;
+
+    public Color ControlFillDisabled => Tokens.ControlFillDisabled;
+
+    public Color SubtleHover => Tokens.SubtleHover;
+
+    public Color SubtlePressed => Tokens.SubtlePressed;
+
+    public Color RowFill => Tokens.SettingsRowFill;
+
+    public Color RowStroke => Tokens.SettingsRowStroke;
+
+    public Color SurfaceStroke => Tokens.SurfaceStroke;
+
+    public bool HighContrast => Tokens.HighContrast;
+
+    public bool Dark => Tokens.Dark;
+
     // The focus visual's colours for this theme.
     public FocusPalette Focus => FocusPalette.For(Dark, HighContrast);
 
     public static CardColours For(bool dark, CardPalette palette, Color accent)
     {
         ArgumentNullException.ThrowIfNull(palette);
-        if (palette.HighContrast)
-        {
-            return new CardColours(
-                palette.Title, palette.Status, palette.Status, SystemColors.Highlight, SystemColors.HighlightText, palette.Title, palette.Background,
-                palette.Border, palette.Border, palette.Background, palette.Border, palette.Border, HighContrast: true, Dark: false);
-        }
-
-        Color onAccent = accent.GetBrightness() > 0.55f ? Color.Black : Color.White;
-        return dark
-            ? new CardColours(
-                Color.FromArgb(0xFF, 0xFF, 0xFF), Color.FromArgb(0xC8, 0xC8, 0xC8), Color.FromArgb(0x9D, 0x9D, 0x9D), accent, onAccent, Color.FromArgb(0xFC, 0xE1, 0x00),
-                Color.FromArgb(0x20, 0x20, 0x20), Color.FromArgb(15, 255, 255, 255), Color.FromArgb(41, 255, 255, 255),
-                Color.FromArgb(15, 255, 255, 255), Color.FromArgb(23, 255, 255, 255), Color.FromArgb(31, 128, 128, 128), HighContrast: false, Dark: true)
-            : new CardColours(
-                Color.FromArgb(0x1B, 0x1B, 0x1B), Color.FromArgb(0x5D, 0x5D, 0x5D), Color.FromArgb(0x70, 0x70, 0x70), accent, onAccent, Color.FromArgb(0x9D, 0x5D, 0x00),
-                Color.FromArgb(0xF3, 0xF3, 0xF3), Color.FromArgb(15, 0, 0, 0), Color.FromArgb(36, 0, 0, 0),
-                Color.FromArgb(0xFD, 0xFD, 0xFD), Color.FromArgb(26, 0, 0, 0), Color.FromArgb(31, 128, 128, 128), HighContrast: false);
+        return palette.HighContrast
+            ? For(DesignTokens.For(false, true), SystemColors.Highlight)
+            : For(DesignTokens.For(dark, false), accent);
     }
+
+    public static CardColours For(DesignTokens tokens, Color accent) => new(tokens, accent);
 }

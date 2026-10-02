@@ -15,35 +15,37 @@ public sealed class GaugeOrderLayoutTests
     private static readonly string[] ExpectedNames =
         ["Ring, number, bolt", "Ring, bolt, number", "Number, ring, bolt", "Number, bolt, ring", "Bolt, ring, number", "Bolt, number, ring"];
 
-    // The design's table for the default order, one row per scale.
-    private sealed record Table(int Dpi, Size Window, int LeftPad, int Ring, int Gap, int Number, int Bolt, int RightPad);
+    // The design's table of left edges, one row per order: ring (R), number (N) and bolt (B) at 100%, 125% and 150%.
+    private sealed record Row(GaugeOrder Order, (int R, int N, int B) At100, (int R, int N, int B) At125, (int R, int N, int B) At150);
 
-    private static readonly Table[] Tables =
+    private static readonly Row[] Table =
     [
-        new Table(Dpi: 96, Window: new Size(74, 40), LeftPad: 7, Ring: 24, Gap: 4, Number: 22, Bolt: 10, RightPad: 7),
-        new Table(Dpi: 120, Window: new Size(93, 50), LeftPad: 9, Ring: 30, Gap: 5, Number: 28, Bolt: 12, RightPad: 9),
-        new Table(Dpi: 144, Window: new Size(111, 60), LeftPad: 10, Ring: 36, Gap: 6, Number: 33, Bolt: 15, RightPad: 11),
+        new(GaugeOrder.RingNumberBolt, (5, 33, 57), (6, 41, 71), (7, 49, 85)),
+        new(GaugeOrder.RingBoltNumber, (5, 49, 33), (6, 61, 41), (7, 73, 49)),
+        new(GaugeOrder.NumberRingBolt, (29, 5, 57), (36, 6, 71), (43, 7, 85)),
+        new(GaugeOrder.NumberBoltRing, (45, 5, 29), (56, 6, 36), (67, 7, 43)),
+        new(GaugeOrder.BoltRingNumber, (21, 49, 5), (26, 61, 6), (31, 73, 7)),
+        new(GaugeOrder.BoltNumberRing, (45, 21, 5), (56, 26, 6), (67, 31, 7)),
     ];
 
     [TestMethod]
-    public void TheDefaultOrderIsTheLiteralTable()
+    public void EveryOrderAtEveryDesignScaleIsTheTablesLeftEdges()
     {
-        foreach (Table t in Tables)
+        foreach (Row row in Table)
         {
-            foreach (GaugeLayout l in new[] { GaugeLayout.For(t.Dpi), GaugeLayout.For(t.Dpi, GaugeOrder.RingNumberBolt) })
-            {
-                string where = " at " + t.Dpi + " dpi";
-                Assert.AreEqual(t.Window, new Size(l.Width, l.Height), "Window" + where);
-                Assert.AreEqual(t.LeftPad, l.RingBox.X, "Left pad" + where);
-                Assert.AreEqual(t.Ring, l.RingBox.Width, "Ring" + where);
-                Assert.AreEqual(t.LeftPad + t.Ring + t.Gap, l.NumberSlot.X, "Number slot" + where);
-                Assert.AreEqual(t.Number, l.NumberSlot.Width);
-                Assert.AreEqual(t.LeftPad + t.Ring + t.Gap + t.Number, l.ChargingSlot.X, "Bolt slot" + where);
-                Assert.AreEqual(t.Bolt, l.ChargingSlot.Width);
-                Assert.AreEqual(t.Window.Width - t.RightPad, l.ChargingSlot.Right, "Right pad" + where);
-                Assert.IsFalse(l.NumberAlignRight, "The default order keeps the digits at the left of their slot, as before.");
-            }
+            Check(row.Order, 96, row.At100);
+            Check(row.Order, 120, row.At125);
+            Check(row.Order, 144, row.At150);
         }
+    }
+
+    private static void Check(GaugeOrder order, int dpi, (int R, int N, int B) expected)
+    {
+        GaugeLayout l = GaugeLayout.For(dpi, order);
+        string where = " (" + order + " at " + dpi + " dpi)";
+        Assert.AreEqual(expected.R, l.RingBox.X, "Ring left edge" + where);
+        Assert.AreEqual(expected.N, l.NumberSlot.X, "Number left edge" + where);
+        Assert.AreEqual(expected.B, l.ChargingSlot.X, "Bolt left edge" + where);
     }
 
     [TestMethod]
@@ -73,13 +75,11 @@ public sealed class GaugeOrderLayoutTests
     };
 
     [TestMethod]
-    public void EveryOrderKeepsTheWindowAndEveryPiecesWidthAndOrdersThePiecesAsAsked()
+    public void EveryOrderKeepsTheWindowAndEveryPiecesSizeAndOrdersThePiecesAsAskedWithOneGapBetweenNeighbours()
     {
         foreach (int dpi in Dpis)
         {
             GaugeLayout baseline = GaugeLayout.For(dpi);
-            int leftPad = baseline.RingBox.X;
-            int rightPad = baseline.Width - baseline.ChargingSlot.Right;
             int gap = baseline.NumberSlot.X - baseline.RingBox.Right;
             foreach (GaugeOrder order in Enum.GetValues<GaugeOrder>())
             {
@@ -89,59 +89,19 @@ public sealed class GaugeOrderLayoutTests
                 Assert.AreEqual(baseline.RingBox.Size, l.RingBox.Size, "Ring box" + where);
                 Assert.AreEqual(baseline.NumberSlot.Size, l.NumberSlot.Size, "Number slot" + where);
                 Assert.AreEqual(baseline.ChargingSlot.Size, l.ChargingSlot.Size, "The bolt's slot is always reserved" + where);
-                Assert.AreEqual(baseline.Bolt, l.Bolt, "Bolt" + where);
                 Assert.AreEqual(baseline.RingBox.Y, l.RingBox.Y, "Ring height" + where);
-                Assert.AreEqual(baseline.NumberSlot.Y, l.NumberSlot.Y);
-                Assert.AreEqual(baseline.ChargingSlot.Y, l.ChargingSlot.Y);
 
                 (GaugePiece first, GaugePiece second, GaugePiece third) = GaugeOrders.Sequence(order);
                 Rectangle a = SlotOf(l, first);
                 Rectangle b = SlotOf(l, second);
                 Rectangle c = SlotOf(l, third);
-                Assert.AreEqual(leftPad, a.Left, "The first piece starts after the left padding" + where);
-                Assert.AreEqual(baseline.Width - rightPad, c.Right, "The last piece ends before the right padding" + where);
-                Assert.IsLessThanOrEqualTo(b.Left, a.Right, "No overlap, first and second" + where);
-                Assert.IsLessThanOrEqualTo(c.Left, b.Right, "No overlap, second and third" + where);
-
-                // The gap budget: all of it next to the ring when the ring is at an end; half each side, the left half
-                // rounded down, when it is in the middle. The number and the bolt touch.
-                int ringIndex = first == GaugePiece.Ring ? 0 : second == GaugePiece.Ring ? 1 : 2;
-                switch (ringIndex)
-                {
-                    case 0:
-                        Assert.AreEqual(gap, b.Left - a.Right, "Ring first: the whole gap after it" + where);
-                        Assert.AreEqual(0, c.Left - b.Right, "The number and the bolt touch" + where);
-                        break;
-                    case 2:
-                        Assert.AreEqual(0, b.Left - a.Right, "The number and the bolt touch" + where);
-                        Assert.AreEqual(gap, c.Left - b.Right, "Ring last: the whole gap before it" + where);
-                        break;
-                    default:
-                        Assert.AreEqual(gap / 2, b.Left - a.Right, "Ring in the middle: half the gap before it, rounded down" + where);
-                        Assert.AreEqual(gap - (gap / 2), c.Left - b.Right, "And the rest after it" + where);
-                        break;
-                }
-
+                Assert.AreEqual(baseline.RingBox.X, a.Left, "The first piece starts after the left padding" + where);
+                Assert.AreEqual(gap, b.Left - a.Right, "One gap between the first and second" + where);
+                Assert.AreEqual(gap, c.Left - b.Right, "One gap between the second and third" + where);
                 Assert.IsTrue(new Rectangle(0, 0, l.Width, l.Height).Contains(l.RingBox), "Ring inside the window" + where);
-                Assert.IsTrue(l.RingBox.Contains(l.Mark), "The earbud mark stays inside its ring" + where);
-                Assert.AreEqual(baseline.Mark.X - baseline.RingBox.X, l.Mark.X - l.RingBox.X, "The mark keeps its place in the ring" + where);
+                Assert.IsLessThanOrEqualTo(l.Width, c.Right, "The pieces fit the window" + where);
+                Assert.AreEqual(l.RingBox, l.Mark, "The mark's grid is the ring box" + where);
             }
-        }
-    }
-
-    // Toward the ring when the number is next to it, otherwise toward the window's outer edge.
-    [TestMethod]
-    [DataRow(GaugeOrder.RingNumberBolt, false)]
-    [DataRow(GaugeOrder.RingBoltNumber, true)]
-    [DataRow(GaugeOrder.NumberRingBolt, true)]
-    [DataRow(GaugeOrder.NumberBoltRing, false)]
-    [DataRow(GaugeOrder.BoltRingNumber, false)]
-    [DataRow(GaugeOrder.BoltNumberRing, true)]
-    public void TheNumberSitsTowardTheRingWhenNextToItAndTowardTheOuterEdgeOtherwise(GaugeOrder order, bool alignRight)
-    {
-        foreach (int dpi in Dpis)
-        {
-            Assert.AreEqual(alignRight, GaugeLayout.For(dpi, order).NumberAlignRight, order + " at " + dpi + " dpi");
         }
     }
 

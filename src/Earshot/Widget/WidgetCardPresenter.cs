@@ -347,7 +347,12 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     private WidgetCardModel BuildModel()
     {
-        SetupViewModel? setup = _view == WidgetCardView.Update ? UpdatePage() : null;
+        SetupViewModel? setup = _view switch
+        {
+            WidgetCardView.Update => UpdatePageWithRows(),
+            WidgetCardView.History => HistoryPage(),
+            _ => null,
+        };
         WidgetCardModel model = BuildModel(_callbacks, _time, _view, setup);
         return model with
         {
@@ -359,6 +364,19 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     // The update page, from the update flow's own state: the same words the tray's messages use.
     private SetupViewModel UpdatePage() => _host!.UpdatePage(_spinnerFrame);
+
+    // The update page with the rows of its own under the status (Check automatically, What's new, Repair).
+    private SetupViewModel UpdatePageWithRows()
+    {
+        CardSettingsValues values = _host!.ReadSettings();
+        return UpdatePage() with { Rows = new UpdatesRows(values.CheckAutomatically, values.InstallExists, values.InstalledVersion) };
+    }
+
+    // The battery history page: its frame, with a body that is supplied later.
+    private static SetupViewModel HistoryPage() =>
+        new(WidgetCopy.HistoryTitle, null, null, null, SetupIcon.None, null, null, Array.Empty<SetupButton>(), 0) { MinBodyAt96 = HistoryBodyAt96 };
+
+    private const int HistoryBodyAt96 = 160;
 
     private CardSettingsValues ReadSettings()
     {
@@ -426,6 +444,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         _card.SetupActionRequested += OnSetupAction;
         _card.SettingsRequested += OnSettingsRequested;
         _card.RefreshRequested += OnRefreshRequested;
+        _card.BluetoothSettingsRequested += OnBluetoothSettingsRequested;
         _card.UpdateRequested += OnUpdateRequested;
         _card.SettingChanged += OnSettingChanged;
         _card.CloseRequested += OnCardClosed;
@@ -439,10 +458,13 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         card.SetupActionRequested -= OnSetupAction;
         card.SettingsRequested -= OnSettingsRequested;
         card.RefreshRequested -= OnRefreshRequested;
+        card.BluetoothSettingsRequested -= OnBluetoothSettingsRequested;
         card.UpdateRequested -= OnUpdateRequested;
         card.SettingChanged -= OnSettingChanged;
         card.CloseRequested -= OnCardClosed;
     }
+
+    private void OnBluetoothSettingsRequested(object? sender, EventArgs e) => _host?.OpenBluetoothSettings(_place);
 
     private void OnToggleRequested(object? sender, EventArgs e) => _callbacks.RequestToggle(_place);
 
@@ -529,20 +551,21 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             case OpenSoundSettingsRequest:
                 _host.OpenSoundSettings(place);
                 break;
-            case RepairRequest:
-                // One administrator prompt, asked for by the click. The result comes back on a card of its own.
-                _host.RepairEarshot();
+            case CopyDiagnosticsRequest:
+                _host.CopyDiagnostics(place);
                 break;
-            case CheckRequest:
-                // A check and nothing more: the result shows on the update page. Nothing downloads.
+            case OpenHistoryRequest:
+                _view = WidgetCardView.History;
+                break;
+            case OpenUpdatesRequest:
+                // The page opens and says where the flow stands; nothing is checked or downloaded until the person asks.
                 _updateFrom = WidgetCardView.Settings;
                 _view = WidgetCardView.Update;
                 _spinnerFrame = 0;
-                _host.CheckForUpdates();
                 break;
         }
 
-        if (_view is WidgetCardView.Settings or WidgetCardView.Update)
+        if (_view is WidgetCardView.Settings or WidgetCardView.Update or WidgetCardView.History)
         {
             RenderKeepingBottom();
             SyncSpinner();
@@ -574,6 +597,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             case SettingsRowId.CaseCard:
                 _host!.SetCaseOpenCard(toggle.On, place);
                 break;
+            case SettingsRowId.FullyCharged:
+                _host!.SetFullyChargedNotice(toggle.On, place);
+                break;
         }
     }
 
@@ -586,6 +612,17 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             {
                 _view = WidgetCardView.Main;
                 _shortcutNote = null;
+                RenderKeepingBottom();
+            }
+
+            return;
+        }
+
+        if (_view == WidgetCardView.History)
+        {
+            if (action == SetupAction.Back)
+            {
+                _view = WidgetCardView.Settings;
                 RenderKeepingBottom();
             }
 
@@ -615,7 +652,18 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 _host?.SetUpEarshot();
                 break;
             case SetupAction.Repair:
+                // One administrator prompt, asked for by the click. The result comes back on a card of its own.
                 _host?.RepairEarshot();
+                break;
+            case SetupAction.ToggleAutoCheck:
+                if (_host is not null)
+                {
+                    _host.SetCheckAutomatically(!_host.ReadSettings().CheckAutomatically, _place);
+                }
+
+                break;
+            case SetupAction.WhatsNew:
+                _host?.OpenWhatsNew(_place);
                 break;
             case SetupAction.Switch:
                 _host?.SwitchToInstalled();
@@ -627,7 +675,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     private void OnSetupAction(object? sender, SetupAction action)
     {
-        if (_view is WidgetCardView.Settings or WidgetCardView.Update)
+        if (_view is WidgetCardView.Settings or WidgetCardView.Update or WidgetCardView.History)
         {
             OnSubPageAction(action);
         }
@@ -640,7 +688,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             _closedByDeactivateAtTimestamp = _time.GetTimestamp();
         }
 
-        if (_view == WidgetCardView.Settings)
+        if (_view is WidgetCardView.Settings or WidgetCardView.History)
         {
             _view = WidgetCardView.Main;
             _shortcutNote = null;

@@ -12,7 +12,7 @@ public sealed class DiagnosticsRedactorTests
     private const string DeviceName = "Jo\u2019s AirPods Pro";
     private const string WindowTitle = "Quarterly figures - Excel";
 
-    private const string AddressColon = "A1:B2:C3:D4:E5:F6";
+    private const string AddressColon = "1A:2B:3C:4D:5E:6F";
     private const string AddressDash = "a1-b2-c3-d4-e5-f6";
     private const string AddressDigits = "A1B2C3D4E5F6";
     private const string AddressPrefixed = "0xA1B2C3D4E5F6";

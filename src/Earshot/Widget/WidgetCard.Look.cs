@@ -37,4 +37,17 @@ internal sealed partial class WidgetCard
     // chose in place of acrylic.
     // https://learn.microsoft.com/en-us/windows/apps/design/style/acrylic
     private bool PaintsOpaqueBackground => !_dwmBackdropOk || _look.OpaqueBackground || _palette.HighContrast;
+
+    // Opens or closes the rows of the settings page that expand, for the probe's pictures of them. Only a page that is already
+    // showing takes it (a page that is being opened closes them), so the caller renders, calls this, then renders again.
+    internal void ExpandSettingsRowsForCapture(bool more, bool gaugeOrder, bool caseOpenCard)
+    {
+        _moreExpanded = more;
+        _orderExpanded = gaugeOrder;
+        _caseCardExpanded = caseOpenCard;
+        if (_model.Settings is not null)
+        {
+            Render(_model, _dpi);
+        }
+    }
 }

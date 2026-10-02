@@ -48,7 +48,7 @@ internal sealed partial class WidgetCard
         {
             new(
                 _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, CardControlRole.PushButton, layout.Button, null, false, false,
-                focus && _focus == WidgetCardFocus.Button, _model.ButtonEnabled, () => Press(WidgetCardFocus.Button)),
+                focus && _focus == WidgetCardFocus.Button, ButtonUsable, () => Press(WidgetCardFocus.Button)),
         };
         if (_model.ShowSwitch)
         {
@@ -74,8 +74,15 @@ internal sealed partial class WidgetCard
         if (!layout.Refresh.IsEmpty)
         {
             list.Add(new CardControl(
-                WidgetCopy.RefreshBattery, CardControlRole.PushButton, layout.Refresh, WidgetCopy.RefreshBattery, true, false,
-                focus && _focus == WidgetCardFocus.Refresh, true, () => Press(WidgetCardFocus.Refresh)));
+                WidgetCopy.RefreshBattery, CardControlRole.PushButton, layout.Refresh, RefreshTip, true, false,
+                focus && _focus == WidgetCardFocus.Refresh, !BluetoothOff, () => Press(WidgetCardFocus.Refresh)));
+        }
+
+        if (BluetoothOff)
+        {
+            list.Add(new CardControl(
+                WidgetCopy.BluetoothOff, CardControlRole.PushButton, layout.WhereLine, WidgetCopy.TipBluetoothSettings, false, false,
+                focus && _focus == WidgetCardFocus.Status, true, () => Press(WidgetCardFocus.Status)));
         }
 
         return list;
@@ -90,7 +97,7 @@ internal sealed partial class WidgetCard
         {
             new(
                 _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, CardControlRole.PushButton, layout.Button, null, false, false,
-                false, _model.ButtonEnabled, () => Press(WidgetCardFocus.Button)),
+                false, ButtonUsable, () => Press(WidgetCardFocus.Button)),
         };
         if (!layout.Gear.IsEmpty)
         {
@@ -124,6 +131,25 @@ internal sealed partial class WidgetCard
                 setup.Buttons[i].Label, CardControlRole.PushButton, layout.Frame.Buttons[i], null, false, false,
                 focus && _setupFocus.Kind == SetupTargetKind.Button && _setupFocus.Index == i, true,
                 () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Button, index))));
+        }
+
+        if (!layout.Action.IsEmpty && setup.Buttons.Count == 1)
+        {
+            list.Add(new CardControl(
+                setup.Buttons[0].Label, CardControlRole.PushButton, layout.Action, null, false, false,
+                focus && _setupFocus.Kind == SetupTargetKind.Button && _setupFocus.Index == 0, true,
+                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Button, 0))));
+        }
+
+        foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
+        {
+            int index = row.Index;
+            string name = index switch { 0 => WidgetCopy.NameAutoCheck, 1 => WidgetCopy.SettingsWhatsNew, _ => WidgetCopy.NameRepair };
+            CardControlRole role = index == 0 ? CardControlRole.CheckButton : CardControlRole.PushButton;
+            list.Add(new CardControl(
+                name, role, row.Surface, null, false, index == 0 && setup.Rows is { AutoCheck: true },
+                focus && _setupFocus.Kind == SetupTargetKind.Row && _setupFocus.Index == index, true,
+                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Row, index))));
         }
 
         return list;
@@ -180,15 +206,12 @@ internal sealed partial class WidgetCard
             CardControlRole role = stop.Part switch
             {
                 SettingsPart.Toggle => CardControlRole.CheckButton,
-                SettingsPart.SegmentFirst or SettingsPart.SegmentSecond => CardControlRole.RadioButton,
                 SettingsPart.Text => CardControlRole.Text,
                 _ => CardControlRole.PushButton,
             };
             bool isChecked = stop.Part switch
             {
                 SettingsPart.Toggle => ToggleValue(values, stop.Row),
-                SettingsPart.SegmentFirst => values.GaugePosition == GaugePosition.RightEnd,
-                SettingsPart.SegmentSecond => values.GaugePosition == GaugePosition.NextToApps,
                 _ => false,
             };
             Add(stop, PartRectangle(item, stop.Part), role, isChecked, _settingsFocus.SameStop(stop));
@@ -227,20 +250,25 @@ internal sealed partial class WidgetCard
         if (!_notice && !OnSettingsPage && _model.View == WidgetCardView.Main)
         {
             WidgetCardLayout.Layout layout = _mainLayout;
-            if (layout.ShowColumns && ReadLineText.Length > 0 && layout.ReadLine.Contains(point))
+            // The status row says more than its words when something is wrong: nothing heard, the case to open near this PC.
+            if (_model.Refresh is { IsProblem: true, ReadLine: { Length: > 0 } problem } && layout.WhereLine.Contains(point))
             {
-                return (ReadLineText, layout.ReadLine);
+                return (problem, layout.WhereLine);
             }
 
-            // A column whose value is a last reading or an estimate says which, and how old the reading is.
+            // A column says what it holds in a sentence: "Left 70%, charging, read 4 min ago".
             if (layout.ShowColumns)
             {
                 ShownBattery shown = _model.ShownParts;
-                foreach ((WidgetCardLayout.ColumnLayout column, ShownPart part) in new[] { (layout.Left, shown.Left), (layout.Right, shown.Right), (layout.Case, shown.Case) })
+                foreach ((WidgetCardLayout.ColumnLayout column, string label, ShownPart part) in new[]
                 {
-                    if (column.Percent.Contains(point) && WidgetCopy.PartTip(part, _model.Now) is { } partTip)
+                    (layout.Left, WidgetCopy.LeftWord, shown.Left), (layout.Right, WidgetCopy.RightWord, shown.Right), (layout.Case, WidgetCopy.CaseLabel, shown.Case),
+                })
+                {
+                    Rectangle whole = Rectangle.Union(column.Label, column.ReadTime);
+                    if (whole.Contains(point) && WidgetCopy.ColumnTip(label, part, _model.Now) is { } columnTip)
                     {
-                        return (partTip, column.Percent);
+                        return (columnTip, whole);
                     }
                 }
             }

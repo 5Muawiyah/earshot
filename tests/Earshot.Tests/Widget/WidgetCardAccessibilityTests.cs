@@ -227,7 +227,9 @@ public sealed class WidgetCardAccessibilityTests
 
             Assert.AreEqual("Settings", card.TooltipAt(Centre(layout.Gear))!.Value.Text, "The gear is an icon and says what it is.");
             Assert.AreEqual("Refresh battery", card.TooltipAt(Centre(layout.Refresh))!.Value.Text, "The refresh icon says what it does.");
-            Assert.AreEqual("Battery read 2 min ago", card.TooltipAt(Centre(layout.ReadLine))!.Value.Text, "The read line is short; its tooltip is the whole sentence.");
+            string leftTip = card.TooltipAt(Centre(layout.Left.ReadTime))!.Value.Text;
+            Assert.StartsWith("Left ", leftTip, "A column's tooltip is a sentence: what it holds and how old the reading is.");
+            Assert.EndsWith("read 2 min ago", leftTip);
             Assert.AreEqual("Version 1.3.0 is available", card.TooltipAt(Centre(layout.UpdateCaption))!.Value.Text);
             Assert.IsNull(card.TooltipAt(Centre(layout.Button)), "The Connect button says it all.");
             Assert.IsNull(card.TooltipAt(new Point(1, 1)), "Nothing under empty space.");
@@ -246,7 +248,7 @@ public sealed class WidgetCardAccessibilityTests
             Assert.AreEqual("Battery read 2 min ago", card.ReadLineText);
 
             card.Render(CardKit.MainModel(CardKit.Snapshot(readAt: now - TimeSpan.FromMinutes(2))) with { Now = now, Refresh = BatteryRefreshView.Started }, 96);
-            Assert.AreEqual(WidgetCopy.ReadingBattery, card.TooltipAt(Centre(card.CurrentMainLayout.ReadLine))!.Value.Text, "The tooltip is the line the refresh set, not the old age.");
+            Assert.AreEqual(WidgetCopy.ReadingBattery, card.TooltipAt(Centre(card.CurrentMainLayout.Refresh))!.Value.Text, "The refresh icon's tooltip says what is happening, not its name.");
             Assert.AreEqual(WidgetCopy.ReadingBattery, card.ReadLineShort);
         });
     }
@@ -257,7 +259,7 @@ public sealed class WidgetCardAccessibilityTests
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
-            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96);
             SettingsLayout layout = card.CurrentSettingsLayout!;
 
             foreach (SettingsItem row in layout.Items.Where(i => i.Kind == SettingsItemKind.Row))

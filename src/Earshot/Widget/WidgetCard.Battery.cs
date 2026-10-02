@@ -8,10 +8,6 @@ namespace Earshot.Widget;
 // is decided in one place and the card only picks a colour.
 internal sealed partial class WidgetCard
 {
-    // How much of its colour a value that is not fresh keeps. Greyed, not hidden: the figure is still the last one
-    // read, and the read line says how old it is.
-    private const float StaleInkOpacity = 0.55f;
-
     // The line under the where line: Windows' own figure when that is what is shown ("Windows reads 70%"), else
     // when the battery was last read ("Battery read 4 min ago"). The age is the newest part's: a part that is old
     // greys by itself, and must not make buds that were just heard read as old. Empty while that reading is fresh: no age is
@@ -43,7 +39,8 @@ internal sealed partial class WidgetCard
                 ? WidgetCopy.OpenTheCaseToShowBattery
                 : WidgetCopy.ReadAge(_model.ShownParts.NewestReadAt, _model.Now);
 
-    private static Color MutedInk(Color ink) => Color.FromArgb((int)Math.Round(ink.A * StaleInkOpacity), ink);
+    // The refresh icon's tooltip: what is happening while it turns, otherwise its name.
+    internal string RefreshTip => _model.Refresh is { Reading: true } ? WidgetCopy.ReadingBattery : WidgetCopy.RefreshBattery;
 
     // Whether the refresh icon is turning, so the presenter only runs its animation while one is.
     internal bool RefreshReading => _model.Refresh is { Reading: true };
@@ -72,7 +69,7 @@ internal sealed partial class WidgetCard
 
         CardColours colours = Colours;
         bool reading = _model.Refresh is { Reading: true };
-        Color ink = reading ? colours.Accent : colours.Text;
+        Color ink = reading ? colours.Accent : BluetoothOff ? colours.TextDisabled : colours.Text;
         Rectangle bounds = layout.Refresh;
         GraphicsState saved = g.Save();
         if (reading)
@@ -84,7 +81,7 @@ internal sealed partial class WidgetCard
             g.TranslateTransform(-centreX, -centreY);
         }
 
-        if (!CardPaint.TryGlyph(g, FluentGlyphs.Refresh, bounds, ink, _dpi))
+        if (!CardPaint.TryGlyph(g, FluentGlyphs.Refresh, bounds, ink, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
         {
             DrawRefreshArrow(g, bounds, ink);
         }

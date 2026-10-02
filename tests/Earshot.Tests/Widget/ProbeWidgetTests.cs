@@ -81,7 +81,7 @@ public sealed class ProbeWidgetTests
         Assert.IsTrue(variants[6].Model.Refresh!.Reading, "The refresh-reading variant shows the icon mid-turn.");
         Assert.AreEqual("Reading the battery", variants[6].Model.Refresh!.ReadLine);
         Assert.AreEqual(BatteryRefreshOutcome.NothingHeard, variants[7].Model.Refresh!.Outcome);
-        Assert.AreEqual("Nothing heard. Open the case", variants[7].Model.Refresh!.ReadLine);
+        Assert.AreEqual("Nothing heard. Open the case near this PC", variants[7].Model.Refresh!.ReadLine);
     }
 
     [TestMethod]

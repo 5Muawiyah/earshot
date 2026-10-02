@@ -36,7 +36,7 @@ public sealed class GaugeContentTests
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.Elsewhere, Bud(70), Bud(60)), Now, Settings);
 
         Assert.AreEqual(GaugeMode.OnOtherDevice, c.Mode);
-        Assert.AreEqual("On your iPhone", c.Tooltip);
+        Assert.AreEqual("AirPods, on iPhone", c.Tooltip);
         Assert.IsNull(c.Percent, "No ring and no number, whatever the buds last read.");
     }
 
@@ -45,7 +45,7 @@ public sealed class GaugeContentTests
     {
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.Elsewhere), Now, Settings with { OtherDeviceLabel = "Pixel" });
 
-        Assert.AreEqual("On your Pixel", c.Tooltip);
+        Assert.AreEqual("AirPods, on Pixel", c.Tooltip);
     }
 
     [TestMethod]
@@ -69,7 +69,7 @@ public sealed class GaugeContentTests
         Assert.AreEqual(60, c.Percent, "The lower bud.");
         Assert.IsFalse(c.Low);
         Assert.IsFalse(c.Charging);
-        Assert.AreEqual("AirPods\r\nL 70%   R 60%\r\nLast read 2 min ago", c.Tooltip, "Two minutes old is not live: a last reading.");
+        Assert.AreEqual("AirPods 60%\r\nL 70%   R 60%\r\nLast read 2 min ago", c.Tooltip, "Two minutes old is not live: a last reading.");
         Assert.IsTrue(c.Tertiary);
     }
 
@@ -93,7 +93,7 @@ public sealed class GaugeContentTests
         Assert.AreEqual("No recent reading", none.Tooltip);
 
         // Replaces "an old reading counts as none": it is the gauge's number, as a last reading.
-        Assert.AreEqual("AirPods\r\nL 70%   R 60%\r\nLast read 3 h ago", old.Tooltip);
+        Assert.AreEqual("AirPods 60%\r\nL 70%   R 60%\r\nLast read 3 h ago", old.Tooltip);
         Assert.AreEqual(GaugeMode.Reading, old.Mode);
         Assert.IsTrue(old.Tertiary);
     }
@@ -155,10 +155,10 @@ public sealed class GaugeContentTests
         GaugeContent at61 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(60, age: TimeSpan.FromMinutes(61)), Bud(60, age: TimeSpan.FromMinutes(61))), Now, Settings);
 
         Assert.AreEqual(GaugeMode.Reading, at59.Mode);
-        Assert.AreEqual("AirPods\r\nL 60%   R 60%\r\nLast read 59 min ago", at59.Tooltip);
-        Assert.AreEqual("AirPods\r\nL 60%   R 60%\r\nLast read 1 h ago", at60.Tooltip);
+        Assert.AreEqual("AirPods 60%\r\nL 60%   R 60%\r\nLast read 59 min ago", at59.Tooltip);
+        Assert.AreEqual("AirPods 60%\r\nL 60%   R 60%\r\nLast read 1 h ago", at60.Tooltip);
         Assert.AreEqual(GaugeMode.Reading, at61.Mode);
-        Assert.AreEqual("AirPods\r\nL 60%   R 60%\r\nLast read 1 h ago", at61.Tooltip);
+        Assert.AreEqual("AirPods 60%\r\nL 60%   R 60%\r\nLast read 1 h ago", at61.Tooltip);
     }
 
     // Replaces "a value older than an hour is dropped bud by bud": the old low bud is still the number, as a last
@@ -171,7 +171,7 @@ public sealed class GaugeContentTests
         Assert.AreEqual(GaugeMode.Reading, c.Mode);
         Assert.AreEqual(30, c.Percent);
         Assert.IsTrue(c.Tertiary);
-        Assert.AreEqual("AirPods\r\nL 70%   R 30%\r\nLast read 2 h ago", c.Tooltip);
+        Assert.AreEqual("AirPods 30%\r\nL 70%   R 30%\r\nLast read 2 h ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -212,7 +212,7 @@ public sealed class GaugeContentTests
 
         Assert.AreEqual(GaugeMode.Reading, c.Mode);
         Assert.AreEqual(70, c.Percent);
-        Assert.AreEqual("AirPods\r\nL 70%\r\nLast read 2 min ago", c.Tooltip);
+        Assert.AreEqual("AirPods 70%\r\nL 70%\r\nLast read 2 min ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -225,7 +225,7 @@ public sealed class GaugeContentTests
         Assert.IsFalse(unknown.Charging);
         Assert.IsFalse(notCharging.Charging);
         Assert.IsTrue(charging.Charging);
-        StringAssert.StartsWith(charging.Tooltip, "Charging\r\n");
+        StringAssert.StartsWith(charging.Tooltip, "AirPods 60%, charging\r\n");
     }
 
     // ---- Low battery ----
@@ -240,7 +240,7 @@ public sealed class GaugeContentTests
         Assert.IsTrue(at20.Low);
         Assert.IsFalse(at30.Low);
         Assert.IsTrue(at30WithHigherLevel.Low);
-        StringAssert.StartsWith(at20.Tooltip, "Low battery\r\n");
+        StringAssert.StartsWith(at20.Tooltip, "Low battery 20%\r\n");
     }
 
     [TestMethod]
@@ -248,7 +248,7 @@ public sealed class GaugeContentTests
     {
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(10, charging: true), LiveBud(20)), Now, Settings);
 
-        StringAssert.StartsWith(c.Tooltip, "Low battery\r\nL 10%   R 20%");
+        StringAssert.StartsWith(c.Tooltip, "Low battery 10%, charging\r\nL 10%   R 20%");
         Assert.IsTrue(c.Charging, "The bolt still shows while it is charging.");
     }
 
@@ -274,7 +274,7 @@ public sealed class GaugeContentTests
 
         Assert.AreEqual(GaugeMode.Reading, c.Mode);
         Assert.AreEqual(70, c.Percent);
-        Assert.AreEqual("AirPods\r\nWindows reads 70%\r\nRead just now", c.Tooltip);
+        Assert.AreEqual("AirPods 70%\r\nWindows reads 70%\r\nRead just now", c.Tooltip);
         Assert.IsFalse(c.Charging, "Windows' figure carries no charging flag.");
     }
 
@@ -286,7 +286,7 @@ public sealed class GaugeContentTests
         GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(30, age: TimeSpan.FromSeconds(5)), headset: windows), Now, Settings);
 
         Assert.AreEqual(30, c.Percent);
-        Assert.AreEqual("AirPods\r\nL 30%\r\nRead just now", c.Tooltip);
+        Assert.AreEqual("AirPods 30%\r\nL 30%\r\nRead just now", c.Tooltip);
     }
 
     [TestMethod]

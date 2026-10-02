@@ -3,24 +3,16 @@ using Earshot.Popup;
 
 namespace Earshot.Widget;
 
-// The colours of the Windows 11 focus visual: an outer stroke and an inner stroke. Dark theme is a white outer
-// stroke over a black inner one at 70%; light theme is a black outer stroke at 89% over a white inner one at 70%.
-// Under a high-contrast theme they are the theme's own window text and window colours.
+// The colours of the Windows 11 focus visual, from the design's tokens: an outer 2 px stroke in the primary text colour
+// and an inner 1 px stroke, #FFFFFF on a light theme and black at 70% on a dark one. Under a high-contrast theme they
+// are the theme's own window text and window colours.
 // https://github.com/microsoft/microsoft-ui-xaml (controls/dev/CommonStyles/Common_themeresources_any.xaml:
 // FocusStrokeColorOuter and FocusStrokeColorInner)
 internal sealed record FocusPalette(Color OuterStroke, Color InnerStroke)
 {
-    public static FocusPalette For(bool dark, bool highContrast)
-    {
-        if (highContrast)
-        {
-            return new FocusPalette(SystemColors.WindowText, SystemColors.Window);
-        }
+    public static FocusPalette For(bool dark, bool highContrast) => For(DesignTokens.For(dark, highContrast));
 
-        return dark
-            ? new FocusPalette(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF), Color.FromArgb(0xB3, 0x00, 0x00, 0x00))
-            : new FocusPalette(Color.FromArgb(0xE4, 0x00, 0x00, 0x00), Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF));
-    }
+    public static FocusPalette For(DesignTokens tokens) => new(tokens.TextPrimary, tokens.FocusInner);
 }
 
 // How far the visual reaches beyond a control, in physical pixels at dpi: a one pixel gap, a one pixel inner

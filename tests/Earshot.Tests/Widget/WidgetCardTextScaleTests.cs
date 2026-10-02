@@ -22,7 +22,6 @@ public sealed class WidgetCardTextScaleTests
         yield return layout.Gear;
         yield return layout.Refresh;
         yield return layout.WhereLine;
-        yield return layout.ReadLine;
         yield return layout.Button;
         yield return layout.Switch;
         yield return layout.UpdateLine;
@@ -34,6 +33,8 @@ public sealed class WidgetCardTextScaleTests
             yield return column.Glyph;
             yield return column.Bar;
             yield return column.Percent;
+            yield return column.BoltSlot;
+            yield return column.ReadTime;
         }
     }
 

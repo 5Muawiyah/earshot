@@ -1,15 +1,15 @@
 namespace Earshot.Widget;
 
 // Which page the card shows. Main is the three-column card; Settings is the settings page; Update is the update
-// page. The update page is drawn from a SetupViewModel, since it is a status body and footer buttons on the
+// page; History is the battery history page (a frame, and a body supplied later). The update page is drawn from a SetupViewModel, since it is a status body and footer buttons on the
 // sub-page frame.
-internal enum WidgetCardView { Main, Settings, Update }
+internal enum WidgetCardView { Main, Settings, Update, History }
 
 internal enum SetupIcon { None, Spinner, Check, Caution, Down, Shield }
 
 // The update page's buttons (Update, Check, SetUp, Repair, Switch, and Cancel and TryAgain while it downloads or
 // has failed), and Back, any sub-page's back button.
-internal enum SetupAction { Cancel, TryAgain, Back, Update, Check, SetUp, Repair, Switch }
+internal enum SetupAction { Cancel, TryAgain, Back, Update, Check, SetUp, Repair, Switch, ToggleAutoCheck, WhatsNew }
 
 internal sealed record SetupButton(string Label, bool Primary, SetupAction Action);
 
@@ -28,4 +28,16 @@ internal sealed record SetupViewModel(
     int? ProgressPercent = null) // null while the size is not known: the bar shows no fill and no figure
 {
     public const int SpinnerFrames = 10;
+
+    // The rows under the status on the updates page: Check automatically, What's new and, with an install, Repair. Null on
+    // every other page.
+    public UpdatesRows? Rows { get; init; }
+
+    // The least height of the body, in epx at 100%, for a page whose content is supplied later (the history page's frame). A
+    // design choice: tall enough to read as a page, not a strip.
+    public int MinBodyAt96 { get; init; }
 }
+
+// What the updates page's own rows need: whether Check automatically is on, whether an install exists (Repair is offered),
+// and the running version for the status row's title.
+internal sealed record UpdatesRows(bool AutoCheck, bool ShowRepair, string? Version);

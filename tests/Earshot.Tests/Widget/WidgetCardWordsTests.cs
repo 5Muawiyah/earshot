@@ -17,7 +17,7 @@ public sealed class WidgetCardWordsTests
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
-            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96);
 
             foreach (SettingsItem row in card.CurrentSettingsLayout!.Items.Where(i => i.Kind == SettingsItemKind.Row))
             {
@@ -47,7 +47,7 @@ public sealed class WidgetCardWordsTests
             foreach (int dpi in Dpis)
             {
                 using WidgetCard card = CardKit.NewCard(dark: false);
-                card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), dpi);
+                CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), dpi);
                 using Bitmap bitmap = CardKit.Render(card);
                 Color background = bitmap.GetPixel(0, 0);
                 foreach (SettingsItem row in card.CurrentSettingsLayout!.Items.Where(i => i.Kind == SettingsItemKind.Row))
@@ -76,7 +76,7 @@ public sealed class WidgetCardWordsTests
             WidgetCardLayout.Layout layout = card.CurrentMainLayout;
             int box = Earshot.Popup.CardPlacement.Scale(16, 96);
 
-            foreach (Rectangle line in new[] { layout.WhereLine, layout.ReadLine, layout.UpdateCaption })
+            foreach (Rectangle line in new[] { layout.WhereLine, layout.UpdateCaption })
             {
                 Assert.IsTrue(CardKit.HasInk(bitmap, new Rectangle(line.X, line.Y, box, line.Height), background), "An icon at the start of " + line);
                 Assert.IsTrue(CardKit.HasInk(bitmap, new Rectangle(line.X + box + 8, line.Y, line.Width - box - 8, line.Height), background), "And words after it, " + line);

@@ -318,7 +318,7 @@ public sealed class FocusVisualTests
         Assert.AreEqual(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF), FocusPalette.For(dark: true, highContrast: false).OuterStroke);
         Assert.AreEqual(Color.FromArgb(0xB3, 0x00, 0x00, 0x00), FocusPalette.For(dark: true, highContrast: false).InnerStroke);
         Assert.AreEqual(Color.FromArgb(0xE4, 0x00, 0x00, 0x00), FocusPalette.For(dark: false, highContrast: false).OuterStroke);
-        Assert.AreEqual(Color.FromArgb(0xB3, 0xFF, 0xFF, 0xFF), FocusPalette.For(dark: false, highContrast: false).InnerStroke);
+        Assert.AreEqual(Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF), FocusPalette.For(dark: false, highContrast: false).InnerStroke);
         Assert.AreEqual(SystemColors.WindowText, FocusPalette.For(dark: true, highContrast: true).OuterStroke);
         Assert.AreEqual(SystemColors.Window, FocusPalette.For(dark: false, highContrast: true).InnerStroke);
     }

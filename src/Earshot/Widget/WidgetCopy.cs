@@ -17,9 +17,12 @@ internal static class WidgetCopy
     public const string AutoPauseSwitch = "Pause on removal";
     public const string CaseOpen = "Case open";
     public const string CardTitle = "AirPods";
+    public const string CardApp = "Earshot";
 
     // The three column labels on the widget card, matching the mockup exactly (Case, not "Case column" or
     // similar).
+    public const string LeftWord = "Left";
+    public const string RightWord = "Right";
     public const string LeftLabel = "L";
     public const string RightLabel = "R";
     public const string CaseLabel = "Case";
@@ -36,19 +39,31 @@ internal static class WidgetCopy
     // The settings page: row labels, the two gauge positions, section heads and the captions that say why a
     // switched-on row cannot act yet.
     public const string SettingsTitle = "Settings";
-    public const string SettingsGaugePosition = "Position";
+    public const string SettingsGaugePosition = "Gauge position";
     public const string SettingsGaugeDisplay = "Display";
     public const string DisplayChosenNotConnected = "That display is not connected. The gauge is on the main display.";
     public const string DisplayChosenNoTaskbar = "That display shows no taskbar. The gauge is on the main display.";
     public const string PositionRightEnd = "Right end";
     public const string PositionNextToApps = "Next to apps";
-    public const string SettingsOtherDevice = "Other device";
-    public const string SettingsPauseBud = AutoPauseSwitch;
-    public const string SettingsPauseLeave = "Pause on leave";
-    public const string SettingsLowBattery = "Low battery";
-    public const string SettingsLeftClick = "Click connects";
+    public const string SettingsOtherDevice = "Other device name";
+    public const string SettingsPauseBud = "Pause when a bud comes out";
+    public const string SettingsPauseLeave = "Pause when AirPods leave";
+    public const string SettingsLowBattery = "Low battery alerts";
+    public const string SettingsLeftClick = "Left click connects";
     public const string SettingsHandBack = "Hand back";
     public const string SettingsShortcuts = "Shortcuts";
+    public const string SettingsGroupTaskbar = "Taskbar";
+    public const string SettingsGroupBehaviour = "Behaviour";
+    public const string SettingsGroupAudio = "Audio";
+    public const string SettingsAbout = "About";
+    public const string SettingsMore = "More";
+    public const string SettingsFullyCharged = "Fully charged notice";
+    public const string SettingsHistory = "Battery history";
+    public const string HistoryTitle = "Battery history";
+    public const string SettingsCopyDiagnostics = "Copy diagnostics";
+    public const string CopyButton = "Copy";
+    public const string SettingsHandBackCaption = "Shut down, sleep, Exit";
+    public const string SettingsWhatsNew = "What's new";
     public const string SettingsUpdates = "Updates";
     public const string SettingsWaitsOnInEar = "Earshot cannot yet tell when a bud is in your ear.";
     public const string ShortcutNotSet = "Not set";
@@ -65,8 +80,8 @@ internal static class WidgetCopy
 
     // Settings rows are an icon and one to three words. What used to be the row's description is its tooltip, and
     // every control has an accessible name that says the whole thing, because an icon says nothing to a screen reader.
-    public const string SettingsOrder = "Order";
-    public const string SettingsAutoCheck = "Auto check";
+    public const string SettingsOrder = "Gauge order";
+    public const string SettingsAutoCheck = "Check automatically";
     public const string SettingsMicOff = "Microphone off";
     public const string SettingsSoundSettings = "Sound settings";
     public const string OpenButton = "Open";
@@ -88,6 +103,16 @@ internal static class WidgetCopy
     public const string TipRepair = RepairSub;
     public const string TipAutoCheck = "Look for a newer version once a day";
     public const string TipMicOff = "Keep the Hands-Free link up, which may let Windows read the battery, and turn only the AirPods microphone off in Windows' sound settings. Off by default.";
+    public const string TipFullyCharged = "Tell me when the AirPods are fully charged";
+    public const string NameFullyCharged = "Fully charged notice";
+    public const string TipHistory = "See how the battery has gone";
+    public const string NameHistory = "Battery history";
+    public const string TipCopyDiagnostics = "Copy redacted diagnostics to the clipboard";
+    public const string NameCopyDiagnostics = "Copy diagnostics";
+    public const string TipMore = "Less used settings";
+    public const string NameMore = "More settings";
+    public const string TipAbout = "Version, updates and repair";
+    public const string NameAbout = "Updates";
     public const string TipSoundSettings = "Open Windows sound settings at the AirPods microphone";
     public const string NameGaugePosition = "Gauge position";
     public const string NameGaugeDisplay = "Gauge display";
@@ -114,6 +139,8 @@ internal static class WidgetCopy
     public const string MicGuidance = "In Sound settings, set the AirPods microphone to Don't allow.";
     public const string MicConnectFirst = "Connect the AirPods, then open sound settings.";
     public const string MicOffInWindows = "Microphone is off in Windows";
+    public const string BluetoothSettingsNotOpened = "Couldn't open Bluetooth settings.";
+    public const string WhatsNewNotOpened = "Couldn't open the release notes.";
     public const string SoundSettingsNotOpened = "Couldn't open sound settings.";
 
     // The case-open card's row on the settings page, the choices in its expander, and its close button.
@@ -239,8 +266,16 @@ internal static class WidgetCopy
 
     // The gauge's tooltip. Three lines when there is a reading, one line otherwise.
     public const string GaugeAirPods = "AirPods";
-    public const string GaugeCharging = "Charging";
     public const string GaugeLowBattery = "Low battery";
+
+    // The tooltip's first line, as the design words it: "AirPods 60%" and "AirPods 60%, charging", "Low battery 15%" while low. An
+    // estimate has "≈" before its value.
+    public static string GaugeHead(bool low, int percent, bool estimated, bool charging) =>
+        (low ? GaugeLowBattery : GaugeAirPods) + " " + PercentText(percent, estimated) + (charging ? ", charging" : "");
+
+    // "AirPods, on iPhone" while the AirPods are in use on the other device, or "AirPods, on another device" with no name given.
+    public static string GaugeOnElsewhere(string otherDeviceLabel) =>
+        GaugeAirPods + ", on " + (string.IsNullOrWhiteSpace(otherDeviceLabel) ? "another device" : otherDeviceLabel.Trim());
     public const string GaugeNotOnThisPc = "Not on this PC";
     public const string GaugeNoRecentReading = "No recent reading";
 
@@ -289,6 +324,34 @@ internal static class WidgetCopy
         return part.Fresh || part.ReadAt is not DateTimeOffset at ? value : value + " · " + StaleAgeAmount(now - at);
     }
 
+    // A card column's tooltip, a sentence: "Left 70%, charging, read 4 min ago". An estimate says so and gives the age of the
+    // reading it grew from; a live value gives no age. Null when the part has no value.
+    public static string? ColumnTip(string label, ShownPart part, DateTimeOffset now)
+    {
+        if (part.Percent is not int percent)
+        {
+            return null;
+        }
+
+        string tip = label + " " + PercentText(percent, part.Estimated);
+        if (part.Charging == true)
+        {
+            tip += ", charging";
+        }
+
+        if (part.Estimated)
+        {
+            tip += ", estimated";
+        }
+
+        if (!part.Fresh && part.ReadAt is DateTimeOffset at)
+        {
+            tip += ", read " + StaleAgeAmount(now - at) + " ago";
+        }
+
+        return tip;
+    }
+
     // A card column's tooltip: what kind of value it is and how old, or null for a live value or none.
     public static string? PartTip(ShownPart part, DateTimeOffset now) =>
         !part.HasValue || part.Fresh || part.ReadAt is not DateTimeOffset at ? null
@@ -334,7 +397,11 @@ internal static class WidgetCopy
     // the case next to the PC is what links one.
     public const string OpenTheCaseToShowBattery = "Open the case to show battery";
     public const string BluetoothIsOff = "Bluetooth is off";
+
+    // The status row's words while Bluetooth is off.
+    public const string BluetoothOff = "Bluetooth off";
+    public const string TipBluetoothSettings = "Open Bluetooth settings";
     public const string NotListening = "Not listening";
     public const string ReadingBattery = "Reading the battery";
-    public static readonly string NothingHeardOpenTheCase = "Nothing heard. " + OpenTheCase;
+    public static readonly string NothingHeardOpenTheCase = "Nothing heard. " + OpenTheCase + " near this PC";
 }

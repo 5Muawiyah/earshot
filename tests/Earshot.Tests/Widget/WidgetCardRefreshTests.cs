@@ -48,7 +48,7 @@ public sealed class WidgetCardRefreshTests
             Assert.AreEqual("Reading the battery", card.ReadLineText);
 
             card.Render(CardKit.MainModel() with { Refresh = new BatteryRefreshView(false, 0, BatteryRefreshOutcome.NothingHeard) }, 96);
-            Assert.AreEqual("Nothing heard. Open the case", card.ReadLineText);
+            Assert.AreEqual("Nothing heard. Open the case near this PC", card.ReadLineText);
 
             card.Render(CardKit.MainModel() with { Refresh = new BatteryRefreshView(false, 0, BatteryRefreshOutcome.BluetoothOff) }, 96);
             Assert.AreEqual("Bluetooth is off", card.ReadLineText);
@@ -107,12 +107,14 @@ public sealed class WidgetCardRefreshTests
                     new(false, 0, BatteryRefreshOutcome.BluetoothOff),
                     new(false, 0, BatteryRefreshOutcome.NotListening),
                 ];
-                bool[] expected = [false, false, false, true, true, true];
+                // The status row has the caution glyph for nothing heard and for not listening; Bluetooth off has its own glyph and the
+                // ordinary ink.
+                bool[] expected = [false, false, false, true, false, true];
                 for (int i = 0; i < views.Length; i++)
                 {
                     card.Render(CardKit.MainModel() with { Refresh = views[i] }, 96);
                     using Bitmap bitmap = CardKit.Render(card);
-                    Rectangle line = card.CurrentMainLayout.ReadLine;
+                    Rectangle line = card.CurrentMainLayout.WhereLine;
                     var icon = new Rectangle(line.X, line.Y, 16, line.Height);
                     Assert.AreEqual(expected[i], HasSaturatedInk(bitmap, icon), "Refresh view " + i + (dark ? " (dark)" : " (light)") + ": caution icon expected " + expected[i] + ".");
                 }
@@ -358,11 +360,11 @@ public sealed class WidgetCardRefreshTests
             CardKit.Click(flow.Card!, flow.Card!.CurrentMainLayout.Refresh);
 
             reader.Result.SetResult(BatteryRefreshOutcome.NothingHeard);
-            Assert.AreEqual("Nothing heard. Open the case", flow.Card.ReadLineText);
+            Assert.AreEqual("Nothing heard. Open the case near this PC", flow.Card.ReadLineText);
 
             // Nothing newer than the refresh itself: the words stay through a redraw.
             flow.Presenter.Refresh();
-            Assert.AreEqual("Nothing heard. Open the case", flow.Card.ReadLineText);
+            Assert.AreEqual("Nothing heard. Open the case near this PC", flow.Card.ReadLineText);
 
             // A reading taken after the refresh began supersedes the words.
             flow.Snapshot = flow.Snapshot with { Left = new PartReading(60, false, null) { ReadAt = flow.Time.GetUtcNow() + TimeSpan.FromSeconds(1) }, BatteryReadAt = flow.Time.GetUtcNow() + TimeSpan.FromSeconds(1) };

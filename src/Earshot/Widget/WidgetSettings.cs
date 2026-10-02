@@ -45,6 +45,11 @@ public sealed record WidgetSettings
 
     public bool LowBatteryAlert { get; set; } = true;          // an addition: an off switch beside the threshold
 
+    // Whether a notice is raised when the AirPods reach a full charge. On by default, for a new install and an existing one alike:
+    // a settings file that never held the member reads as on. A member of its own so the settings page's switch and the notice
+    // read the same value.
+    public bool FullyChargedNotice { get; set; } = true;
+
     public int LowBatteryThresholdPercent { get; set; } = DefaultLowBatteryThresholdPercent; // 10 to 90 in steps of 10
 
     // No longer read. Up to v1.3 the case-open card could never show (nothing raised it) and its menu item and settings row

@@ -144,7 +144,7 @@ public sealed class WidgetCardScrollTests
                     Assert.IsLessThanOrEqualTo(page.Card.ClientSize.Height, item.Bounds.Bottom - offset, "The row " + item.Row + " ends in view" + at);
                 }
 
-                CardKit.ClickPart(page.Card, SettingsRowId.CheckForUpdates, SettingsPart.Button);
+                CardKit.ClickPart(page.Card, SettingsRowId.About, SettingsPart.Button);
 
                 Assert.AreEqual(WidgetCardView.Update, page.Presenter.ViewForTest, "The last row can be pressed" + at);
             }
@@ -260,7 +260,7 @@ public sealed class WidgetCardScrollTests
             page.OpenSettings();
             Rectangle OnScreen()
             {
-                Rectangle onPage = CardKit.Part(page.Card, SettingsRowId.GaugePosition, SettingsPart.SegmentFirst);
+                Rectangle onPage = CardKit.Part(page.Card, SettingsRowId.GaugePosition, SettingsPart.Choice);
                 return new Rectangle(onPage.X, onPage.Y - page.Card.SettingsScrollOffset, onPage.Width, onPage.Height);
             }
 
@@ -487,7 +487,7 @@ public sealed class WidgetCardScrollTests
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard fits = CardKit.NewCard(dark);
-            fits.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            CardKit.RenderSettings(fits, CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
             using Bitmap fitting = CardKit.Render(fits);
             Assert.IsFalse(fits.SettingsScrolls);
             Assert.AreEqual(Rectangle.Empty, fits.ScrollIndicatorBounds);
@@ -496,7 +496,7 @@ public sealed class WidgetCardScrollTests
 
             using WidgetCard card = CardKit.NewCard(dark);
             card.MaxHeight = 500;
-            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
             Assert.AreEqual(500, card.ClientSize.Height);
             Assert.IsTrue(card.SettingsScrolls);
             using Bitmap top = CardKit.Render(card);
@@ -590,7 +590,7 @@ public sealed class WidgetCardScrollTests
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
             card.MaxHeight = 500;
-            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
             int bodyTop = card.SettingsViewport.Top;
             CardControl[] withTips = card.CurrentControls().Skip(1).Where(c => c.Tip is { Length: > 0 }).ToArray();
             int tried = 0;

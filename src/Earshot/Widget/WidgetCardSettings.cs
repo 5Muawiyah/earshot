@@ -76,6 +76,15 @@ internal sealed record CardSettingsValues(
     // open and hands it in here for the layout.
     public bool CaseOpenCardExpanded { get; init; }
 
+    // Whether the "More" row and the gauge order row are expanded. Not settings: the card holds them while the page is open and
+    // hands them in here for the layout.
+    public bool MoreExpanded { get; init; }
+
+    public bool GaugeOrderExpanded { get; init; }
+
+    // Whether a notice that a full charge was reached is wanted (WidgetSettings.FullyChargedNotice, on by default).
+    public bool FullyChargedNotice { get; init; } = true;
+
     public bool CaseOpenCardShownOnDisplay(int index) =>
         index >= 0 && index < CaseOpenCardDisplayOptions.Count &&
         CaseOpenCardShownOn.Contains(CaseOpenCardDisplayOptions[index].Id, StringComparer.OrdinalIgnoreCase);
@@ -133,6 +142,17 @@ internal interface IWidgetCardHost
 
     // Opens Windows' sound settings at the AirPods' microphone. Opens a page and changes nothing.
     void OpenSoundSettings(CardPlace place);
+
+    // Puts the same redacted text on the clipboard as the tray menu's Copy diagnostics item.
+    void CopyDiagnostics(CardPlace place);
+
+    // Sets the fully charged notice (WidgetSettings.FullyChargedNotice).
+    void SetFullyChargedNotice(bool on, CardPlace place);
+
+    // Opens Windows' Bluetooth settings (the card's Bluetooth off row) and the release notes page (the updates page's What's new).
+    void OpenBluetoothSettings(CardPlace place);
+
+    void OpenWhatsNew(CardPlace place);
 
     void SetCheckAutomatically(bool on, CardPlace place);
 
@@ -198,7 +218,6 @@ internal enum SettingsRowId
     Connect,
     Disconnect,
     OpenCard,
-    CheckForUpdates,
     Repair,
     CheckAutomatically,
     MicrophoneOff,
@@ -207,10 +226,15 @@ internal enum SettingsRowId
     CaseCardClose,     // in the expander: when it closes
     CaseCardDisplays,  // in the expander: where the gauge is, or all displays
     CaseCardDisplay,   // in the expander, with more than one display: one box per display, Index the display's place
+    More,              // the one expander that holds the rarely changed rows
+    FullyCharged,      // in More: the fully charged notice's switch
+    History,           // in More: the row that opens the battery history page
+    CopyDiagnostics,   // in More: the Copy button
+    About,             // the row that opens the updates page
 }
 
 // Expand is the chevron of a row with an expander; Check a box, one per item of a list (Index says which).
-internal enum SettingsPart { Back, Toggle, SegmentFirst, SegmentSecond, Text, Minus, Plus, Shortcut, Clear, Button, Choice, Tile, Expand, Check }
+internal enum SettingsPart { Back, Toggle, Text, Minus, Plus, Shortcut, Clear, Button, Choice, Tile, Expand, Check }
 
 // One control of the settings page, for the keyboard order, the mouse and the focus visual. Index is which picture of a
 // group of pictures (the gauge orders), 0 for everything else.
@@ -251,11 +275,13 @@ internal sealed record ShortcutChange(CardShortcut Shortcut, Keys Key, bool Cont
 
 internal sealed record ShortcutClear(CardShortcut Shortcut) : SettingChange;
 
-internal sealed record CheckRequest : SettingChange;
-
-internal sealed record RepairRequest : SettingChange;
-
 internal sealed record OpenSoundSettingsRequest : SettingChange;
+
+internal sealed record OpenHistoryRequest : SettingChange;
+
+internal sealed record OpenUpdatesRequest : SettingChange;
+
+internal sealed record CopyDiagnosticsRequest : SettingChange;
 
 // How wide a run of text is and how many lines it wraps to, so the layout can size rows without drawing. The
 // card's own is measured with GDI+ in the card's font; a test hands in the same over an off-screen bitmap.
@@ -311,40 +337,70 @@ internal sealed record SettingsItem(
     // Which item of a list this row is (the case-open card's display boxes), 0 for every other row.
     public int Index { get; init; }
 
-    // A row inside another row's expander: indented to the parent's label, with no icon of its own.
+    // A row inside another row's expander: no icon of its own.
     public bool Nested { get; init; }
+
+    // A 1 px row stroke is drawn across the top of this row, which is under the expander row of its surface.
+    public bool DividerAbove { get; init; }
+
+    // The chevron at the row's right end and the glyph in it, for a row that opens something or expands; and, for the gauge order
+    // row, where the gauge as it is now is drawn.
+    public Rectangle Chevron { get; init; }
+
+    public char ChevronGlyph { get; init; }
+
+    public Rectangle Preview { get; init; }
 }
 
-internal sealed record SettingsLayout(SubPageFrame.FrameLayout Frame, IReadOnlyList<SettingsItem> Items, IReadOnlyList<SettingsTarget> Targets);
+// Surfaces: the filled, stroked rounded rectangles the page's rows sit on (one per row, or one for an expander and what is under
+// it), in the page's own pixels.
+internal sealed record SettingsLayout(
+    SubPageFrame.FrameLayout Frame, IReadOnlyList<SettingsItem> Items, IReadOnlyList<SettingsTarget> Targets, IReadOnlyList<Rectangle> Surfaces);
 
 // The settings page's rows in the order the design gives them, each sized from what it holds. Pure: no window and
-// no drawing.
+// no drawing. Every figure is the design's, at 100% display scale and 100% text size; what holds text grows with the
+// text size t (a single-line row is 20t + 12 for its control plus 8 above and below, 48 at 100%).
+//
+// Groups: Taskbar (Display, Gauge order), Behaviour (Case-open card, Hand back), Audio (Microphone off), Shortcuts
+// (Connect, Disconnect, Card), About (Updates), then one More expander row holding Gauge position, Other device name,
+// Pause when a bud comes out, Pause when AirPods leave, Low battery alerts, Fully charged notice, Left click connects,
+// Battery history and Copy diagnostics.
 internal static class SettingsPageLayout
 {
-    public const int RowMinHeightAt96 = 36;
-    public const int RowPaddingAt96 = 4;
-    public const int SidePaddingAt96 = 16;
-    public const int LabelControlGapAt96 = 12;
-    public const int ControlHeightAt96 = 28;
-    public const int TextBoxWidthAt96 = 120;
+    public const int BodyTopAt96 = 8;
+    public const int BodySideAt96 = 12;
+    public const int BodyBottomAt96 = 12;
+    public const int RowGapAt96 = 4;
+    public const int GroupTopAt96 = 12;
+    public const int GroupFirstTopAt96 = 4;
+    public const int GroupBottomAt96 = 4;
+    public const int RowPadVerticalAt96 = 8;
+    public const int RowPadLeftAt96 = 14;
+    public const int RowPadRightAt96 = 12;
+    public const int TwoLineExtraAt96 = 20;
+    public const int GuidanceBottomAt96 = 10;
+    public const int IconSizeAt96 = 16;
+    public const int IconGapAt96 = 12;
+    public const int ChevronAt96 = 12;
+    public const int ComboMinWidthAt96 = 128;
+    public const int TextBoxWidthAt96 = 128;
     public const int ShortcutWidthAt96 = 136;
     public const int StepperValueWidthAt96 = 40;
-    public const int SegmentPaddingAt96 = 10;
-    public const int SegmentGapAt96 = 4;
+    public const int ToggleChevronGapAt96 = 4;
     public const int ButtonPaddingAt96 = 12;
-    public const int DividerGapAt96 = 8;
-    public const int HeadHeightAt96 = 32;
-    public const int BodyBottomAt96 = 12;
     public const int ControlGapAt96 = 2;
     public const int LabelLineAt96 = 20;
     public const int SubLineAt96 = 16;
     public const int MinLabelWidthAt96 = 80;
-    public const int IconSizeAt96 = 16;
-    public const int IconGapAt96 = 12;
     public const int OrderTileGapAt96 = 8;
     public const int OrderTileHeightAt96 = 52;
+    public const int OrderPaddingAt96 = 12;
     public const int StackGapAt96 = 4;
     public const int CheckBoxAt96 = 20;
+    public const int OrderHeaderAt96 = 56;
+
+    // The 1 px row stroke that separates an expander's content.
+    public const int SeparatorAt96 = 1;
 
     public static SettingsLayout Compute(CardSettingsValues values, int dpi, ICardTextMeasure measure, double textScale = 1.0)
     {
@@ -352,46 +408,84 @@ internal static class SettingsPageLayout
         ArgumentNullException.ThrowIfNull(measure);
 
         int width = CardPlacement.Scale(SubPageFrame.WidthAt96, dpi);
-        int side = CardPlacement.Scale(SidePaddingAt96, dpi);
-        int gap = CardPlacement.Scale(LabelControlGapAt96, dpi);
-        int minRow = CardPlacement.Scale(RowMinHeightAt96, dpi);
-        int rowPad = CardPlacement.Scale(RowPaddingAt96, dpi);
-        int control = TextFit.Fit(ControlHeightAt96, TypeRole.Body, 8, dpi, textScale);
+        int bodySide = CardPlacement.Scale(BodySideAt96, dpi);
+        int surfaceLeft = bodySide;
+        int surfaceWidth = width - (2 * bodySide);
+        int surfaceRight = surfaceLeft + surfaceWidth;
+        int rowGap = CardPlacement.Scale(RowGapAt96, dpi);
+        int rowPad = CardPlacement.Scale(RowPadVerticalAt96, dpi);
+        int padLeft = CardPlacement.Scale(RowPadLeftAt96, dpi);
+        int padRight = CardPlacement.Scale(RowPadRightAt96, dpi);
+        int gap = CardPlacement.Scale(LabelControlGapAtDpi, dpi);
+        int control = WidgetCardLayout.RowHeight(dpi, textScale);
         int labelLine = TextFit.Grow(LabelLineAt96, dpi, textScale);
         int subLine = TextFit.Grow(SubLineAt96, dpi, textScale);
         int fourteen = CardPlacement.Scale(14, dpi);
         int twelve = CardPlacement.Scale(12, dpi);
         int toggleW = CardPlacement.Scale(WidgetCardLayout.ToggleWidthAt96, dpi);
         int toggleH = CardPlacement.Scale(WidgetCardLayout.ToggleHeightAt96, dpi);
-        int contentWidth = width - (2 * side);
+        int chevronBox = CardPlacement.Scale(ChevronAt96, dpi) + CardPlacement.Scale(8, dpi);
+        int buttonPad = CardPlacement.Scale(ButtonPaddingAt96, dpi);
 
         var items = new List<SettingsItem>();
+        var surfaces = new List<Rectangle>();
         var targets = new List<SettingsTarget> { new(SettingsRowId.None, SettingsPart.Back) };
-        int y = 0;
+        int y = CardPlacement.Scale(BodyTopAt96, dpi);
 
-        // The icon sits at the side padding and the label after it. A label (and its note) take the width from there to
-        // the right padding.
+        // The icon sits 14 into the surface, the label after it and a 12 gap. A label (and its note) take the width from there to
+        // the surface's right padding.
         int iconBox = CardPlacement.Scale(IconSizeAt96, dpi);
-        int labelLeft = side + iconBox + CardPlacement.Scale(IconGapAt96, dpi);
-        int labelArea = width - side - labelLeft;
+        int iconLeft = surfaceLeft + padLeft;
+        int labelLeft = iconLeft + iconBox + CardPlacement.Scale(IconGapAt96, dpi);
+        int right = surfaceRight - padRight;
+        int labelArea = right - labelLeft;
+
+        // A surface that holds a row, or an expander and what is under it. surfaceTop is where the open one began.
+        bool holding = false;
+        int surfaceTop = 0;
+        bool nested = false;
+
+        void BeginGroup()
+        {
+            holding = true;
+            surfaceTop = y;
+        }
+
+        void EndGroup()
+        {
+            surfaces.Add(new Rectangle(surfaceLeft, surfaceTop, surfaceWidth, y - surfaceTop));
+            y += rowGap;
+            holding = false;
+        }
 
         // The icon is centred on the label's first line.
-        Rectangle IconAt(Rectangle labelRect) => new(side, labelRect.Y + ((labelLine - iconBox) / 2), iconBox, iconBox);
+        Rectangle IconAt(Rectangle labelRect) => new(iconLeft, labelRect.Y + ((labelLine - iconBox) / 2), iconBox, iconBox);
 
-        SettingsItem Dressed(SettingsItem item) =>
-            item with
+        SettingsItem Dressed(SettingsItem item, bool separated)
+        {
+            SettingsRowInfo info = SettingsRows.For(item.Row);
+            return item with
             {
-                Glyph = SettingsRows.For(item.Row).Glyph,
+                Glyph = nested ? '\0' : info.Glyph,
                 IconRect = IconAt(item.LabelRect),
-                Tip = SettingsRows.For(item.Row).Tip,
-                AccessibleName = SettingsRows.For(item.Row).Name,
+                Tip = info.Tip,
+                AccessibleName = info.Name,
+                DividerAbove = separated,
+                Nested = nested,
             };
+        }
 
         // One row: an icon and the label (and a note) on the left, the control block, and its height.
         void Row(
             SettingsRowId id, string label, string? sub, bool subIsProblem, bool subFullWidth, int controlWidth,
             Func<int, int, (Rectangle A, Rectangle B, Rectangle Value)> place, params SettingsPart[] parts)
         {
+            bool separated = holding && y != surfaceTop;
+            if (!holding)
+            {
+                surfaceTop = y;
+            }
+
             int labelWidth = Math.Max(1, labelArea - controlWidth - gap);
 
             // A control that leaves the label too little room (long text at a large text size) goes under the label,
@@ -407,100 +501,80 @@ internal static class SettingsPageLayout
             int subWidth = subFullWidth || stacked ? labelArea : labelWidth;
             int subLines = sub is null ? 0 : measure.Lines(sub, subWidth, twelve, subLine);
             int subHeight = subLine * subLines;
+            int top = y;
+            int height;
+            Rectangle labelRect;
+            Rectangle subRect = Rectangle.Empty;
+            Rectangle a;
+            Rectangle b;
+            Rectangle value;
 
             if (stacked)
             {
                 int stackGap = CardPlacement.Scale(StackGapAt96, dpi);
-                var stackedLabel = new Rectangle(labelLeft, y + rowPad, labelWidth, textHeight);
-                Rectangle stackedSub = sub is null ? Rectangle.Empty : new Rectangle(labelLeft, stackedLabel.Bottom, labelArea, subHeight);
-                int controlTop = (sub is null ? stackedLabel.Bottom : stackedSub.Bottom) + stackGap;
-                (Rectangle sa, Rectangle sb, Rectangle sv) = place(controlTop, controlTop + (control / 2));
-                int stackedHeight = Math.Max(minRow, controlTop + control + rowPad - y);
-                items.Add(Dressed(new SettingsItem(
-                    SettingsItemKind.Row, id, label, sub, subIsProblem, new Rectangle(0, y, width, stackedHeight), stackedLabel, stackedSub, sa, sb, sv)));
-                foreach (SettingsPart part in parts)
+                labelRect = new Rectangle(labelLeft, top + rowPad, labelWidth, textHeight);
+                subRect = sub is null ? Rectangle.Empty : new Rectangle(labelLeft, labelRect.Bottom, labelArea, subHeight);
+                int controlTop = (sub is null ? labelRect.Bottom : subRect.Bottom) + stackGap;
+                (a, b, value) = place(controlTop, controlTop + (control / 2));
+                height = controlTop + control + rowPad - top;
+            }
+            else
+            {
+                int lineHeight = Math.Max(textHeight + (subFullWidth ? 0 : subHeight), control);
+                int labelBlock = textHeight + (subFullWidth ? 0 : subHeight);
+                if (subFullWidth)
                 {
-                    targets.Add(new SettingsTarget(id, part));
+                    int bottomPad = sub is null ? rowPad : CardPlacement.Scale(GuidanceBottomAt96, dpi);
+                    height = rowPad + lineHeight + subHeight + bottomPad;
+                }
+                else
+                {
+                    height = (2 * rowPad) + lineHeight;
+                    if (sub is not null)
+                    {
+                        height = Math.Max(height, labelBlock + CardPlacement.Scale(TwoLineExtraAt96, dpi));
+                    }
                 }
 
-                y += stackedHeight;
-                return;
+                int labelTop = top + ((height - (subFullWidth ? subHeight : 0) - labelBlock) / 2);
+                labelRect = new Rectangle(labelLeft, labelTop, labelWidth, textHeight);
+                if (sub is not null)
+                {
+                    subRect = subFullWidth
+                        ? new Rectangle(labelLeft, top + rowPad + lineHeight, labelArea, subHeight)
+                        : new Rectangle(labelLeft, labelRect.Bottom, labelWidth, subHeight);
+                }
+
+                int controlTop = top + ((height - (subFullWidth ? subHeight : 0) - control) / 2);
+                (a, b, value) = place(controlTop, controlTop + (control / 2));
             }
 
-            int lineHeight = Math.Max(textHeight + (subFullWidth ? 0 : subHeight), control);
-            int height = Math.Max(minRow, (2 * rowPad) + lineHeight + (subFullWidth ? subHeight : 0));
-            var bounds = new Rectangle(0, y, width, height);
-            int labelBlock = textHeight + (subFullWidth ? 0 : subHeight);
-            int labelTop = y + rowPad + ((lineHeight - labelBlock) / 2);
-            var labelRect = new Rectangle(labelLeft, labelTop, labelWidth, textHeight);
-            Rectangle subRect = Rectangle.Empty;
-            if (sub is not null)
-            {
-                subRect = subFullWidth
-                    ? new Rectangle(labelLeft, y + rowPad + lineHeight, labelArea, subHeight)
-                    : new Rectangle(labelLeft, labelRect.Bottom, labelWidth, subHeight);
-            }
-
-            (Rectangle a, Rectangle b, Rectangle value) = place(y + rowPad + ((lineHeight - control) / 2), y + rowPad + (lineHeight / 2));
-            items.Add(Dressed(new SettingsItem(SettingsItemKind.Row, id, label, sub, subIsProblem, bounds, labelRect, subRect, a, b, value)));
+            height = Math.Max(height, 1);
+            var bounds = new Rectangle(surfaceLeft, top, surfaceWidth, height);
+            items.Add(Dressed(new SettingsItem(SettingsItemKind.Row, id, label, sub, subIsProblem, bounds, labelRect, subRect, a, b, value), separated));
             foreach (SettingsPart part in parts)
             {
                 targets.Add(new SettingsTarget(id, part));
             }
 
             y += height;
-        }
-
-        int right = width - side;
-
-        // The two segments' widths come from their own text, so a longer word never clips.
-        int firstW = measure.Width(WidgetCopy.PositionRightEnd, twelve) + (2 * CardPlacement.Scale(SegmentPaddingAt96, dpi));
-        int secondW = measure.Width(WidgetCopy.PositionNextToApps, twelve) + (2 * CardPlacement.Scale(SegmentPaddingAt96, dpi));
-        int segGap = CardPlacement.Scale(SegmentGapAt96, dpi);
-        Row(
-            SettingsRowId.GaugePosition, WidgetCopy.SettingsGaugePosition, null, false, false, firstW + segGap + secondW,
-            (top, _) => (new Rectangle(right - secondW - segGap - firstW, top, firstW, control), new Rectangle(right - secondW, top, secondW, control), Rectangle.Empty),
-            SettingsPart.SegmentFirst, SettingsPart.SegmentSecond);
-
-        int choiceW = 0;
-        foreach (DisplayOption option in values.GaugeDisplayOptions)
-        {
-            choiceW = Math.Max(choiceW, measure.Width(option.Label, twelve));
-        }
-
-        choiceW = Math.Max(choiceW, Math.Max(measure.Width(Widget.GaugeDisplayOptions.NotConnectedLabel, twelve), measure.Width(Widget.GaugeDisplayOptions.AllLabel, twelve))) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
-        Row(
-            SettingsRowId.GaugeDisplay, WidgetCopy.SettingsGaugeDisplay, values.GaugeDisplayNote, false, false, choiceW,
-            (top, _) => (new Rectangle(right - choiceW, top, choiceW, control), Rectangle.Empty, Rectangle.Empty),
-            SettingsPart.Choice);
-
-        // Gauge order: the label, then six pictures of the gauge in a grid of three across, each holding the gauge itself in
-        // that order. One stop in the keyboard order; the arrow keys move among the pictures.
-        {
-            var orderLabel = new Rectangle(labelLeft, y + rowPad, labelArea, labelLine);
-            int tileGap = CardPlacement.Scale(OrderTileGapAt96, dpi);
-            int tileWidth = (contentWidth - (2 * tileGap)) / 3;
-            int tileHeight = CardPlacement.Scale(OrderTileHeightAt96, dpi);
-            int tilesTop = orderLabel.Bottom + CardPlacement.Scale(OrderTileGapAt96, dpi);
-            var tiles = new List<Rectangle>(6);
-            for (int i = 0; i < 6; i++)
+            if (!holding)
             {
-                tiles.Add(new Rectangle(side + ((i % 3) * (tileWidth + tileGap)), tilesTop + ((i / 3) * (tileHeight + tileGap)), tileWidth, tileHeight));
+                surfaces.Add(bounds);
+                y += rowGap;
             }
-
-            int orderHeight = tiles[^1].Bottom + rowPad - y;
-            items.Add(Dressed(new SettingsItem(
-                SettingsItemKind.Row, SettingsRowId.GaugeOrder, WidgetCopy.SettingsOrder, null, false, new Rectangle(0, y, width, orderHeight), orderLabel,
-                Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty)) with { Tiles = tiles });
-            targets.Add(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, (int)GaugeOrders.FromStored(values.GaugeOrder)));
-            y += orderHeight;
         }
 
-        int textW = CardPlacement.Scale(TextBoxWidthAt96, dpi);
-        Row(
-            SettingsRowId.OtherDevice, WidgetCopy.SettingsOtherDevice, null, false, false, textW,
-            (top, _) => (new Rectangle(right - textW, top, textW, control), Rectangle.Empty, Rectangle.Empty),
-            SettingsPart.Text);
+        // A row that is one target, pressed anywhere on it, with a chevron at its right end (History, Updates).
+        void NavigationRow(SettingsRowId id, string label, string? sub)
+        {
+            Row(
+                id, label, sub, false, false, chevronBox,
+                (top, _) => (Rectangle.Empty, Rectangle.Empty, new Rectangle(right - chevronBox, top + ((control - chevronBox) / 2), chevronBox, chevronBox)),
+                SettingsPart.Button);
+            SettingsItem row = items[^1];
+            items[^1] = row with { A = row.Bounds, Chevron = row.Value, ChevronGlyph = FluentGlyphs.ChevronRight };
+        }
 
         void ToggleRow(SettingsRowId id, string label, string? sub) =>
             Row(
@@ -508,48 +582,122 @@ internal static class SettingsPageLayout
                 (_, mid) => (new Rectangle(right - toggleW, mid - (toggleH / 2), toggleW, toggleH), Rectangle.Empty, Rectangle.Empty),
                 SettingsPart.Toggle);
 
-        ToggleRow(SettingsRowId.PauseBud, WidgetCopy.SettingsPauseBud, values.InEarProofMissing ? WidgetCopy.SettingsWaitsOnInEar : null);
-        ToggleRow(SettingsRowId.PauseLeave, WidgetCopy.SettingsPauseLeave, null);
+        // A button whose width is its words and padding (and a glyph when it has one).
+        int ButtonWidth(string text, bool glyph) =>
+            measure.Width(text, fourteen) + (2 * buttonPad) + (glyph ? CardPlacement.Scale(ChevronAt96, dpi) + CardPlacement.Scale(8, dpi) : 0);
 
-        int valueW = CardPlacement.Scale(StepperValueWidthAt96, dpi);
-        int stepGap = CardPlacement.Scale(ControlGapAt96, dpi);
-        int stepperW = control + stepGap + valueW + stepGap + control;
-        Row(
-            SettingsRowId.LowBattery, WidgetCopy.SettingsLowBattery, null, false, false, stepperW,
-            (top, _) => (
-                new Rectangle(right - stepperW, top, control, control),
-                new Rectangle(right - control, top, control, control),
-                new Rectangle(right - stepperW + control + stepGap, top, valueW, control)),
-            SettingsPart.Minus, SettingsPart.Plus);
+        bool firstGroup = true;
 
-        // The case-open card: a switch and a chevron; expanded, its close and display choices under it, and a box per display
-        // when there is more than one.
-        int chevronW = control;
+        void Head(string text)
+        {
+            y += CardPlacement.Scale(firstGroup ? GroupFirstTopAt96 : GroupTopAt96, dpi);
+            firstGroup = false;
+            int headHeight = labelLine;
+            var bounds = new Rectangle(surfaceLeft, y, surfaceWidth, headHeight);
+            items.Add(new SettingsItem(SettingsItemKind.Head, SettingsRowId.None, text, null, false, bounds, bounds, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty));
+            y += headHeight + CardPlacement.Scale(GroupBottomAt96, dpi);
+        }
+
+        // ---- Taskbar
+
+        Head(WidgetCopy.SettingsGroupTaskbar);
+
+        int choiceW = ComboMin(dpi);
+        foreach (DisplayOption option in values.GaugeDisplayOptions)
+        {
+            choiceW = Math.Max(choiceW, ButtonWidth(option.Label, glyph: false));
+        }
+
+        choiceW = Math.Max(choiceW, Math.Max(ButtonWidth(Widget.GaugeDisplayOptions.NotConnectedLabel, false), ButtonWidth(Widget.GaugeDisplayOptions.AllLabel, false)));
         Row(
-            SettingsRowId.CaseCard, WidgetCopy.SettingsCaseCard, null, false, false, toggleW + segGap + chevronW,
+            SettingsRowId.GaugeDisplay, WidgetCopy.SettingsGaugeDisplay, values.GaugeDisplayNote, false, false, choiceW,
+            (top, _) => (new Rectangle(right - choiceW, top, choiceW, control), Rectangle.Empty, Rectangle.Empty),
+            SettingsPart.Choice);
+
+        // Gauge order: an expander row showing the gauge as it is now; open, a grid of three across and two down holding the gauge in each
+        // order. The pictures are one stop in the keyboard order; the arrow keys move among them.
+        {
+            Size gaugeSize = GaugeLayout.SizeFor(dpi);
+            int header = Math.Max(CardPlacement.Scale(OrderHeaderAt96, dpi), gaugeSize.Height + (2 * rowPad));
+            BeginGroup();
+            int top = y;
+            var orderLabel = new Rectangle(labelLeft, top + ((header - labelLine) / 2), labelArea, labelLine);
+            var chevron = new Rectangle(right - chevronBox, top + ((header - chevronBox) / 2), chevronBox, chevronBox);
+            var preview = new Rectangle(chevron.X - gap - gaugeSize.Width, top + ((header - gaugeSize.Height) / 2), gaugeSize.Width, gaugeSize.Height);
+            var headBounds = new Rectangle(surfaceLeft, top, surfaceWidth, header);
+            items.Add(Dressed(new SettingsItem(
+                SettingsItemKind.Row, SettingsRowId.GaugeOrder, WidgetCopy.SettingsOrder, null, false, headBounds, orderLabel,
+                Rectangle.Empty, Rectangle.Empty, headBounds, Rectangle.Empty), separated: false)
+                with { Chevron = chevron, ChevronGlyph = values.GaugeOrderExpanded ? FluentGlyphs.ChevronUp : FluentGlyphs.ChevronDown, Preview = preview });
+            targets.Add(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Expand));
+            y += header;
+
+            if (values.GaugeOrderExpanded)
+            {
+                int pad = CardPlacement.Scale(OrderPaddingAt96, dpi);
+                int tileGap = CardPlacement.Scale(OrderTileGapAt96, dpi);
+                int across = surfaceWidth - (2 * pad) - (2 * tileGap);
+                int tileWidth = across / 3;
+                int spare = across - (3 * tileWidth);
+                int tileHeight = Math.Max(CardPlacement.Scale(OrderTileHeightAt96, dpi), gaugeSize.Height + (2 * CardPlacement.Scale(6, dpi)));
+                int gridTop = y + pad;
+                var tiles = new List<Rectangle>(6);
+                for (int i = 0; i < 6; i++)
+                {
+                    // The spare pixels of the division go to the first columns, so the grid fills the surface to its padding.
+                    int column = i % 3;
+                    int left = surfaceLeft + pad + (column * (tileWidth + tileGap)) + Math.Min(column, spare);
+                    tiles.Add(new Rectangle(left, gridTop + ((i / 3) * (tileHeight + tileGap)), tileWidth + (column < spare ? 1 : 0), tileHeight));
+                }
+
+                int gridHeight = tiles[^1].Bottom + pad - y;
+                var gridBounds = new Rectangle(surfaceLeft, y, surfaceWidth, gridHeight);
+                items.Add(new SettingsItem(
+                    SettingsItemKind.Row, SettingsRowId.GaugeOrder, string.Empty, null, false, gridBounds, Rectangle.Empty, Rectangle.Empty,
+                    Rectangle.Empty, Rectangle.Empty, Rectangle.Empty)
+                {
+                    Tiles = tiles,
+                    DividerAbove = true,
+                    Nested = true,
+                    Tip = SettingsRows.For(SettingsRowId.GaugeOrder).Tip,
+                    AccessibleName = SettingsRows.For(SettingsRowId.GaugeOrder).Name,
+                });
+                targets.Add(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, (int)GaugeOrders.FromStored(values.GaugeOrder)));
+                y += gridHeight;
+            }
+
+            EndGroup();
+        }
+
+        // ---- Behaviour
+
+        Head(WidgetCopy.SettingsGroupBehaviour);
+
+        // The case-open card: a switch and a chevron; expanded, its close and display choices under it in the same surface, and a
+        // box per display when there is more than one.
+        BeginGroup();
+        Row(
+            SettingsRowId.CaseCard, WidgetCopy.SettingsCaseCard, null, false, false, toggleW + CardPlacement.Scale(ToggleChevronGapAt96, dpi) + chevronBox,
             (top, mid) => (
-                new Rectangle(right - chevronW - segGap - toggleW, mid - (toggleH / 2), toggleW, toggleH),
-                new Rectangle(right - chevronW, top, chevronW, control),
+                new Rectangle(right - chevronBox - CardPlacement.Scale(ToggleChevronGapAt96, dpi) - toggleW, mid - (toggleH / 2), toggleW, toggleH),
+                new Rectangle(right - chevronBox, top + ((control - chevronBox) / 2), chevronBox, chevronBox),
                 Rectangle.Empty),
             SettingsPart.Toggle, SettingsPart.Expand);
         if (values.CaseOpenCardExpanded)
         {
-            void Nested() => items[^1] = items[^1] with { Glyph = '\0', Nested = true };
-
-            int closeW = CaseOpenCardClose.Choices.Max(c => measure.Width(CaseOpenCardClose.Label(c), twelve)) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+            nested = true;
+            int closeW = CaseOpenCardClose.Choices.Max(c => ButtonWidth(CaseOpenCardClose.Label(c), false));
             Row(
                 SettingsRowId.CaseCardClose, WidgetCopy.SettingsCaseCardClose, null, false, false, closeW,
                 (top, _) => (new Rectangle(right - closeW, top, closeW, control), Rectangle.Empty, Rectangle.Empty),
                 SettingsPart.Choice);
-            Nested();
 
             int placesW = new[] { WidgetCopy.CaseCardWhereTheGaugeIs, WidgetCopy.CaseCardAllDisplays, WidgetCopy.CaseCardChosenDisplays }
-                .Max(t => measure.Width(t, twelve)) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+                .Max(t => ButtonWidth(t, false));
             Row(
                 SettingsRowId.CaseCardDisplays, WidgetCopy.SettingsCaseCardDisplays, null, false, false, placesW,
                 (top, _) => (new Rectangle(right - placesW, top, placesW, control), Rectangle.Empty, Rectangle.Empty),
                 SettingsPart.Choice);
-            Nested();
 
             if (values.CaseOpenCardDisplayOptions.Count > 1)
             {
@@ -559,57 +707,53 @@ internal static class SettingsPageLayout
                     Row(
                         SettingsRowId.CaseCardDisplay, values.CaseOpenCardDisplayOptions[i].Label, null, false, false, box,
                         (_, mid) => (new Rectangle(right - box, mid - (box / 2), box, box), Rectangle.Empty, Rectangle.Empty));
-                    items[^1] = items[^1] with { Glyph = '\0', Nested = true, Index = i };
+                    items[^1] = items[^1] with { Index = i };
                     targets.Add(new SettingsTarget(SettingsRowId.CaseCardDisplay, SettingsPart.Check, i));
                 }
             }
+
+            nested = false;
         }
 
-        ToggleRow(SettingsRowId.LeftClick, WidgetCopy.SettingsLeftClick, null);
-        ToggleRow(SettingsRowId.HandBack, WidgetCopy.SettingsHandBack, null);
+        EndGroup();
+
+        // Hand back: a caption says when.
+        ToggleRow(SettingsRowId.HandBack, WidgetCopy.SettingsHandBack, WidgetCopy.SettingsHandBackCaption);
+
+        // ---- Audio
+
+        Head(WidgetCopy.SettingsGroupAudio);
 
         // The Hands-Free "microphone off" mode. While it is on the row says what to do next in one line under it, and a
-        // second row opens sound settings, unless Windows already lists the microphone as disabled.
+        // second row in the same surface opens sound settings, unless Windows already lists the microphone as disabled.
         string? micNote = !values.HandsFreeMicrophoneOff ? null : values.MicrophoneState switch
         {
             MicrophoneRowState.ConnectFirst => WidgetCopy.MicConnectFirst,
             MicrophoneRowState.OffInWindows => WidgetCopy.MicOffInWindows,
             _ => WidgetCopy.MicGuidance,
         };
+        BeginGroup();
         Row(
             SettingsRowId.MicrophoneOff, WidgetCopy.SettingsMicOff, micNote, subIsProblem: false, subFullWidth: true, toggleW,
             (_, mid) => (new Rectangle(right - toggleW, mid - (toggleH / 2), toggleW, toggleH), Rectangle.Empty, Rectangle.Empty),
             SettingsPart.Toggle);
         if (values.HandsFreeMicrophoneOff && values.MicrophoneState != MicrophoneRowState.OffInWindows)
         {
-            int openW = measure.Width(WidgetCopy.OpenButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+            int openW = ButtonWidth(WidgetCopy.OpenButton, glyph: true);
             Row(
                 SettingsRowId.SoundSettings, WidgetCopy.SettingsSoundSettings, null, subIsProblem: false, subFullWidth: false, openW,
                 (top, _) => (new Rectangle(right - openW, top, openW, control), Rectangle.Empty, Rectangle.Empty),
                 SettingsPart.Button);
         }
 
-        void Divider()
-        {
-            int dividerGap = CardPlacement.Scale(DividerGapAt96, dpi);
-            items.Add(new SettingsItem(
-                SettingsItemKind.Divider, SettingsRowId.None, string.Empty, null, false,
-                new Rectangle(side, y + dividerGap, contentWidth, 1), Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty));
-            y += dividerGap + 1;
-        }
+        EndGroup();
 
-        void Head(string text)
-        {
-            int headHeight = TextFit.Grow(HeadHeightAt96, dpi, textScale);
-            var bounds = new Rectangle(side, y, contentWidth, headHeight);
-            items.Add(new SettingsItem(SettingsItemKind.Head, SettingsRowId.None, text, null, false, bounds, bounds, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty, Rectangle.Empty));
-            y += headHeight;
-        }
+        // ---- Shortcuts
 
-        Divider();
         Head(WidgetCopy.SettingsShortcuts);
 
         int shortcutW = CardPlacement.Scale(ShortcutWidthAt96, dpi);
+        int stepGap = CardPlacement.Scale(ControlGapAt96, dpi);
         int shortcutBlock = shortcutW + stepGap + control;
         void ShortcutRow(SettingsRowId id, string label, string chord, string? failure)
         {
@@ -623,30 +767,66 @@ internal static class SettingsPageLayout
         ShortcutRow(SettingsRowId.Disconnect, WidgetCopy.Disconnect, values.DisconnectChord, values.DisconnectFailure);
         ShortcutRow(SettingsRowId.OpenCard, ShortcutCopy.Card, values.OpenCardChord, values.OpenCardFailure);
 
-        Divider();
-        Head(WidgetCopy.SettingsUpdates);
+        // ---- About
 
-        // The row says which version is installed, and keeps its note only when an update or repair is under way.
-        string checkLabel = values.InstalledVersion is null ? WidgetCopy.CheckForUpdates : "Version " + values.InstalledVersion;
-        int checkW = measure.Width(WidgetCopy.CheckButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+        Head(WidgetCopy.SettingsAbout);
+        NavigationRow(SettingsRowId.About, WidgetCopy.SettingsUpdates, values.InstalledVersion is null ? null : "Version " + values.InstalledVersion);
+
+        // ---- More: one expander row, and what it holds in the same surface
+
+        y += CardPlacement.Scale(GroupTopAt96 - RowGapAt96, dpi);
+        BeginGroup();
         Row(
-            SettingsRowId.CheckForUpdates, checkLabel, values.ElevatedRunNote, subIsProblem: false, subFullWidth: false, checkW,
-            (top, _) => (new Rectangle(right - checkW, top, checkW, control), Rectangle.Empty, Rectangle.Empty),
-            SettingsPart.Button);
-
-        // Repair is offered whenever an install exists, in any state, in the row under the check.
-        if (values.InstallExists)
+            SettingsRowId.More, WidgetCopy.SettingsMore, null, false, false, chevronBox,
+            (top, _) => (Rectangle.Empty, Rectangle.Empty, new Rectangle(right - chevronBox, top + ((control - chevronBox) / 2), chevronBox, chevronBox)),
+            SettingsPart.Expand);
         {
-            int repairW = measure.Width(WidgetCopy.RepairButton, twelve) + (2 * CardPlacement.Scale(ButtonPaddingAt96, dpi));
+            SettingsItem row = items[^1];
+            items[^1] = row with { B = row.Bounds, Chevron = row.Value, ChevronGlyph = values.MoreExpanded ? FluentGlyphs.ChevronUp : FluentGlyphs.ChevronDown };
+        }
+
+        if (values.MoreExpanded)
+        {
+            // Two places, in a combo like the display's: it names the place and a press moves to the other.
+            int positionW = Math.Max(ComboMin(dpi), Math.Max(ButtonWidth(WidgetCopy.PositionRightEnd, false), ButtonWidth(WidgetCopy.PositionNextToApps, false)));
             Row(
-                SettingsRowId.Repair, WidgetCopy.RepairEarshot, values.ElevatedRunNote, subIsProblem: false, subFullWidth: false, repairW,
-                (top, _) => (new Rectangle(right - repairW, top, repairW, control), Rectangle.Empty, Rectangle.Empty),
+                SettingsRowId.GaugePosition, WidgetCopy.SettingsGaugePosition, null, false, false, positionW,
+                (top, _) => (new Rectangle(right - positionW, top, positionW, control), Rectangle.Empty, Rectangle.Empty),
+                SettingsPart.Choice);
+
+            int textW = CardPlacement.Scale(TextBoxWidthAt96, dpi);
+            Row(
+                SettingsRowId.OtherDevice, WidgetCopy.SettingsOtherDevice, null, false, false, textW,
+                (top, _) => (new Rectangle(right - textW, top, textW, control), Rectangle.Empty, Rectangle.Empty),
+                SettingsPart.Text);
+
+            ToggleRow(SettingsRowId.PauseBud, WidgetCopy.SettingsPauseBud, values.InEarProofMissing ? WidgetCopy.SettingsWaitsOnInEar : null);
+            ToggleRow(SettingsRowId.PauseLeave, WidgetCopy.SettingsPauseLeave, null);
+
+            int valueW = CardPlacement.Scale(StepperValueWidthAt96, dpi);
+            int stepperW = control + stepGap + valueW + stepGap + control;
+            Row(
+                SettingsRowId.LowBattery, WidgetCopy.SettingsLowBattery, null, false, false, stepperW,
+                (top, _) => (
+                    new Rectangle(right - stepperW, top, control, control),
+                    new Rectangle(right - control, top, control, control),
+                    new Rectangle(right - stepperW + control + stepGap, top, valueW, control)),
+                SettingsPart.Minus, SettingsPart.Plus);
+
+            ToggleRow(SettingsRowId.FullyCharged, WidgetCopy.SettingsFullyCharged, null);
+            ToggleRow(SettingsRowId.LeftClick, WidgetCopy.SettingsLeftClick, null);
+            NavigationRow(SettingsRowId.History, WidgetCopy.SettingsHistory, null);
+
+            int copyW = ButtonWidth(WidgetCopy.CopyButton, glyph: false);
+            Row(
+                SettingsRowId.CopyDiagnostics, WidgetCopy.SettingsCopyDiagnostics, null, false, false, copyW,
+                (top, _) => (new Rectangle(right - copyW, top, copyW, control), Rectangle.Empty, Rectangle.Empty),
                 SettingsPart.Button);
         }
 
-        ToggleRow(SettingsRowId.CheckAutomatically, WidgetCopy.SettingsAutoCheck, null);
+        EndGroup();
 
-        int bodyHeight = y + CardPlacement.Scale(BodyBottomAt96, dpi);
+        int bodyHeight = y - rowGap + CardPlacement.Scale(BodyBottomAt96, dpi);
         SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight, buttonCount: 0, textScale);
         int offset = frame.Body.Y;
         var shifted = new List<SettingsItem>(items.Count);
@@ -661,12 +841,18 @@ internal static class SettingsPageLayout
                 B = Shift(item.B, offset),
                 Value = Shift(item.Value, offset),
                 IconRect = Shift(item.IconRect, offset),
+                Chevron = Shift(item.Chevron, offset),
+                Preview = Shift(item.Preview, offset),
                 Tiles = item.Tiles.Select(t => Shift(t, offset)).ToList(),
             });
         }
 
-        return new SettingsLayout(frame, shifted, targets);
+        return new SettingsLayout(frame, shifted, targets, surfaces.Select(r => Shift(r, offset)).ToList());
     }
+
+    private const int LabelControlGapAtDpi = 12;
+
+    private static int ComboMin(int dpi) => CardPlacement.Scale(ComboMinWidthAt96, dpi);
 
     private static Rectangle Shift(Rectangle rect, int dy) => rect.IsEmpty ? rect : new Rectangle(rect.X, rect.Y + dy, rect.Width, rect.Height);
 }

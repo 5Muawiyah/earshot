@@ -8,7 +8,7 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class CardMotionTests
 {
-    private const int Travel = 48;
+    private const int Travel = 40;
 
     private static TimeSpan Ms(double milliseconds) => TimeSpan.FromTicks((long)Math.Round(milliseconds * TimeSpan.TicksPerMillisecond));
 
@@ -63,13 +63,23 @@ public sealed class CardMotionTests
         Assert.AreEqual(new MotionFrame(0, 255, Done: true), CardMotion.FrameAt(plan, Ms(900)), "Nothing moves after the end.");
     }
 
+    // The exit's curve is cubic-bezier(1, 0, 1, 1): x(s) = 3s - 3s^2 + s^3 and y(s) = 3s^2 - 2s^3, slow at first and fast at the end.
+    [TestMethod]
+    public void TheAccelerateCurveIsTheExitsAndStartsSlow()
+    {
+        Assert.AreEqual(0.0, CardMotion.Accelerate.Progress(0), 1e-9);
+        Assert.AreEqual(1.0, CardMotion.Accelerate.Progress(1), 1e-9);
+        Assert.AreEqual(0.1101, CardMotion.Accelerate.Progress(0.5), 1e-3, "Barely a tenth of the way at half the time.");
+        Assert.IsLessThan(CardMotion.Decelerate.Progress(0.125), CardMotion.Accelerate.Progress(0.125), "It starts slower than the entrance's curve.");
+    }
+
     [TestMethod]
     public void AnExitSlidesDownAndFadesOutOverOneHundredAndSixtySevenMilliseconds()
     {
         CardMotionPlan plan = CardMotion.ExitFromRest(Travel);
 
         Assert.AreEqual(new MotionFrame(0, 255, Done: false), CardMotion.FrameAt(plan, TimeSpan.Zero));
-        Assert.AreEqual(Travel / 2, CardMotion.FrameAt(plan, Ms(20.875)).OffsetPx, "Half the travel after an eighth of 167 ms.");
+        Assert.AreEqual((int)Math.Round(Travel * CardMotion.Accelerate.Progress(0.5), MidpointRounding.AwayFromZero), CardMotion.FrameAt(plan, Ms(83.5)).OffsetPx, "The offset follows the exit's curve.");
         Assert.AreEqual(128, CardMotion.FrameAt(plan, Ms(83.5)).Alpha, "Half faded at half the time, linearly.");
         Assert.AreEqual(new MotionFrame(Travel, 0, Done: true), CardMotion.FrameAt(plan, Ms(167)));
     }

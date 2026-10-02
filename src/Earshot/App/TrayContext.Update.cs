@@ -553,4 +553,35 @@ internal sealed partial class TrayContext
             _registry.UiPost(() => ShowCard(view.Status, view.CardText ?? "", CardPlace.NearTray));
         }
     }
+
+    // The updates page's "What's new": the release notes are the project's releases page, opened in the default browser. A run
+    // whose data lives somewhere other than the real folder (every test run) and safe mode open nothing. A refusal by Windows is
+    // logged with its raw code and said on a card.
+    internal const string WhatsNewAddress = "https://github.com/5Muawiyah/earshot/releases";
+
+    internal void OpenWhatsNew(CardPlace place)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        if (_registry.SafeMode || Paths.Current.IsRedirected)
+        {
+            _log.Info("What's new: not opened here.");
+            return;
+        }
+
+        try
+        {
+            using System.Diagnostics.Process? process = System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(WhatsNewAddress) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            int code = ex is System.ComponentModel.Win32Exception win ? win.NativeErrorCode : ex.HResult;
+            _log.Warn("What's new: the releases page could not be opened, raw code " + code.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".", ex);
+            ShowCard(TrayStatus.AppName, Earshot.Widget.WidgetCopy.WhatsNewNotOpened, place);
+        }
+    }
 }

@@ -3,8 +3,8 @@ using Earshot.Popup;
 
 namespace Earshot.Widget;
 
-// The frame every sub-page of the widget card sits in: a 48 px header (a 32 by 32 back button 8 px from the
-// left, the title, a step counter 16 px from the right), a body the page fills, and a 64 px footer holding one
+// The frame every sub-page of the widget card sits in: a 48 px header (a back button, an icon button 16t + 16 square, 8 px from the
+// left, the title 8 px after it, a step counter 12 px from the right), a body the page fills, and a 64 px footer holding one
 // button across the whole width or two split 50/50 with an 8 px gap. Pure layout, then a painter for the two
 // parts the frame owns (header and footer); the body is the page's own. The set-up steps use it now; the
 // settings and updates pages sit in it the same way.
@@ -12,10 +12,9 @@ internal static class SubPageFrame
 {
     public const int WidthAt96 = 360;
     public const int HeaderHeightAt96 = 48;
-    public const int BackSizeAt96 = 32;
     public const int BackLeftAt96 = 8;
-    public const int TitleGapAt96 = 4;
-    public const int StepRightAt96 = 16;
+    public const int TitleGapAt96 = 8;
+    public const int StepRightAt96 = 12;
     public const int FooterHeightAt96 = 64;
     public const int FooterPaddingAt96 = 16;
     public const int ButtonHeightAt96 = 32;
@@ -46,7 +45,7 @@ internal static class SubPageFrame
 
         int width = CardPlacement.Scale(WidthAt96, dpi);
         int headerHeight = TextFit.Fit(HeaderHeightAt96, TypeRole.BodyStrong, 28, dpi, textScale);
-        int backSize = CardPlacement.Scale(BackSizeAt96, dpi);
+        int backSize = WidgetCardLayout.IconButtonSize(dpi, textScale);
         int backLeft = CardPlacement.Scale(BackLeftAt96, dpi);
         int titleGap = CardPlacement.Scale(TitleGapAt96, dpi);
         int stepRight = CardPlacement.Scale(StepRightAt96, dpi);
@@ -205,6 +204,13 @@ internal static partial class CardPaint
             g.DrawPath(pen, path);
         }
 
+        if (!primary)
+        {
+            // The standard control's bottom edge is a little stronger than its sides.
+            using var bottom = new Pen(colours.ControlStrokeBottom, 1f);
+            g.DrawLine(bottom, rect.Left + radius, rect.Bottom - 1, rect.Right - radius - 1, rect.Bottom - 1);
+        }
+
         Text(g, label, rect, type, Scale(14, dpi), bold: false, primary ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
         if (focused)
         {
@@ -212,8 +218,9 @@ internal static partial class CardPaint
         }
     }
 
-    // The 24 px button of the update line: the standard control fill and stroke, the caption size.
-    public static void SmallButton(Graphics g, Rectangle rect, string label, CardColours colours, CardType type, int dpi, bool focused)
+    // A standard button: the control fill and stroke, the Body size (14) for the words, 4 px corners. trailingGlyph, when given, is a
+    // 12 px glyph after the words (the Open button's external link).
+    public static void SmallButton(Graphics g, Rectangle rect, string label, CardColours colours, CardType type, int dpi, bool focused, char trailingGlyph = '\0')
     {
         ArgumentNullException.ThrowIfNull(colours);
         int radius = Scale(4, dpi);
@@ -228,7 +235,25 @@ internal static partial class CardPaint
             g.DrawPath(pen, path);
         }
 
-        Text(g, label, rect, type, Scale(12, dpi), bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
+        // The standard control's bottom edge is a little stronger than its sides.
+        using (var bottom = new Pen(colours.ControlStrokeBottom, 1f))
+        {
+            g.DrawLine(bottom, rect.Left + radius, rect.Bottom - 1, rect.Right - radius - 1, rect.Bottom - 1);
+        }
+
+        if (trailingGlyph == '\0')
+        {
+            Text(g, label, rect, type, Scale(14, dpi), bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
+        }
+        else
+        {
+            int glyph = Scale(FluentGlyphs.ChevronSizeAt96, dpi);
+            int pad = Scale(12, dpi);
+            int gap = Scale(8, dpi);
+            Text(g, label, new Rectangle(rect.X + pad, rect.Y, Math.Max(1, rect.Width - (2 * pad) - glyph - gap), rect.Height), type, Scale(14, dpi), bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
+            _ = TryGlyph(g, trailingGlyph, new Rectangle(rect.Right - pad - glyph, rect.Y + ((rect.Height - glyph) / 2), glyph, glyph), colours.Text, dpi, FluentGlyphs.ChevronSizeAt96, 1.0);
+        }
+
         if (focused)
         {
             Focus(g, rect, radius, colours, dpi);
@@ -413,48 +438,24 @@ internal static partial class CardPaint
         }
     }
 
-    // One of the settings page's two-choice buttons: the accent when it is the choice, the standard control when not.
-    public static void Segment(Graphics g, Rectangle rect, string label, bool selected, CardColours colours, CardType type, int dpi, bool focused)
-    {
-        ArgumentNullException.ThrowIfNull(colours);
-        int radius = Scale(4, dpi);
-        using GraphicsPath path = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
-        using (var fill = new SolidBrush(selected ? colours.Accent : colours.ControlFill))
-        {
-            g.FillPath(fill, path);
-        }
-
-        using (var pen = new Pen(selected ? colours.Accent : colours.ControlStroke, 1f))
-        {
-            g.DrawPath(pen, path);
-        }
-
-        Text(g, label, rect, type, Scale(12, dpi), bold: false, selected ? colours.OnAccent : colours.Text, StringAlignment.Center, StringAlignment.Center);
-        if (focused)
-        {
-            Focus(g, rect, radius, colours, dpi);
-        }
-    }
-
-    // A 28 by 28 button holding a minus, a plus or a cross. Drawn at 35% when it cannot be used.
+    // A button holding a minus, a plus or a cross. Disabled, it has the disabled control fill and the disabled text colour.
     public static void IconButton(Graphics g, Rectangle rect, GlyphKind kind, bool enabled, CardColours colours, int dpi, bool focused, bool bordered = true)
     {
         ArgumentNullException.ThrowIfNull(colours);
         int radius = Scale(4, dpi);
-        int alpha = enabled ? 255 : 89;
         if (bordered)
         {
             using GraphicsPath path = RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
-            using (var fill = new SolidBrush(Color.FromArgb((colours.ControlFill.A * alpha) / 255, colours.ControlFill)))
+            using (var fill = new SolidBrush(enabled ? colours.ControlFill : colours.ControlFillDisabled))
             {
                 g.FillPath(fill, path);
             }
 
-            using var pen = new Pen(Color.FromArgb((colours.ControlStroke.A * alpha) / 255, colours.ControlStroke), 1f);
+            using var pen = new Pen(colours.ControlStroke, 1f);
             g.DrawPath(pen, path);
         }
 
-        Color ink = Color.FromArgb(alpha, bordered ? colours.Text : colours.TextSecondary);
+        Color ink = !enabled ? colours.TextDisabled : bordered ? colours.Text : colours.TextSecondary;
         if (kind != GlyphKind.Cross || !TryGlyph(g, FluentGlyphs.Cancel, rect, ink, dpi))
         {
             Glyph10(g, rect, kind, ink, dpi);

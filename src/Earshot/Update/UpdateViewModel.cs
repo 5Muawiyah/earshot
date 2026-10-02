@@ -150,7 +150,10 @@ internal sealed record UpdateViewModel(
             UpdateStage.Idle => new(stage, title, UpdateIcon.None, UpdateCopy.CheckRowLabel, UpdateCopy.CurrentSub(installed), null, null, null,
                 [new UpdateButton(UpdateButtonRole.Check, UpdateCopy.CheckRowButton, Primary: false)]),
             UpdateStage.Checking => new(stage, title, UpdateIcon.Spinner, UpdateCopy.CheckingStatus, UpdateCopy.InstalledSub(installed), null, null, null, None),
-            UpdateStage.UpToDate => new(stage, title, UpdateIcon.Check, UpdateCopy.UpToDateStatus, UpdateCopy.CurrentSub(installed), null, null, null, None),
+            // Up to date offers Check again (a standard button), as the design's updates page does: the settings page no longer has
+            // a Check button of its own.
+            UpdateStage.UpToDate => new(stage, title, UpdateIcon.Check, UpdateCopy.UpToDateStatus, UpdateCopy.CurrentSub(installed), null, null, null,
+                [new UpdateButton(UpdateButtonRole.Check, UpdateCopy.CheckRowButton, Primary: false)]),
             UpdateStage.Available => new(stage, title, UpdateIcon.Down, UpdateCopy.AvailableStatus(target), UpdateCopy.InstalledSub(installed), null, notice, null,
                 updateOffered ? [new UpdateButton(UpdateButtonRole.Update, UpdateCopy.UpdateButton, Primary: true)] : Instead(instead)),
             UpdateStage.Downloading => new(stage, title, UpdateIcon.Down, UpdateCopy.DownloadingStatus(target), null, null, null, progressPercent,

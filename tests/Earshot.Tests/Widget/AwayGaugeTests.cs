@@ -83,7 +83,7 @@ public sealed class AwayGaugeTests
 
         Assert.AreEqual(GaugeMode.OnOtherDevice, c.Mode);
         Assert.IsFalse(c.CaseMark);
-        Assert.AreEqual("On your iPhone\r\nCase 80%\r\nLast read 5 min ago", c.Tooltip);
+        Assert.AreEqual("AirPods, on iPhone\r\nCase 80%\r\nLast read 5 min ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -97,7 +97,7 @@ public sealed class AwayGaugeTests
         Assert.AreEqual(60, c.Percent);
         Assert.IsTrue(c.Tertiary);
         Assert.IsFalse(c.CaseMark, "On this PC the earbud mark stays.");
-        Assert.AreEqual("AirPods\r\nL 70%   R 60%\r\nLast read 3 h ago", c.Tooltip);
+        Assert.AreEqual("AirPods 60%\r\nL 70%   R 60%\r\nLast read 3 h ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -110,7 +110,7 @@ public sealed class AwayGaugeTests
         Assert.AreEqual(70, c.Percent);
         Assert.IsTrue(c.Estimated);
         Assert.IsTrue(c.Tertiary);
-        Assert.AreEqual("Charging\r\nL ≈70%   R 90%\r\nEstimated, read 1 h ago", c.Tooltip);
+        Assert.AreEqual("AirPods ≈70%, charging\r\nL ≈70%   R 90%\r\nEstimated, read 1 h ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -129,7 +129,7 @@ public sealed class AwayGaugeTests
         Assert.AreEqual(50, c.Percent, "The newer live readings replace the saved ones.");
         Assert.IsFalse(c.Tertiary);
         Assert.IsFalse(c.Estimated);
-        Assert.AreEqual("AirPods\r\nL 50%   R 50%\r\nRead just now", c.Tooltip);
+        Assert.AreEqual("AirPods 50%\r\nL 50%   R 50%\r\nRead just now", c.Tooltip);
     }
 
     [TestMethod]
@@ -167,7 +167,7 @@ public sealed class AwayGaugeTests
         Assert.AreEqual(80, c.Percent, "The live bud's figure, not the other bud's reading from an hour ago.");
         Assert.IsFalse(c.Tertiary);
         Assert.IsFalse(c.Low);
-        StringAssert.StartsWith(c.Tooltip, "AirPods\r\n");
+        StringAssert.StartsWith(c.Tooltip, "AirPods 80%\r\n");
         Assert.IsFalse(c.Tooltip.Contains("Low battery", StringComparison.Ordinal));
     }
 

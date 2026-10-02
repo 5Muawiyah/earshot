@@ -17,8 +17,10 @@ internal sealed partial class WidgetCard
     private int _caret;
     private SettingsRowId? _capturing;
 
-    // Whether the case-open card's row is expanded to show its choices. Collapsed each time the page opens.
+    // Whether the case-open card's row, the gauge order row and the More row are expanded. Collapsed each time the page opens.
     private bool _caseCardExpanded;
+    private bool _orderExpanded;
+    private bool _moreExpanded;
 
     // For tests.
     internal bool CaseCardExpanded => _caseCardExpanded;
@@ -83,10 +85,18 @@ internal sealed partial class WidgetCard
             _settingsFocus = new SettingsTarget(SettingsRowId.None, SettingsPart.Back);
             _editingText = false;
             _capturing = null;
-            _settingsScroll = 0;
             _scrollHot = false;
             _scrollDragging = false;
+        }
+
+        // Opened from the main card: everything closed and at the top. Coming back from the history or updates page, the page is as it
+        // was left.
+        if (_shownView == WidgetCardView.Main)
+        {
+            _settingsScroll = 0;
             _caseCardExpanded = false;
+            _orderExpanded = false;
+            _moreExpanded = false;
         }
 
         _shownView = WidgetCardView.Settings;
@@ -94,7 +104,7 @@ internal sealed partial class WidgetCard
         using var probe = new Bitmap(1, 1);
         using Graphics measure = Graphics.FromImage(probe);
         SettingsLayout layout = SettingsPageLayout.Compute(
-            values with { CaseOpenCardExpanded = _caseCardExpanded }, _dpi, new GraphicsTextMeasure(measure, _type), _look.TextScale);
+            values with { CaseOpenCardExpanded = _caseCardExpanded, GaugeOrderExpanded = _orderExpanded, MoreExpanded = _moreExpanded }, _dpi, new GraphicsTextMeasure(measure, _type), _look.TextScale);
         _settingsLayout = layout;
 
         // The focus must point at a control the page still draws (the Clear button goes when its chord does).
@@ -303,15 +313,15 @@ internal sealed partial class WidgetCard
 
     private static Rectangle PartRectangle(SettingsItem item, SettingsPart part) => part switch
     {
-        SettingsPart.Toggle or SettingsPart.SegmentFirst or SettingsPart.Text or SettingsPart.Minus or SettingsPart.Shortcut or SettingsPart.Button
+        SettingsPart.Toggle or SettingsPart.Text or SettingsPart.Minus or SettingsPart.Shortcut or SettingsPart.Button
             or SettingsPart.Choice or SettingsPart.Check => item.A,
-        SettingsPart.SegmentSecond or SettingsPart.Plus or SettingsPart.Clear or SettingsPart.Expand => item.B,
+        SettingsPart.Plus or SettingsPart.Clear or SettingsPart.Expand => item.B,
         _ => Rectangle.Empty,
     };
 
     // The row a control is on: the row with its id and, for a box of a list, its index (the pictures of a group share one row).
     private static bool IsItemOf(SettingsItem item, SettingsTarget target) =>
-        item.Kind == SettingsItemKind.Row && item.Row == target.Row && (target.Part == SettingsPart.Tile || item.Index == target.Index);
+        item.Kind == SettingsItemKind.Row && item.Row == target.Row && (target.Part == SettingsPart.Tile ? item.Tiles.Count > 0 : item.Index == target.Index && item.Tiles.Count == 0);
 
     private void SettingsMouseDown(MouseEventArgs e)
     {
@@ -369,11 +379,8 @@ internal sealed partial class WidgetCard
             case SettingsPart.Toggle:
                 Raise(new ToggleChange(target.Row, !ToggleValue(values, target.Row)));
                 break;
-            case SettingsPart.SegmentFirst:
-                Raise(new PositionChange(GaugePosition.RightEnd));
-                break;
-            case SettingsPart.SegmentSecond:
-                Raise(new PositionChange(GaugePosition.NextToApps));
+            case SettingsPart.Choice when target.Row == SettingsRowId.GaugePosition:
+                Raise(new PositionChange(values.GaugePosition == GaugePosition.RightEnd ? GaugePosition.NextToApps : GaugePosition.RightEnd));
                 break;
             case SettingsPart.Choice when target.Row == SettingsRowId.CaseCardClose:
                 Raise(new CaseCardCloseChange(CaseOpenCardClose.Next(values.CaseOpenCardCloseSeconds)));
@@ -386,7 +393,19 @@ internal sealed partial class WidgetCard
                 break;
             case SettingsPart.Expand:
                 // Only the page changes: the row's choices show or go, and the focus stays on the chevron.
-                _caseCardExpanded = !_caseCardExpanded;
+                switch (target.Row)
+                {
+                    case SettingsRowId.More:
+                        _moreExpanded = !_moreExpanded;
+                        break;
+                    case SettingsRowId.GaugeOrder:
+                        _orderExpanded = !_orderExpanded;
+                        break;
+                    default:
+                        _caseCardExpanded = !_caseCardExpanded;
+                        break;
+                }
+
                 RenderSettings(values);
                 Invalidate();
                 break;
@@ -420,9 +439,10 @@ internal sealed partial class WidgetCard
             case SettingsPart.Button:
                 Raise(target.Row switch
                 {
-                    SettingsRowId.Repair => new RepairRequest(),
                     SettingsRowId.SoundSettings => new OpenSoundSettingsRequest(),
-                    _ => new CheckRequest(),
+                    SettingsRowId.History => new OpenHistoryRequest(),
+                    SettingsRowId.About => new OpenUpdatesRequest(),
+                    _ => new CopyDiagnosticsRequest(),
                 });
                 break;
         }
@@ -437,6 +457,7 @@ internal sealed partial class WidgetCard
         SettingsRowId.CheckAutomatically => values.CheckAutomatically,
         SettingsRowId.MicrophoneOff => values.HandsFreeMicrophoneOff,
         SettingsRowId.CaseCard => values.CaseOpenCardOn,
+        SettingsRowId.FullyCharged => values.FullyChargedNotice,
         _ => false,
     };
 
@@ -774,7 +795,7 @@ internal sealed partial class WidgetCard
                 g.FillRectangle(line, 0, SettingsViewport.Top, layout.Frame.Width, 1);
             }
 
-            CardScroll.DrawIndicator(g, ScrollIndicator(), colours.TextSecondary, _scrollHot || _scrollDragging);
+            CardScroll.DrawIndicator(g, ScrollIndicator(), colours.TextTertiary);
         }
     }
 
@@ -782,43 +803,65 @@ internal sealed partial class WidgetCard
     {
         int fourteen = CardPlacement.Scale(14, _dpi);
         int twelve = CardPlacement.Scale(12, _dpi);
+        int radius = CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi);
 
         bool Focused(SettingsRowId row, SettingsPart part) => focusVisible && focus == new SettingsTarget(row, part);
 
+        // The surfaces first: each a fill and a 1 px stroke at the row radius.
+        foreach (Rectangle surface in layout.Surfaces)
+        {
+            using GraphicsPath path = CardPaint.RoundedRectangle(new RectangleF(surface.X + 0.5f, surface.Y + 0.5f, surface.Width - 1, surface.Height - 1), radius);
+            using var fill = new SolidBrush(colours.RowFill);
+            g.FillPath(fill, path);
+            using var pen = new Pen(colours.RowStroke, 1f);
+            g.DrawPath(pen, path);
+        }
+
         foreach (SettingsItem item in layout.Items)
         {
-            switch (item.Kind)
+            if (item.Kind == SettingsItemKind.Head)
             {
-                case SettingsItemKind.Divider:
-                    CardPaint.Divider(g, item.Bounds.Left, item.Bounds.Right, item.Bounds.Y, colours);
-                    continue;
-                case SettingsItemKind.Head:
-                    CardPaint.Text(g, item.Label, item.Bounds, _type, twelve, bold: true, colours.TextSecondary, StringAlignment.Near, StringAlignment.Far);
-                    continue;
+                CardPaint.Text(g, item.Label, item.Bounds, _type, fourteen, bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
+                continue;
+            }
+
+            if (item.DividerAbove)
+            {
+                using var line = new Pen(colours.RowStroke, 1f);
+                g.DrawLine(line, item.Bounds.Left + 1, item.Bounds.Top, item.Bounds.Right - 2, item.Bounds.Top);
             }
 
             if (item.Glyph != '\0')
             {
-                CardPaint.Glyph(g, item.Glyph, item.IconRect, colours.Text, _dpi);
+                CardPaint.Glyph(g, FluentGlyphs.Resolve(item.Glyph), item.IconRect, colours.Text, _dpi);
             }
 
-            CardPaint.Wrapped(g, item.Label, item.LabelRect, _type, fourteen, bold: false, colours.Text);
+            if (item.Label.Length > 0)
+            {
+                CardPaint.Wrapped(g, item.Label, item.LabelRect, _type, fourteen, bold: false, colours.Text);
+            }
+
             if (item.Sub is not null)
             {
                 CardPaint.Wrapped(g, item.Sub, item.SubRect, _type, twelve, bold: false, item.SubIsProblem ? colours.Caution : colours.TextSecondary);
             }
 
+            if (!item.Chevron.IsEmpty && item.ChevronGlyph != '\0'
+                && !CardPaint.TryGlyph(g, item.ChevronGlyph, item.Chevron, colours.TextSecondary, _dpi, FluentGlyphs.ChevronSizeAt96, 1.0))
+            {
+                CardPaint.Chevron(g, item.Chevron, up: item.ChevronGlyph == FluentGlyphs.ChevronUp, colours.TextSecondary, _dpi);
+            }
+
             switch (item.Row)
             {
                 case SettingsRowId.GaugePosition:
-                    CardPaint.Segment(g, item.A, WidgetCopy.PositionRightEnd, values.GaugePosition == GaugePosition.RightEnd, colours, _type, _dpi, Focused(item.Row, SettingsPart.SegmentFirst));
-                    CardPaint.Segment(g, item.B, WidgetCopy.PositionNextToApps, values.GaugePosition == GaugePosition.NextToApps, colours, _type, _dpi, Focused(item.Row, SettingsPart.SegmentSecond));
+                    CardPaint.SmallButton(g, item.A, values.GaugePosition == GaugePosition.RightEnd ? WidgetCopy.PositionRightEnd : WidgetCopy.PositionNextToApps, colours, _type, _dpi, Focused(item.Row, SettingsPart.Choice));
                     break;
                 case SettingsRowId.GaugeDisplay:
                     CardPaint.SmallButton(g, item.A, GaugeDisplayOptions.LabelFor(values.GaugeDisplayOptions, values.GaugeDisplayId), colours, _type, _dpi, Focused(item.Row, SettingsPart.Choice));
                     break;
                 case SettingsRowId.GaugeOrder:
-                    DrawOrderTiles(g, item, values, colours, focusVisible, focus);
+                    DrawOrderRow(g, item, values, colours, focusVisible, focus);
                     break;
                 case SettingsRowId.OtherDevice:
                     DrawTextBox(g, item.A, colours, values.OtherDeviceLabel, Focused(item.Row, SettingsPart.Text));
@@ -835,14 +878,26 @@ internal sealed partial class WidgetCard
                 case SettingsRowId.OpenCard:
                     DrawShortcut(g, item, colours, values.ChordFor(item.Row), focusVisible, focus);
                     break;
-                case SettingsRowId.CheckForUpdates:
-                    CardPaint.SmallButton(g, item.A, WidgetCopy.CheckButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
-                    break;
-                case SettingsRowId.Repair:
-                    CardPaint.SmallButton(g, item.A, WidgetCopy.RepairButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
+                case SettingsRowId.CopyDiagnostics:
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.CopyButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
                     break;
                 case SettingsRowId.SoundSettings:
-                    CardPaint.SmallButton(g, item.A, WidgetCopy.OpenButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.OpenButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button), FluentGlyphs.OpenExternal);
+                    break;
+                case SettingsRowId.About:
+                case SettingsRowId.History:
+                    if (Focused(item.Row, SettingsPart.Button))
+                    {
+                        CardPaint.Focus(g, item.A, radius, colours, _dpi);
+                    }
+
+                    break;
+                case SettingsRowId.More:
+                    if (Focused(item.Row, SettingsPart.Expand))
+                    {
+                        CardPaint.Focus(g, item.B, radius, colours, _dpi);
+                    }
+
                     break;
                 case SettingsRowId.CaseCard:
                     CardPaint.Toggle(g, item.A, values.CaseOpenCardOn, colours, _dpi);
@@ -851,14 +906,14 @@ internal sealed partial class WidgetCard
                         CardPaint.Focus(g, item.A, item.A.Height / 2, colours, _dpi);
                     }
 
-                    if (!CardPaint.TryGlyph(g, _caseCardExpanded ? FluentGlyphs.ChevronUp : FluentGlyphs.ChevronDown, item.B, colours.Text, _dpi))
+                    if (!CardPaint.TryGlyph(g, _caseCardExpanded ? FluentGlyphs.ChevronUp : FluentGlyphs.ChevronDown, item.B, colours.TextSecondary, _dpi, FluentGlyphs.ChevronSizeAt96, 1.0))
                     {
-                        CardPaint.Chevron(g, item.B, up: _caseCardExpanded, colours.Text, _dpi);
+                        CardPaint.Chevron(g, item.B, up: _caseCardExpanded, colours.TextSecondary, _dpi);
                     }
 
                     if (Focused(item.Row, SettingsPart.Expand))
                     {
-                        CardPaint.Focus(g, item.B, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
+                        CardPaint.Focus(g, item.B, radius, colours, _dpi);
                     }
 
                     break;

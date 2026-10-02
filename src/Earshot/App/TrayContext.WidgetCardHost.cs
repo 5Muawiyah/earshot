@@ -88,6 +88,7 @@ internal sealed partial class TrayContext
                 OpenCardFailure = hotkeys.FailureMessage(HotkeyAction.OpenCard),
                 HandsFreeMicrophoneOff = HandsFreeMicrophoneMode.IsOn(settings),
                 MicrophoneState = HandsFreeMicrophoneMode.Describe(_tray._snapshot).State,
+                FullyChargedNotice = widget.FullyChargedNotice,
                 GaugeDisplayId = widget.GaugeDisplay,
                 GaugeDisplayOptions = displayOptions,
                 GaugeDisplayNote = displayNote,
@@ -196,6 +197,15 @@ internal sealed partial class TrayContext
         public void SetHandsFreeMicrophoneOff(bool on, CardPlace place) => _tray.SetHandsFreeMicrophoneOff(on, place);
 
         public void OpenSoundSettings(CardPlace place) => _tray.OpenSoundSettings(place);
+
+        public void OpenBluetoothSettings(CardPlace place) => _tray.OpenBluetoothSettings(place);
+
+        public void OpenWhatsNew(CardPlace place) => _tray.OpenWhatsNew(place);
+
+        public void CopyDiagnostics(CardPlace place) => _tray.CopyDiagnostics(place);
+
+        public void SetFullyChargedNotice(bool on, CardPlace place) =>
+            Write("fully charged notice (card)", s => s.Widget = s.Widget with { FullyChargedNotice = on }, place);
 
         public void SetCheckAutomatically(bool on, CardPlace place) =>
             Write("check for updates automatically (card)", s => s.CheckForUpdatesAutomatically = on, place);

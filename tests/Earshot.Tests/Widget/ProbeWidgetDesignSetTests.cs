@@ -15,13 +15,18 @@ public sealed class ProbeWidgetDesignSetTests
     private static readonly string[] CardPictures =
     [
         "card-fresh", "card-greyed", "card-refreshing", "card-refresh-open-the-case",
-        "card-fresh-text-150", "card-greyed-text-150", "settings", "update-available", "update-downloading",
+        "card-fresh-text-150", "card-greyed-text-150", "card-estimates", "card-estimates-text-150", "card-bluetooth-off", "card-case-open",
+        "card-case-open-estimates", "settings", "settings-text-150", "settings-more-open", "settings-order-open", "settings-case-open-card-open",
+        "history", "update-up-to-date", "update-available", "update-downloading",
     ];
+
+    private static readonly string[] Themes = ["light", "dark", "high-contrast"];
 
     private static readonly string[] GaugeStates =
     [
         "gauge-reading", "gauge-charging", "gauge-low", "gauge-no-recent-reading", "gauge-not-on-this-pc",
-        "gauge-on-the-other-device",
+        "gauge-on-the-other-device", "gauge-last-reading", "gauge-estimate", "gauge-away-case-last-reading", "gauge-away-case-estimate",
+        "gauge-away-case-charging", "gauge-away-case-live",
     ];
 
     private static readonly string[] GaugeOrders =
@@ -31,14 +36,14 @@ public sealed class ProbeWidgetDesignSetTests
     ];
 
     [TestMethod]
-    public void TheSetRendersEveryPictureNonEmptyInBothThemesAtBothScales()
+    public void TheSetRendersEveryPictureNonEmptyInEveryThemeAtBothScales()
     {
         using var temp = new TempFolder();
 
         IReadOnlyList<Program.ProbeWidgetFile> files = RenderUnderSafeMode(temp.Path);
 
         int pictures = CardPictures.Length + GaugeStates.Length + GaugeOrders.Length;
-        Assert.HasCount(pictures * 2 * 2, files, "Every picture in light and dark at 100% and 150%.");
+        Assert.HasCount(pictures * 3 * 2, files, "Every picture in light, dark and high contrast at 100% and 150%.");
         foreach (Program.ProbeWidgetFile file in files)
         {
             Assert.IsNull(file.Problem, file.Path + ": " + file.Problem);
@@ -48,7 +53,7 @@ public sealed class ProbeWidgetDesignSetTests
 
         foreach (string name in CardPictures.Concat(GaugeStates).Concat(GaugeOrders))
         {
-            foreach (string theme in new[] { "light", "dark" })
+            foreach (string theme in Themes)
             {
                 foreach (string scale in new[] { "100pct", "150pct" })
                 {
@@ -67,7 +72,7 @@ public sealed class ProbeWidgetDesignSetTests
 
         foreach (string name in GaugeStates.Concat(GaugeOrders))
         {
-            foreach (string theme in new[] { "light", "dark" })
+            foreach (string theme in Themes)
             {
                 AssertSize(Path.Combine(temp.Path, name + "-" + theme + "-100pct.png"), 74, 40);
                 AssertSize(Path.Combine(temp.Path, name + "-" + theme + "-150pct.png"), 111, 60);
@@ -120,6 +125,24 @@ public sealed class ProbeWidgetDesignSetTests
         Assert.IsFalse(Program.TryParseProbeArgs(["probe", "widget", "--out", @"C:\x", "--set", "other"], out _, out _), "An unknown set is refused.");
         Assert.IsFalse(Program.TryParseProbeArgs(["probe", "widget", "--out", @"C:\x", "--set"], out _, out _), "--set needs a name.");
         Assert.IsFalse(Program.TryParseProbeArgs(["probe", "battery", "--set", "design"], out _, out _), "Only probe widget takes a set.");
+    }
+
+    // Every new state is in the set: the case-open card, estimates, last readings on the gauge, the case mark, the history page and the
+    // More row open.
+    [TestMethod]
+    public void TheSetCoversTheCaseOpenCardEstimatesLastReadingsTheCaseMarkHistoryAndMoreOpen()
+    {
+        string[] required =
+        [
+            "card-case-open", "card-estimates", "gauge-last-reading", "gauge-estimate", "gauge-away-case-last-reading", "gauge-away-case-estimate",
+            "gauge-away-case-charging", "gauge-away-case-live", "history", "settings-more-open", "settings-order-open",
+        ];
+        foreach (string name in required)
+        {
+            Assert.IsTrue(CardPictures.Concat(GaugeStates).Contains(name), name + " is in the set.");
+        }
+
+        Assert.HasCount(6, Program.ProbeWidgetDesignGaugeContents());
     }
 
     [TestMethod]

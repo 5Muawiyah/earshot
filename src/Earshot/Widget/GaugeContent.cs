@@ -67,7 +67,7 @@ internal sealed record GaugeContent(
 
         if (snapshot.Where == AirPodsWhere.Elsewhere)
         {
-            return new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, WidgetCopy.OnElsewhere(label) + CaseLines(shown.Case, now));
+            return new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, WidgetCopy.GaugeOnElsewhere(label) + CaseLines(shown.Case, now));
         }
 
         if (snapshot.Where != AirPodsWhere.ThisPc)
@@ -91,7 +91,7 @@ internal sealed record GaugeContent(
             // Low is a claim about now: only a live figure gives it. A last reading or an estimate that is at or under the
             // level is drawn as it is, in tertiary ink with its age, and never as "Low battery".
             bool low = figure.Kind == ReadingKind.Live && figure.Percent <= settings.LowBatteryThresholdPercent;
-            string head = low ? WidgetCopy.GaugeLowBattery : figure.Charging ? WidgetCopy.GaugeCharging : WidgetCopy.GaugeAirPods;
+            string head = WidgetCopy.GaugeHead(low, figure.Percent, figure.Kind == ReadingKind.Estimated, figure.Charging);
             string detail = figure.Source == BatterySource.Windows
                 ? WidgetCopy.WindowsReads(figure.Percent)
                 : WidgetCopy.GaugeBudsLine(figure.Left, figure.Right, figure.LeftEstimated, figure.RightEstimated);

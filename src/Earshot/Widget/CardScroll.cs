@@ -118,7 +118,8 @@ internal static class CardScroll
     // How far a Page Up or Page Down moves: a page less one line.
     public static int PagePixels(int viewportHeight, int dpi) => Math.Max(1, viewportHeight - CardPlacement.Scale(PageOverlapAt96, dpi));
 
-    public static void DrawIndicator(Graphics g, Rectangle bar, Color colour, bool wide)
+    // The thumb is the Text tertiary token as it is (the design's thumb colour); its width is Thumb's.
+    public static void DrawIndicator(Graphics g, Rectangle bar, Color colour)
     {
         ArgumentNullException.ThrowIfNull(g);
         if (bar.IsEmpty)
@@ -127,7 +128,7 @@ internal static class CardScroll
         }
 
         using GraphicsPath path = CardPaint.RoundedRectangle(new RectangleF(bar.X, bar.Y, bar.Width, bar.Height), bar.Width / 2f);
-        using var brush = new SolidBrush(Color.FromArgb(wide ? 0xDC : 0x9C, colour));
+        using var brush = new SolidBrush(colour);
         g.FillPath(brush, path);
     }
 }

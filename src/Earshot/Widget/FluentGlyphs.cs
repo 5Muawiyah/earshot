@@ -20,8 +20,21 @@ internal static class FluentGlyphs
     public const char Settings = '\uE713';
     public const char Refresh = '\uE72C';
     public const char Back = '\uE72B';
-    public const char Location = '\uE81D';
-    public const char Clock = '\uE917';
+    public const char OnThisPc = '\uE977';
+    public const char ReadTime = '\uE823';
+    public const char Bolt = '\uE945';
+    public const char BluetoothOff = '\uE702';
+    public const char WhatsNew = '\uE946';
+    public const char OpenExternal = '\uE8A7';
+    public const char ChevronRight = '\uE76C';
+
+    // The chevrons are 12 epx glyphs.
+    public const int ChevronSizeAt96 = 12;
+
+    public const char Volume = '\uE767';
+    public const char History = '\uE81C';
+    public const char Copy = '\uE8C8';
+    public const char More = '\uE712';
     public const char Download = '\uE896';
     public const char DockBottom = '\uE90E';
     public const char TvMonitor = '\uE7F4';
@@ -35,11 +48,10 @@ internal static class FluentGlyphs
     public const char Mouse = '\uE962';
     public const char PowerButton = '\uE7E8';
     public const char MicOff = '\uEC54';
-    public const char KeyboardShortcut = '\uEDA7';
+    public const char Keyboard = '\uE765';
     public const char Cancel = '\uE711';
     public const char Sync = '\uE895';
     public const char Repair = '\uE90F';
-    public const char UpdateRestore = '\uE777';
     public const char Warning = '\uE7BA';
     public const char Preview = '\uE8A0';
     public const char ChevronDown = '\uE70D';
@@ -118,6 +130,10 @@ internal static class FluentGlyphs
         return hasGlyph(Earbud) ? Earbud : Headphone;
     }
 
+    // The glyph to draw for a code point a row names: the earbud is the headphone where the font has no earbud, which only the
+    // painter asks the font about, so a layout never needs the font.
+    public static char Resolve(char codePoint) => codePoint == Earbud ? EarbudForThisPc() : codePoint;
+
     private static char? _earbud;
 
     // The earbud, or the headphone when this PC's font has no earbud.
@@ -147,7 +163,11 @@ internal static partial class CardPaint
         _ = TryGlyph(g, codePoint, bounds, colour, dpi);
 
     // The same, answering false when no icon font is installed, so a caller can draw its own shape instead.
-    public static bool TryGlyph(Graphics g, char codePoint, Rectangle bounds, Color colour, int dpi)
+    public static bool TryGlyph(Graphics g, char codePoint, Rectangle bounds, Color colour, int dpi) =>
+        TryGlyph(g, codePoint, bounds, colour, dpi, GlyphSizeAt96, 1.0);
+
+    // A glyph of sizeAt96 epx at the display scale, grown by the text size (the card's icons follow it).
+    public static bool TryGlyph(Graphics g, char codePoint, Rectangle bounds, Color colour, int dpi, int sizeAt96, double textScale)
     {
         ArgumentNullException.ThrowIfNull(g);
         string? family = FluentGlyphs.Family;
@@ -156,7 +176,7 @@ internal static partial class CardPaint
             return false;
         }
 
-        float size = Math.Max(1, Scale(GlyphSizeAt96, dpi));
+        float size = Math.Max(1, TextFit.Grow(sizeAt96, dpi, textScale));
         using var font = new Font(family, size, FontStyle.Regular, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(colour);
         using var format = new StringFormat(StringFormat.GenericTypographic)

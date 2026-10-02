@@ -55,7 +55,7 @@ public sealed class TypeRampTests
         Assert.AreEqual(14, TypeRamp.SizePx(TypeRole.Body, 96, 1.0));
         Assert.AreEqual(16, TypeRamp.LineHeight(TypeRole.Caption, 96, 1.0));
         Assert.AreEqual(20, TypeRamp.LineHeight(TypeRole.BodyStrong, 96, 1.0));
-        Assert.AreEqual(24, TypeRamp.LineHeight(TypeRole.Number, 96, 1.0));
+        Assert.AreEqual(28, TypeRamp.LineHeight(TypeRole.Number, 96, 1.0), "Subtitle: 20 on 28.");
         Assert.AreEqual(15, TypeRamp.SizePx(TypeRole.Caption, 120, 1.0));
         Assert.AreEqual(21, TypeRamp.SizePx(TypeRole.Body, 144, 1.0));
         Assert.AreEqual(18, TypeRamp.SizePx(TypeRole.Caption, 96, 1.5));

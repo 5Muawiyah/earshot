@@ -52,11 +52,11 @@ public sealed class GaugeOrderRenderTests
     {
         foreach (int dpi in Dpis)
         {
-            GaugeLayout baseline = GaugeLayout.For(dpi);
-            int leftPad = baseline.RingBox.X;
-            int rightPad = baseline.Width - baseline.ChargingSlot.Right;
             foreach (GaugeOrder order in Enum.GetValues<GaugeOrder>())
             {
+                GaugeLayout slots = GaugeLayout.For(dpi, order);
+                int leftPad = Math.Min(slots.RingBox.Left, Math.Min(slots.NumberSlot.Left, slots.ChargingSlot.Left));
+                int rightPad = slots.Width - Math.Max(slots.RingBox.Right, Math.Max(slots.NumberSlot.Right, slots.ChargingSlot.Right));
                 foreach (GaugeContent content in new[]
                 {
                     Full(),
@@ -124,7 +124,7 @@ public sealed class GaugeOrderRenderTests
     }
 
     // The gauge's number is the type ramp's gauge style (Segoe UI Variable Small where installed): "100" must still fit
-    // the 22 px slot at every scale, in any order.
+    // the 20 px slot at every scale, in any order.
     [TestMethod]
     public void ThreeDigitsInTheRampsGaugeFaceFitTheNumberSlotAtEveryScale()
     {
@@ -137,53 +137,25 @@ public sealed class GaugeOrderRenderTests
         }
     }
 
+    // The phone and the digits are centred in the number slot, whatever the order: the ink's middle is within two pixels of the
+    // slot's middle.
     [TestMethod]
-    public void ThePhoneMarkTakesTheNumbersSideAndStaysInsideItsSlot()
+    public void ThePhoneMarkAndTheDigitsAreCentredInTheNumberSlot()
     {
         foreach (int dpi in Dpis)
         {
             foreach (GaugeOrder order in Enum.GetValues<GaugeOrder>())
             {
                 GaugeLayout layout = GaugeLayout.For(dpi, order);
-                using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, ""), dpi, order);
-                (int First, int Last)? phone = Columns(bitmap, layout.NumberSlot);
-                Assert.IsNotNull(phone, "The phone is drawn in the number slot (" + order + ", dpi " + dpi + ")");
                 Rectangle slot = layout.NumberSlot;
-                Assert.IsTrue(phone.Value.First >= slot.Left && phone.Value.Last < slot.Right, "Inside the slot (" + order + ", dpi " + dpi + ")");
-                int leftRoom = phone.Value.First - slot.Left;
-                int rightRoom = slot.Right - 1 - phone.Value.Last;
-                if (layout.NumberAlignRight)
+                foreach (GaugeContent content in new[] { new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, ""), Full() })
                 {
-                    Assert.IsLessThanOrEqualTo(leftRoom, rightRoom, "Against the slot's right side (" + order + ", dpi " + dpi + ")");
-                }
-                else
-                {
-                    Assert.IsLessThanOrEqualTo(rightRoom, leftRoom, "Against the slot's left side (" + order + ", dpi " + dpi + ")");
-                }
-            }
-        }
-    }
-
-    [TestMethod]
-    public void TheDigitsSitAgainstTheSideTheOrderGives()
-    {
-        foreach (int dpi in Dpis)
-        {
-            foreach (GaugeOrder order in Enum.GetValues<GaugeOrder>())
-            {
-                GaugeLayout layout = GaugeLayout.For(dpi, order);
-                using Bitmap bitmap = Draw(Full(), dpi, order);
-                (int First, int Last) digits = Columns(bitmap, layout.NumberSlot)!.Value;
-                Rectangle slot = layout.NumberSlot;
-                int leftRoom = digits.First - slot.Left;
-                int rightRoom = slot.Right - 1 - digits.Last;
-                if (layout.NumberAlignRight)
-                {
-                    Assert.IsLessThanOrEqualTo(leftRoom, rightRoom, "Right (" + order + ", dpi " + dpi + ")");
-                }
-                else
-                {
-                    Assert.IsLessThanOrEqualTo(rightRoom, leftRoom, "Left (" + order + ", dpi " + dpi + ")");
+                    using Bitmap bitmap = Draw(content, dpi, order);
+                    (int First, int Last)? ink = Columns(bitmap, slot);
+                    Assert.IsNotNull(ink, content.Mode + " is drawn in the number slot (" + order + ", dpi " + dpi + ")");
+                    Assert.IsTrue(ink.Value.First >= slot.Left && ink.Value.Last < slot.Right, "Inside the slot (" + order + ", dpi " + dpi + ")");
+                    double middle = (ink.Value.First + ink.Value.Last + 1) / 2.0;
+                    Assert.AreEqual(slot.Left + (slot.Width / 2.0), middle, 2.0, content.Mode + " centred (" + order + ", dpi " + dpi + ")");
                 }
             }
         }

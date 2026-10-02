@@ -107,6 +107,18 @@ internal sealed class FakeCardHost : IWidgetCardHost
 
     public void OpenSoundSettings(CardPlace place) => Calls.Add("openSound");
 
+    public void CopyDiagnostics(CardPlace place) => Calls.Add("copyDiagnostics");
+
+    public void OpenBluetoothSettings(CardPlace place) => Calls.Add("openBluetooth");
+
+    public void OpenWhatsNew(CardPlace place) => Calls.Add("whatsNew");
+
+    public void SetFullyChargedNotice(bool on, CardPlace place)
+    {
+        Calls.Add("fullyCharged:" + on);
+        Values = Values with { FullyChargedNotice = on };
+    }
+
     public void SetCaseOpenCard(bool on, CardPlace place)
     {
         Calls.Add("caseCard:" + on);
@@ -330,13 +342,32 @@ internal static class CardKit
         Phase5.TestWindows.Send(card.Handle, Phase5.TestWindows.WM_LBUTTONUP, 0, lParam);
     }
 
+    // Renders the settings page and opens the rows that expand (More, and the gauge order's pictures when asked), so a test reaches every
+    // row. The page closes them each time it opens; a test of the closed page passes false.
+    public static void RenderSettings(WidgetCard card, WidgetCardModel model, int dpi, bool more = true, bool order = false)
+    {
+        card.Render(model, dpi);
+        card.ExpandSettingsRowsForCapture(more, order, card.CaseCardExpanded);
+    }
+
+    // Opens the expanders of a page that is already showing.
+    public static void OpenExpanders(WidgetCard card, bool more = true, bool order = false) =>
+        card.ExpandSettingsRowsForCapture(more, order, card.CaseCardExpanded);
+
+    // The update page's button i: the one beside the status when the page has one button, else the footer's.
+    public static Rectangle ActionRect(WidgetCard card, int index)
+    {
+        WidgetCardLayout.SetupLayout layout = card.CurrentSetupLayout!;
+        return !layout.Action.IsEmpty && index == 0 ? layout.Action : layout.Frame.Buttons[index];
+    }
+
     public static SettingsItem Row(WidgetCard card, SettingsRowId row) =>
-        card.CurrentSettingsLayout!.Items.Single(i => i.Kind == SettingsItemKind.Row && i.Row == row);
+        card.CurrentSettingsLayout!.Items.Single(i => i.Kind == SettingsItemKind.Row && i.Row == row && i.Tiles.Count == 0);
 
     public static Rectangle Part(WidgetCard card, SettingsRowId row, SettingsPart part)
     {
-        SettingsItem item = Row(card, row);
-        return part is SettingsPart.SegmentSecond or SettingsPart.Plus or SettingsPart.Clear or SettingsPart.Expand ? item.B : item.A;
+        SettingsItem item = card.CurrentSettingsLayout!.Items.First(i => i.Kind == SettingsItemKind.Row && i.Row == row && i.Tiles.Count == 0);
+        return part is SettingsPart.Plus or SettingsPart.Clear or SettingsPart.Expand ? item.B : item.A;
     }
 
     // Presses a part of a row the way a person would on a card that is shorter than the page: the rows are scrolled until the
@@ -350,6 +381,11 @@ internal static class CardKit
         card.ScrollSettingsToForTest(item.Bounds.Top - card.CurrentSettingsLayout!.Frame.Body.Y);
         Click(card, new Rectangle(place.X, place.Y - card.SettingsScrollOffset, place.Width, place.Height));
     }
+
+    // The update page's model with the page's own rows (Check automatically, What's new and, with an install, Repair).
+    public static WidgetCardModel UpdateModelWithRows(UpdateViewModel view, bool autoCheck = false, bool showRepair = true, string? version = "1.1.0") =>
+        new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, WidgetCardView.Update,
+            WidgetCardUpdatePage.From(view) with { Rows = new UpdatesRows(autoCheck, showRepair, version) });
 
     public static UpdateViewModel Update(UpdateStage stage, int? percent = null, string? reason = null, string? notice = null) =>
         UpdateViewModel.For(stage, new ReleaseVersion(1, 1, 0), new ReleaseVersion(1, 2, 0), percent, reason, notice);

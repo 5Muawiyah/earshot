@@ -58,23 +58,25 @@ internal readonly record struct MotionFrame(int OffsetPx, byte Alpha, bool Done)
 
 // The card's entrance and exit, as pure functions of the time since the motion began.
 //
-// Taskbar flyouts slide up when invoked and down when dismissed, so a card enters from one taskbar thickness below
-// its place (above a bottom taskbar) and leaves the way it came. The motion page lists 167, 250 and 333 ms for a
-// direct entrance and 167 ms for a direct exit, with cubic-bezier(0, 0, 0, 1); an exit also fades out, and the
-// "bare minimum" entrance fades in linearly over 83 ms. The card travels about 48 px, so the 250 ms entrance is the
-// middle of the three: that curve covers half the distance in the first eighth of the time, so it reads as
-// immediate yet still visibly slides. The travel itself is a chosen value, not a Microsoft figure.
+// Taskbar flyouts slide up when invoked and down when dismissed, so a card enters from 40 px (scaled) below its place (above a
+// bottom taskbar) and leaves the way it came. The design's motion table: the entrance runs 250 ms on
+// cubic-bezier(0, 0, 0, 1) and its opacity rises 0 to 1 linearly over the first 83 ms; the exit runs 167 ms on
+// cubic-bezier(1, 0, 1, 1) with its opacity falling 1 to 0 linearly over the whole 167 ms. The curve of the entrance covers
+// half the distance in the first eighth of the time, so it reads as immediate yet still visibly slides.
 // https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/motion
 internal static class CardMotion
 {
     public static readonly CubicBezier Decelerate = new(0, 0, 0, 1);
 
+    // The exit's curve: cubic-bezier(1, 0, 1, 1).
+    public static readonly CubicBezier Accelerate = new(1, 0, 1, 1);
+
     public static readonly TimeSpan EnterDuration = TimeSpan.FromMilliseconds(250);
     public static readonly TimeSpan EnterFade = TimeSpan.FromMilliseconds(83);
     public static readonly TimeSpan ExitDuration = TimeSpan.FromMilliseconds(167);
 
-    // The distance used when the taskbar's thickness is not known: 48 px at 100%.
-    public const int FallbackTravelAt96 = 48;
+    // How far the card slides: 40 px at 100%, scaled with the display.
+    public const int TravelAt96 = 40;
 
     // Whether the card fades as well as slides. The fade is a constant window opacity (WS_EX_LAYERED with
     // LWA_ALPHA), and Microsoft does not say whether the system backdrop and the rounded corners survive that style.
@@ -82,38 +84,20 @@ internal static class CardMotion
     // opacity and drops the layered style.
     public static readonly bool UseAlphaFade = true;
 
-    // How far the card travels, signed (down is positive), and from which side: one taskbar thickness, away from the
-    // taskbar edge it sits above. A bottom taskbar is read from the gauge, which is centred on the taskbar's short
-    // side and so lies below the work area; a top one the same above it. With no gauge on a taskbar (hidden, or the
-    // taskbar auto-hides and the work area covers it) the travel is the fallback, downward.
+    // How far the card travels, signed (down is positive), and from which side: 40 px scaled, away from the taskbar edge it sits above.
+    // A bottom taskbar is read from the gauge, which is centred on the taskbar's short side and so lies below the work area; a top
+    // one the same above it. With no gauge on a taskbar (hidden, or the taskbar auto-hides and the work area covers it) the travel is
+    // downward.
     public static int TravelFor(Rectangle anchor, Rectangle workArea, int dpi)
     {
-        int fallback = Popup.CardPlacement.Scale(FallbackTravelAt96, dpi);
+        int travel = Popup.CardPlacement.Scale(TravelAt96, dpi);
         if (anchor.Width <= 0 || anchor.Height <= 0)
         {
-            return fallback;
+            return travel;
         }
 
         int centre = anchor.Y + (anchor.Height / 2);
-        int thickness;
-        int sign;
-        if (centre > workArea.Bottom)
-        {
-            thickness = 2 * (centre - workArea.Bottom);
-            sign = 1;
-        }
-        else if (centre < workArea.Top)
-        {
-            thickness = 2 * (workArea.Top - centre);
-            sign = -1;
-        }
-        else
-        {
-            return fallback;
-        }
-
-        bool plausible = thickness >= Popup.CardPlacement.Scale(16, dpi) && thickness <= Popup.CardPlacement.Scale(200, dpi);
-        return sign * (plausible ? thickness : fallback);
+        return centre < workArea.Top ? -travel : travel;
     }
 
     // Entrance from travel pixels away, invisible. A card already partly in view starts from there.
@@ -143,7 +127,8 @@ internal static class CardMotion
             elapsed = TimeSpan.Zero;
         }
 
-        double progress = Decelerate.Progress(elapsed.TotalMilliseconds / plan.Duration.TotalMilliseconds);
+        double time = elapsed.TotalMilliseconds / plan.Duration.TotalMilliseconds;
+        double progress = (plan.Kind == MotionKind.Enter ? Decelerate : Accelerate).Progress(time);
         bool done = elapsed >= plan.Duration;
         if (plan.Kind == MotionKind.Enter)
         {

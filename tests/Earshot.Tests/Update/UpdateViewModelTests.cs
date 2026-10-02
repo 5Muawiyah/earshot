@@ -44,8 +44,8 @@ public sealed class UpdateViewModelTests
         AssertView(For(UpdateStage.Checking), UpdateIcon.Spinner, "Checking for updates", "Version 1.1.0 installed");
 
     [TestMethod]
-    public void UpToDateShowsATickAndTheVersion() =>
-        AssertView(For(UpdateStage.UpToDate), UpdateIcon.Check, "You're up to date", "Version 1.1.0");
+    public void UpToDateShowsATickTheVersionAndOffersCheck() =>
+        AssertView(For(UpdateStage.UpToDate), UpdateIcon.Check, "You're up to date", "Version 1.1.0", (UpdateButtonRole.Check, "Check", false));
 
     [TestMethod]
     public void AvailableNamesTheNewVersionAndOffersUpdate() =>

@@ -37,7 +37,7 @@ internal static class TypeRamp
         TypeRole.CaptionStrong => new RoleSpec(12, 16, true, OpticalSize.Small),
         TypeRole.Body => new RoleSpec(14, 20, false, OpticalSize.Text),
         TypeRole.BodyStrong => new RoleSpec(14, 20, true, OpticalSize.Text),
-        TypeRole.Number => new RoleSpec(20, 24, true, OpticalSize.Display),
+        TypeRole.Number => new RoleSpec(20, 28, true, OpticalSize.Display),
         TypeRole.Gauge => new RoleSpec(12, 16, false, OpticalSize.Small),
         _ => throw new ArgumentOutOfRangeException(nameof(role)),
     };

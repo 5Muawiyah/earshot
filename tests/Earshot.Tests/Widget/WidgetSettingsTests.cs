@@ -356,7 +356,7 @@ public sealed class WidgetSettingsTests : IDisposable
         {
             "Enabled", "ShowOnTaskbar", "OtherDeviceLabel", "AutoPause", "LowBatteryAlert",
             "LowBatteryThresholdPercent", "CaseOpenCard", "LeftClickConnects", "GaugePosition", "GaugeOrder", "GaugeDisplay",
-            "CaseOpenCardOn", "CaseOpenCardCloseSeconds", "CaseOpenCardDisplays",
+            "CaseOpenCardOn", "CaseOpenCardCloseSeconds", "CaseOpenCardDisplays", "FullyChargedNotice",
         };
 
         CollectionAssert.AreEquivalent(

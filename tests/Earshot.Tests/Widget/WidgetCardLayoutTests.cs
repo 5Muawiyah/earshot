@@ -32,8 +32,9 @@ public sealed class WidgetCardLayoutTests
         WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
         Assert.IsTrue(layout.Left.Glyph.Right <= layout.Right.Glyph.Left, "Left column must not overlap the right column.");
         Assert.IsTrue(layout.Right.Glyph.Right <= layout.Case.Glyph.Left, "Right column must not overlap the case column.");
-        Assert.IsTrue(layout.Left.Glyph.Top < layout.Left.Bar.Top, "The bar sits below the glyph.");
-        Assert.IsTrue(layout.Left.Bar.Top < layout.Left.Percent.Top, "The percent text sits below the bar.");
+        Assert.IsTrue(layout.Left.Glyph.Top < layout.Left.Percent.Top, "The value sits below the mark.");
+        Assert.IsTrue(layout.Left.Percent.Top < layout.Left.Bar.Top, "The bar sits below the value.");
+        Assert.IsTrue(layout.Left.Bar.Top < layout.Left.ReadTime.Top, "The read-time line sits below the bar.");
     }
 
     [TestMethod]
@@ -91,8 +92,8 @@ public sealed class WidgetCardLayoutTests
             Assert.AreEqual(S(48), frame.Header.Height, "Header 48 at " + dpi);
             Assert.AreEqual(new Size(S(32), S(32)), frame.Back.Size, "Back button 32 by 32 at " + dpi);
             Assert.AreEqual(S(8), frame.Back.Left, "8 px from the left at " + dpi);
-            Assert.AreEqual(S(16), frame.Width - frame.Step.Right, "The step counter is 16 px from the right at " + dpi);
-            Assert.IsTrue(frame.Title.Left >= frame.Back.Right, "The title starts after the back button.");
+            Assert.AreEqual(S(12), frame.Width - frame.Step.Right, "The step counter is 12 px from the right at " + dpi);
+            Assert.AreEqual(S(8), frame.Title.Left - frame.Back.Right, "The title is 8 px after the back button at " + dpi);
             Assert.IsTrue(frame.Title.Right <= frame.Step.Left, "The title ends before the step counter.");
             Assert.AreEqual(S(64), frame.Footer.Height, "Footer 64 at " + dpi);
             Assert.AreEqual(frame.Header.Bottom + S(100), frame.Footer.Top, "The body sits between them.");

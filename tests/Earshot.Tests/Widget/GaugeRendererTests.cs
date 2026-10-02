@@ -129,9 +129,9 @@ public sealed class GaugeRendererTests
             if (percent < 100)
             {
                 Assert.IsTrue(IsFill(RingPixel(bitmap, layout, Math.Max(3, end - 8)), Accent), percent + "%: filled just before the end at " + dpi);
-                Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, end + 8), palette.Track), percent + "%: track just after the end at " + dpi);
+                Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, end + 12), palette.Track), percent + "%: track just after the end (past the round cap) at " + dpi);
                 Assert.IsTrue(IsFill(RingPixel(bitmap, layout, 8), Accent), percent + "%: the arc starts at twelve o'clock and runs clockwise (a little past it)");
-                Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, 352), palette.Track), percent + "%: just before twelve o'clock is track, so it is not counter-clockwise");
+                Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, 348), palette.Track), percent + "%: just before twelve o'clock (past the round cap) is track, so it is not counter-clockwise");
             }
             else
             {
@@ -247,7 +247,8 @@ public sealed class GaugeRendererTests
         Assert.IsEmpty(Painted(zero, beyond, 20), "Nothing of 0 lies beyond the slot.");
         Assert.IsEmpty(Painted(hundred, beyond, 20), "Nothing of 100 lies beyond the slot: the slot fits three digits.");
         Assert.IsGreaterThan(zeroInk.Max(p => p.X), hundredInk.Max(p => p.X), "Three digits reach further right than one.");
-        Assert.IsLessThanOrEqualTo(layout.NumberSlot.Left + 2, zeroInk.Min(p => p.X), "The number is left aligned in its slot.");
+        double middle = (zeroInk.Min(p => p.X) + zeroInk.Max(p => p.X) + 1) / 2.0;
+        Assert.AreEqual(layout.NumberSlot.Left + (layout.NumberSlot.Width / 2.0), middle, 3.0, "The number is centred in its slot.");
     }
 
     // Every digit takes the same width, so 11 and 88 end in the same column (tabular figures).
@@ -282,7 +283,7 @@ public sealed class GaugeRendererTests
         Rectangle slot = layout.ChargingSlot;
 
         Assert.IsEmpty(Painted(idle, slot, 20), "No bolt, and nothing else in the slot.");
-        Assert.IsNotEmpty(Painted(charging, slot, 200), "The bolt is drawn inside the reserved slot.");
+        Assert.IsNotEmpty(Painted(charging, slot, 100), "The bolt is drawn inside the reserved slot.");
         Assert.AreEqual(idle.Width, charging.Width, "The window does not change width for a bolt.");
         Assert.AreEqual(
             string.Join(",", Painted(idle, layout.NumberSlot)),
@@ -290,21 +291,22 @@ public sealed class GaugeRendererTests
             "The number does not move for a bolt.");
     }
 
+    // Not on this PC the pair is the disabled token, and with no recent reading the tertiary one (the design's table).
     [TestMethod]
     [DataRow(96)]
     [DataRow(120)]
     [DataRow(144)]
-    public void TheEarbudMarkIsAtFortyPercentWhenNotOnThisPc(int dpi)
+    public void TheEarbudMarkIsDisabledWhenNotOnThisPcAndTertiaryWithNoRecentReading(int dpi)
     {
         GaugeLayout layout = GaugeLayout.For(dpi);
-        using Bitmap full = Draw(Of(GaugeMode.MarkOnly), dpi, light: false);
+        GaugePalette palette = Palette(light: false);
+        using Bitmap none = Draw(Of(GaugeMode.MarkOnly), dpi, light: false);
         using Bitmap away = Draw(Of(GaugeMode.NotOnThisPc), dpi, light: false);
 
-        int fullAlpha = MaxAlpha(full, layout.Mark);
-        int awayAlpha = MaxAlpha(away, layout.Mark);
-
-        Assert.IsGreaterThanOrEqualTo(250, fullAlpha, "Sanity: the full mark is solid.");
-        Assert.IsInRange(96, 108, awayAlpha, "The away mark is 40% of full: " + awayAlpha);
+        RectangleF head = layout.EarbudShapes().Shapes[0];
+        var spot = new Point((int)(head.X + (head.Width / 2)), (int)(head.Y + (head.Height / 2)));
+        Assert.AreEqual(palette.Tertiary.A, none.GetPixel(spot.X, spot.Y).A, 2, "No recent reading: Text tertiary");
+        Assert.AreEqual(palette.Disabled.A, away.GetPixel(spot.X, spot.Y).A, 2, "Not on this PC: Text disabled");
     }
 
     [TestMethod]
@@ -312,10 +314,10 @@ public sealed class GaugeRendererTests
     [DataRow(96, false)]
     [DataRow(144, true)]
     [DataRow(144, false)]
-    public void OnlyTheReadingStateDrawsARing(int dpi, bool light)
+    public void OnlyAStateWithAValueDrawsAnArcAndTheOthersHideTheRing(int dpi, bool light)
     {
         GaugeLayout layout = GaugeLayout.For(dpi);
-        foreach (GaugeMode mode in new[] { GaugeMode.MarkOnly, GaugeMode.NotOnThisPc, GaugeMode.OnOtherDevice })
+        foreach (GaugeMode mode in new[] { GaugeMode.NotOnThisPc, GaugeMode.OnOtherDevice })
         {
             using Bitmap bitmap = Draw(Of(mode), dpi, light);
             foreach (double angle in new[] { 8, 90, 180, 270, 352 })
@@ -331,7 +333,7 @@ public sealed class GaugeRendererTests
     [DataRow(96)]
     [DataRow(120)]
     [DataRow(144)]
-    public void OnAnotherDeviceAPhoneMarkIsDrawnInTheNumberSlotAtFullInk(int dpi)
+    public void OnAnotherDeviceAPhoneMarkIsDrawnInTheNumberSlotInTertiary(int dpi)
     {
         GaugeLayout layout = GaugeLayout.For(dpi);
         GaugePalette palette = Palette(light: true);
@@ -340,9 +342,9 @@ public sealed class GaugeRendererTests
         List<Point> phone = Painted(bitmap, layout.NumberSlot);
 
         Assert.IsNotEmpty(phone, "The phone outline is in the number slot.");
-        Assert.IsTrue(Near(Strongest(bitmap, layout.NumberSlot), palette.Ink, 40));
-        Assert.IsGreaterThanOrEqualTo(250, MaxAlpha(bitmap, layout.Mark), "The mark is at full opacity beside the phone.");
-        Assert.IsLessThanOrEqualTo(layout.NumberSlot.Left + layout.PhoneSize, phone.Max(p => p.X) + 1, "The phone is PhoneSize wide, left aligned in the slot.");
+        Assert.IsTrue(Near(Strongest(bitmap, layout.NumberSlot), palette.Tertiary, 40));
+        Assert.IsGreaterThanOrEqualTo(palette.Tertiary.A - 4, MaxAlpha(bitmap, layout.Mark), "The pair is Text tertiary beside the phone.");
+        Assert.IsTrue(phone.Min(p => p.X) >= layout.NumberSlot.Left && phone.Max(p => p.X) < layout.NumberSlot.Right, "The phone is inside the number slot, centred.");
     }
 
     // ---- Hover and hit testing ----
@@ -378,8 +380,8 @@ public sealed class GaugeRendererTests
         using Bitmap bitmap = GaugeRenderer.Render(snapshot, Now, 96, 48, Color.Black, hover: false, FontFamily, accent: Accent);
 
         Assert.IsTrue(IsFill(RingPixel(bitmap, layout, 8), Accent));
-        Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, 352), Palette(true).Track), "60% is the lower bud, so the ring is not full.");
-        Assert.IsNotEmpty(Painted(bitmap, layout.ChargingSlot, 200), "The left bud is charging, a proved flag.");
+        Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, 348), Palette(true).Track), "60% is the lower bud, so the ring is not full.");
+        Assert.IsNotEmpty(Painted(bitmap, layout.ChargingSlot, 100), "The left bud is charging, a proved flag.");
     }
 
     [TestMethod]
@@ -391,6 +393,7 @@ public sealed class GaugeRendererTests
         using Bitmap bitmap = GaugeRenderer.Render(snapshot, Now, 96, 48, Color.Black, hover: false, FontFamily, accent: Accent);
 
         Assert.IsEmpty(Painted(bitmap, layout.NumberSlot, 20));
-        Assert.IsLessThan(20, (int)RingPixel(bitmap, layout, 90).A, "No ring without a proved reading.");
+        Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, 90), Palette(true).Track), "Only the track: no arc without a proved reading.");
+        Assert.IsFalse(IsFill(RingPixel(bitmap, layout, 90), Accent));
     }
 }

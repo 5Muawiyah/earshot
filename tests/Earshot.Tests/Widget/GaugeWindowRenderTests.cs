@@ -112,7 +112,7 @@ public sealed class GaugeWindowRenderTests
             Assert.AreEqual("AirPods, L 70%   R 60%, Read 2 min ago", gauge.AccessibleDescription);
 
             gauge.Render(Reading() with { Where = AirPodsWhere.Elsewhere }, Now, GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
-            Assert.AreEqual("On your iPhone", gauge.AccessibleDescription);
+            Assert.AreEqual("AirPods, on iPhone", gauge.AccessibleDescription);
 
             gauge.Render(Reading() with { Where = AirPodsWhere.NotInUse }, Now, GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
             Assert.AreEqual("Not on this PC", gauge.AccessibleDescription);

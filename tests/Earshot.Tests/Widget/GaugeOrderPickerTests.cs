@@ -24,7 +24,7 @@ public sealed class GaugeOrderPickerTests
             foreach (int dpi in Dpis)
             {
                 using WidgetCard card = CardKit.NewCard(dark: false);
-                card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), dpi);
+                CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), dpi, order: true);
                 SettingsItem row = OrderRow(card);
                 IReadOnlyList<Rectangle> tiles = row.Tiles;
                 Assert.AreEqual(6, tiles.Count);
@@ -63,7 +63,7 @@ public sealed class GaugeOrderPickerTests
             foreach (GaugeOrder chosen in Enum.GetValues<GaugeOrder>())
             {
                 using WidgetCard card = CardKit.NewCard(dark: false);
-                card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { GaugeOrder = chosen }), 96);
+                CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { GaugeOrder = chosen }), 96, order: true);
                 SettingsTarget[] stops = card.CurrentSettingsLayout!.Targets.Where(t => t.Row == SettingsRowId.GaugeOrder).ToArray();
                 Assert.AreEqual(1, stops.Length, "One stop for six pictures.");
                 Assert.AreEqual(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, (int)chosen), stops[0], "At the chosen picture.");
@@ -79,7 +79,7 @@ public sealed class GaugeOrderPickerTests
             foreach (int dpi in Dpis)
             {
                 using WidgetCard card = CardKit.NewCard(dark: false);
-                card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()), dpi);
+                CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), dpi, order: true);
                 using Bitmap bitmap = CardKit.Render(card);
                 SettingsItem row = OrderRow(card);
                 for (int i = 0; i < 6; i++)
@@ -133,7 +133,7 @@ public sealed class GaugeOrderPickerTests
             foreach (GaugeOrder chosen in new[] { GaugeOrder.RingNumberBolt, GaugeOrder.BoltRingNumber })
             {
                 using WidgetCard card = CardKit.NewCard(dark: false);
-                card.Render(CardKit.SettingsModel(FakeCardHost.Defaults() with { GaugeOrder = chosen }), 96);
+                CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { GaugeOrder = chosen }), 96, order: true);
                 using Bitmap bitmap = CardKit.Render(card);
                 Color accent = WidgetCard.AccentLight;
                 SettingsItem row = OrderRow(card);

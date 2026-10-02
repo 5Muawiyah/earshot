@@ -452,26 +452,26 @@ public sealed class WidgetCardMotionTests
     }
 
     [TestMethod]
-    public void TheTravelIsOneTaskbarThicknessAwayFromTheTaskbarEdge()
+    public void TheTravelIs40ScaledAwayFromTheTaskbarEdge()
     {
         // A bottom taskbar 48 px thick on a 1080 px display: the work area ends at 1032 and the gauge is centred on the
         // taskbar's short side.
         var work = new Rectangle(0, 0, 1920, 1032);
         var gauge = new Rectangle(1700, 1036, 74, 40);
-        Assert.AreEqual(48, CardMotion.TravelFor(gauge, work, 96), "Down, one taskbar thickness.");
+        Assert.AreEqual(40, CardMotion.TravelFor(gauge, work, 96), "Down, 40 px.");
 
-        // The same at 150%: a 72 px taskbar.
+        // The same at 150%: 60 px.
         var work150 = new Rectangle(0, 0, 2880, 1728 - 72);
         var gauge150 = new Rectangle(2500, 1656 + 6, 111, 60);
-        Assert.AreEqual(72, CardMotion.TravelFor(gauge150, work150, 144));
+        Assert.AreEqual(60, CardMotion.TravelFor(gauge150, work150, 144));
 
         // A top taskbar: the work area starts below the taskbar and the card leaves upward.
         var topWork = new Rectangle(0, 48, 1920, 1032);
         var topGauge = new Rectangle(1700, 4, 74, 40);
-        Assert.AreEqual(-48, CardMotion.TravelFor(topGauge, topWork, 96));
+        Assert.AreEqual(-40, CardMotion.TravelFor(topGauge, topWork, 96));
 
-        // No gauge, or one inside the work area (an auto-hidden taskbar): the fallback, down.
-        Assert.AreEqual(48, CardMotion.TravelFor(Rectangle.Empty, work, 96));
-        Assert.AreEqual(60, CardMotion.TravelFor(new Rectangle(1700, 900, 74, 40), work, 120));
+        // No gauge, or one inside the work area (an auto-hidden taskbar): down.
+        Assert.AreEqual(40, CardMotion.TravelFor(Rectangle.Empty, work, 96));
+        Assert.AreEqual(50, CardMotion.TravelFor(new Rectangle(1700, 900, 74, 40), work, 120));
     }
 }

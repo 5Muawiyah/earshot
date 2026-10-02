@@ -9,10 +9,10 @@ namespace Earshot.Widget;
 
 // Which of the card's focusable items has the keyboard focus. There are no child controls, so focus is
 // tracked here and painted as the system focus rectangle.
-internal enum WidgetCardFocus { Button, Switch, Gear, UpdateButton, Refresh }
+internal enum WidgetCardFocus { Button, Switch, Gear, UpdateButton, Refresh, Status }
 
 // Which control of a sub-page has the keyboard focus: the back button, or a footer button (Index is the button).
-internal enum SetupTargetKind { Back, Button }
+internal enum SetupTargetKind { Back, Button, Row }
 
 internal readonly record struct SetupTarget(SetupTargetKind Kind, int Index);
 
@@ -111,6 +111,10 @@ internal sealed partial class WidgetCard : Form
     private bool _leftButtonDownOnGear;
     private bool _leftButtonDownOnUpdate;
     private bool _leftButtonDownOnRefresh;
+    private bool _leftButtonDownOnStatus;
+
+    // The status row's chevron was pressed while Bluetooth is off: the presenter opens Windows' Bluetooth settings.
+    public event EventHandler? BluetoothSettingsRequested;
     private SetupTarget? _leftButtonDownOnSetupTarget;
 
     public WidgetCard(ILog log, bool notice = false)
@@ -322,7 +326,7 @@ internal sealed partial class WidgetCard : Form
                     }
                 }
 
-                _setupFocus = new SetupTarget(SetupTargetKind.Button, primary);
+                _setupFocus = setup.Buttons.Count == 0 ? new SetupTarget(SetupTargetKind.Back, 0) : new SetupTarget(SetupTargetKind.Button, primary);
             }
 
             _shownView = model.View;
@@ -365,6 +369,11 @@ internal sealed partial class WidgetCard : Form
             _focus = WidgetCardFocus.Button;
         }
 
+        if (_focus == WidgetCardFocus.Status && !BluetoothOff)
+        {
+            _focus = WidgetCardFocus.Button;
+        }
+
         SetClientSizeIfChanged(new Size(layout.Width, layout.Height));
         RepaintIfChanged();
     }
@@ -395,8 +404,28 @@ internal sealed partial class WidgetCard : Form
         int promptLines = setup.Prompt is null ? 1 : CardPaint.Lines(measure, setup.Prompt, contentWidth, _type, CardPlacement.Scale(14, _dpi), bold: true, CardPlacement.Scale(WidgetCardLayout.PromptLineAt96, _dpi));
         int captionLines = setup.Caption is null ? 1 : CardPaint.Lines(measure, setup.Caption, contentWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
         int subLines = setup.StatusSub is null ? 1 : CardPaint.Lines(measure, setup.StatusSub, textWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
-        return WidgetCardLayout.Setup(setup, _dpi, promptLines, captionLines, subLines, _look.TextScale);
+        int actionWidth = 0;
+        if (setup.Rows is not null)
+        {
+            // The updates page: the status caption wraps beside the tile and the action, so it is measured at the width left there.
+            int padding = CardPlacement.Scale(SettingsPageLayout.RowPadLeftAt96 + SettingsPageLayout.RowPadRightAt96, _dpi);
+            int gap = CardPlacement.Scale(WidgetCardLayout.StatusIconGapAt96, _dpi);
+            int surfaceWidth = CardPlacement.Scale(SubPageFrame.WidthAt96, _dpi) - (2 * CardPlacement.Scale(SettingsPageLayout.BodySideAt96, _dpi));
+            if (setup.Buttons.Count == 1)
+            {
+                actionWidth = new GraphicsTextMeasure(measure, _type).Width(setup.Buttons[0].Label, CardPlacement.Scale(14, _dpi)) + (2 * CardPlacement.Scale(SettingsPageLayout.ButtonPaddingAt96, _dpi));
+            }
+
+            int captionWidth = Math.Max(1, surfaceWidth - padding - CardPlacement.Scale(WidgetCardLayout.UpdatesTileAt96, _dpi) - (3 * gap) - actionWidth);
+            subLines = CardPaint.Lines(measure, UpdatesCaptionText(setup), captionWidth, _type, CardPlacement.Scale(12, _dpi), bold: false, CardPlacement.Scale(WidgetCardLayout.CaptionLineAt96, _dpi));
+        }
+
+        return WidgetCardLayout.Setup(setup, _dpi, promptLines, captionLines, subLines, _look.TextScale, actionWidth);
     }
+
+    // The updates page's status caption: the state in words, and its second line when it has one.
+    internal static string UpdatesCaptionText(SetupViewModel setup) =>
+        (setup.Status ?? string.Empty) + (setup.StatusSub is null ? string.Empty : "\n" + setup.StatusSub);
 
     // Advances the spinner to frame and repaints only its icon. The presenter's 100 ms timer calls this; a
     // whole Render (a new layout, a new size) is not needed for a turning arc.
@@ -453,6 +482,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnGear = false;
         _leftButtonDownOnUpdate = false;
         _leftButtonDownOnRefresh = false;
+        _leftButtonDownOnStatus = false;
         _leftButtonDownOnSetupTarget = null;
         _leftButtonDownOnSettingsTarget = null;
         EndScrollDrag();
@@ -581,6 +611,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnGear = e.Button == MouseButtons.Left && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
         _leftButtonDownOnUpdate = e.Button == MouseButtons.Left && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
         _leftButtonDownOnRefresh = e.Button == MouseButtons.Left && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
+        _leftButtonDownOnStatus = e.Button == MouseButtons.Left && !_notice && BluetoothOff && layout.WhereLine.Contains(e.Location);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -622,6 +653,7 @@ internal sealed partial class WidgetCard : Form
         bool activatesGear = e.Button == MouseButtons.Left && _leftButtonDownOnGear && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
         bool activatesUpdate = e.Button == MouseButtons.Left && _leftButtonDownOnUpdate && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
         bool activatesRefresh = e.Button == MouseButtons.Left && _leftButtonDownOnRefresh && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
+        bool activatesStatus = e.Button == MouseButtons.Left && _leftButtonDownOnStatus && BluetoothOff && layout.WhereLine.Contains(e.Location);
         ClearPressedFlags();
 
         if (activatesGear)
@@ -632,6 +664,11 @@ internal sealed partial class WidgetCard : Form
         else if (activatesRefresh)
         {
             _focus = WidgetCardFocus.Refresh;
+            ActivateFocused();
+        }
+        else if (activatesStatus)
+        {
+            _focus = WidgetCardFocus.Status;
             ActivateFocused();
         }
         else if (activatesUpdate)
@@ -697,7 +734,10 @@ internal sealed partial class WidgetCard : Form
         // two rows at half strength, which is what made a thin outline look faint on a dark card.
         g.PixelOffsetMode = PixelOffsetMode.Half;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        g.Clear(OverrideBackgroundForCaptureOnly ?? (PaintsOpaqueBackground ? _palette.Background : Color.FromArgb(0, 0, 0, 0)));
+        // The surface is the design's: the acrylic tint over the backdrop DWM blurs, or the solid surface when there is no backdrop
+        // (transparency effects off, or high contrast, where it is the window colour).
+        g.Clear(OverrideBackgroundForCaptureOnly ?? (PaintsOpaqueBackground ? Colours.Tokens.SolidSurface : Colours.Tokens.AcrylicTint));
+        DrawSurfaceStroke(g);
 
         if (OnSettingsPage && _model.Settings is { } settingsValues && _settingsLayout is { } settingsLayout)
         {
@@ -715,25 +755,13 @@ internal sealed partial class WidgetCard : Form
         DrawTitleRow(g, layout);
         if (layout.ShowColumns)
         {
-            DrawColumnLabel(g, layout.Left.Label, WidgetCopy.LeftLabel);
-            DrawColumnLabel(g, layout.Right.Label, WidgetCopy.RightLabel);
-            DrawColumnLabel(g, layout.Case.Label, WidgetCopy.CaseLabel);
             ShownBattery shown = _model.ShownParts;
-            DrawEarbudColumn(g, layout.Left, _model.Snapshot.Left, shown.Left, mirror: false);
-            DrawEarbudColumn(g, layout.Right, _model.Snapshot.Right, shown.Right, mirror: true);
-            DrawCaseColumn(g, layout.Case, shown.Case);
+            DrawEarbudColumn(g, layout.Left, WidgetCopy.LeftLabel, _model.Snapshot.Left, shown.Left, mirror: false);
+            DrawEarbudColumn(g, layout.Right, WidgetCopy.RightLabel, _model.Snapshot.Right, shown.Right, mirror: true);
+            DrawCaseColumn(g, layout.Case, WidgetCopy.CaseLabel, shown.Case);
         }
 
-        DrawIconLine(g, layout.WhereLine, FluentGlyphs.Location, WhereLineText, WhereLineText);
-        if (_model.Refresh is { IsProblem: true })
-        {
-            DrawProblemLine(g, layout.ReadLine, ReadLineText);
-        }
-        else if (ReadLineShort.Length > 0)
-        {
-            // A fresh reading shows no age: the line is empty and its place stays, drawn as nothing.
-            DrawIconLine(g, layout.ReadLine, AsksToOpenTheCase ? FluentGlyphs.Earbud : FluentGlyphs.Clock, ReadLineShort, ReadLineText);
-        }
+        DrawStatusRow(g, layout.WhereLine);
 
         if (layout.ShowUpdateLine)
         {
@@ -761,7 +789,7 @@ internal sealed partial class WidgetCard : Form
         if (_notice)
         {
             // The case-open card's close button: the Cancel glyph, or the clear button's own cross without the font.
-            if (!CardPaint.TryGlyph(g, FluentGlyphs.Cancel, layout.Gear, colours.Text, _dpi))
+            if (!CardPaint.TryGlyph(g, FluentGlyphs.Cancel, layout.Gear, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
             {
                 CardPaint.IconButton(g, layout.Gear, GlyphKind.Cross, enabled: true, colours, _dpi, focused: false, bordered: false);
             }
@@ -769,7 +797,7 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
-        if (!CardPaint.TryGlyph(g, FluentGlyphs.Settings, layout.Gear, colours.Text, _dpi))
+        if (!CardPaint.TryGlyph(g, FluentGlyphs.Settings, layout.Gear, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
         {
             CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
         }
@@ -823,6 +851,11 @@ internal sealed partial class WidgetCard : Form
             order.Add(WidgetCardFocus.Refresh);
         }
 
+        if (!_notice && BluetoothOff)
+        {
+            order.Add(WidgetCardFocus.Status);
+        }
+
         int at = order.IndexOf(_focus);
         _focus = order[(at + 1) % order.Count];
         Invalidate();
@@ -833,7 +866,7 @@ internal sealed partial class WidgetCard : Form
     {
         if (_focus == WidgetCardFocus.Button)
         {
-            if (!_model.ButtonEnabled)
+            if (!ButtonUsable)
             {
                 return;
             }
@@ -858,9 +891,16 @@ internal sealed partial class WidgetCard : Form
         }
         else if (_focus == WidgetCardFocus.Refresh)
         {
-            if (!_mainLayout.Refresh.IsEmpty)
+            if (!_mainLayout.Refresh.IsEmpty && !BluetoothOff)
             {
                 RefreshRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else if (_focus == WidgetCardFocus.Status)
+        {
+            if (BluetoothOff)
+            {
+                BluetoothSettingsRequested?.Invoke(this, EventArgs.Empty);
             }
         }
         else if (_focus == WidgetCardFocus.UpdateButton)
@@ -1048,19 +1088,41 @@ internal sealed partial class WidgetCard : Form
         path.CloseFigure();
     }
 
-    // "L", "R" or "Case" above the glyph, centred, in the same status ink the where/read lines use.
+    // The card's 1 px surface stroke, inside the edge, rounded to the window's 8 px corners.
+    private void DrawSurfaceStroke(Graphics g)
+    {
+        if (OverrideBackgroundForCaptureOnly is null && !_cornersApplied)
+        {
+            return;
+        }
+
+        CardColours colours = Colours;
+        using GraphicsPath path = CardPaint.RoundedRectangle(
+            new RectangleF(0.5f, 0.5f, ClientSize.Width - 1, ClientSize.Height - 1), CardPlacement.Scale(SurfaceRadiusAt96, _dpi));
+        using var pen = new Pen(colours.SurfaceStroke, 1f);
+        g.DrawPath(pen, path);
+    }
+
+    // The surface's corner radius, from the design.
+    internal const int SurfaceRadiusAt96 = 8;
+
+    // "L", "R" or "Case" above the mark, centred, Caption in the secondary text colour.
     private void DrawColumnLabel(Graphics g, Rectangle bounds, string text)
     {
-        using Font font = _type.Role(TypeRole.CaptionStrong);
-        using var brush = new SolidBrush(_palette.Status);
-        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Near };
+        using Font font = _type.Role(TypeRole.Caption);
+        using var brush = new SolidBrush(Colours.TextSecondary);
+        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         g.DrawString(text, font, brush, bounds, format);
     }
 
-    private void DrawEarbudColumn(Graphics g, WidgetCardLayout.ColumnLayout column, PartReading part, ShownPart shown, bool mirror)
+    // The mark is a filled shape in the primary text colour, never the accent: the earbud in a square of the mark's height.
+    private void DrawEarbudColumn(Graphics g, WidgetCardLayout.ColumnLayout column, string label, PartReading part, ShownPart shown, bool mirror)
     {
-        using GraphicsPath glyph = BudGlyphPath(column.Glyph, mirror);
-        using (var brush = new SolidBrush(_palette.Title))
+        DrawColumnLabel(g, column.Label, label);
+        int side = Math.Min(column.Glyph.Width, column.Glyph.Height);
+        var square = new Rectangle(column.Glyph.X + ((column.Glyph.Width - side) / 2), column.Glyph.Y, side, side);
+        using GraphicsPath glyph = BudGlyphPath(square, mirror);
+        using (var brush = new SolidBrush(Colours.Text))
         {
             g.FillPath(brush, glyph);
         }
@@ -1069,18 +1131,19 @@ internal sealed partial class WidgetCard : Form
         // shown must not be drawn, and nothing decodes an in-ear bit today, so this is only ever a guard.
         if (shown.HasValue && part.InEar == true)
         {
-            DrawInEarMark(g, column.Glyph, mirror);
+            DrawInEarMark(g, square, mirror);
         }
 
         DrawBatteryPart(g, column, shown);
     }
 
-    private void DrawCaseColumn(Graphics g, WidgetCardLayout.ColumnLayout column, ShownPart shown)
+    private void DrawCaseColumn(Graphics g, WidgetCardLayout.ColumnLayout column, string label, ShownPart shown)
     {
+        DrawColumnLabel(g, column.Label, label);
         (GraphicsPath lid, GraphicsPath box) = CaseGlyphPaths(column.Glyph);
         using (lid)
         using (box)
-        using (var brush = new SolidBrush(_palette.Title))
+        using (var brush = new SolidBrush(Colours.Text))
         {
             g.FillPath(brush, lid);
             g.FillPath(brush, box);
@@ -1089,42 +1152,68 @@ internal sealed partial class WidgetCard : Form
         DrawBatteryPart(g, column, shown);
     }
 
-    // A live value is drawn in full ink and the accent; a last reading or an estimate in the stale style, its line saying
-    // its age, and an estimate with "≈" before it (WidgetCopy.PartLine). The bar and the charging bolt are absent entirely
-    // when Percent is null: there is nothing to show a bar or a bolt for. The words "No reading" take the percent line's own place instead (the owner's own
-    // instruction): never a number, never a dash standing in for a reading that was never taken.
+    // The ink a value is drawn in: primary while it is fresh, the tertiary token when it is a last reading or an estimate
+    // (the stale style, which replaced a 55% opacity of the primary ink).
+    internal Color ValueInk(ShownPart shown) => shown.Fresh ? Colours.Text : Colours.TextTertiary;
+
+    // A live value is drawn in the primary ink and the accent; a last reading or an estimate in the tertiary token, its
+    // read-time line saying its age, and an estimate with "≈" before it. The bar and the charging bolt are absent entirely
+    // when Percent is null: there is nothing to show a bar or a bolt for. The words "No reading" take the value's own place
+    // instead: never a number, never a dash standing in for a reading that was never taken. The read-time line is always
+    // reserved and empty while the value is fresh (no ticking seconds).
     private void DrawBatteryPart(Graphics g, WidgetCardLayout.ColumnLayout column, ShownPart shown)
     {
+        CardColours colours = Colours;
         if (shown.Percent is not { } percent)
         {
-            DrawLine(g, column.Percent, WidgetCopy.Percent(null), _palette.Status);
+            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Number, StringAlignment.Center);
             return;
         }
 
-        using (var track = new SolidBrush(Color.FromArgb(64, _palette.Title)))
+        // A 1 px track centred on the bar's 3 px, and the fill the full 3.
+        int trackHeight = Math.Max(1, CardPlacement.Scale(1, _dpi));
+        using (var track = new SolidBrush(colours.Track))
         {
-            g.FillRectangle(track, column.Bar);
+            g.FillRectangle(track, column.Bar.X, column.Bar.Y + ((column.Bar.Height - trackHeight) / 2), column.Bar.Width, trackHeight);
         }
 
         int filled = (int)Math.Round(column.Bar.Width * Math.Clamp(percent, 0, 100) / 100.0);
         if (filled > 0)
         {
-            // The bar is filled with the accent colour, never a fixed blue, and with the muted ink when the value
-            // is not fresh.
-            using var fill = new SolidBrush(shown.Fresh ? Colours.Accent : MutedInk(_palette.Title));
+            using var fill = new SolidBrush(shown.Fresh ? colours.Accent : colours.TextTertiary);
             g.FillRectangle(fill, column.Bar.X, column.Bar.Y, filled, column.Bar.Height);
         }
 
+        Color ink = ValueInk(shown);
+        DrawText(g, column.Percent, WidgetCopy.PercentText(percent, shown.Estimated), ink, TypeRole.Number, StringAlignment.Center);
         if (shown.Charging == true)
         {
-            DrawBolt(g, column.Bar, shown.Fresh);
+            DrawBolt(g, column.BoltSlot, ink);
         }
 
-        using Font font = _type.Role(TypeRole.Number);
-        using var textBrush = new SolidBrush(shown.Fresh ? _palette.Status : MutedInk(_palette.Status));
-        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
-        g.DrawString(WidgetCopy.PartLine(shown, _model.Now), font, textBrush, new RectangleF(column.Percent.X, column.Percent.Y, column.Percent.Width, column.Percent.Height), format);
+        if (!shown.Fresh && shown.ReadAt is { } at)
+        {
+            DrawReadTime(g, column.ReadTime, WidgetCopy.StaleAgeAmount(_model.Now - at), colours.TextTertiary);
+        }
     }
+
+    // The clock (12, Read time E823) and the age, centred as one run, in the tertiary token.
+    private void DrawReadTime(Graphics g, Rectangle bounds, string age, Color ink)
+    {
+        using Font font = _type.Role(TypeRole.Caption);
+        using var format = new StringFormat(StringFormat.GenericTypographic) { FormatFlags = StringFormatFlags.NoWrap };
+        float textWidth = g.MeasureString(age, font, int.MaxValue, format).Width;
+        int box = TextFit.Grow(ReadTimeGlyphAt96, _dpi, _look.TextScale);
+        int gap = CardPlacement.Scale(4, _dpi);
+        float run = box + gap + textWidth;
+        int left = bounds.X + (int)Math.Max(0, (bounds.Width - run) / 2f);
+        var iconRect = new Rectangle(left, bounds.Y + ((bounds.Height - box) / 2), box, box);
+        _ = CardPaint.TryGlyph(g, FluentGlyphs.ReadTime, iconRect, ink, _dpi, ReadTimeGlyphAt96, _look.TextScale);
+        DrawText(g, new Rectangle(iconRect.Right + gap, bounds.Y, Math.Max(1, bounds.Right - iconRect.Right - gap), bounds.Height), age, ink, TypeRole.Caption, StringAlignment.Near);
+    }
+
+    // The clock and the charging bolt are 12 epx glyphs.
+    internal const int ReadTimeGlyphAt96 = 12;
 
     // A small filled arc beside the bud, on the side away from the mirrored head so it never overlaps it.
     private void DrawInEarMark(Graphics g, Rectangle glyphBounds, bool mirror)
@@ -1132,17 +1221,22 @@ internal sealed partial class WidgetCard : Form
         float d = glyphBounds.Width * 0.22f;
         float x = mirror ? glyphBounds.Left - (d * 0.2f) : glyphBounds.Right - (d * 0.8f);
         float y = glyphBounds.Bottom - d;
-        using var brush = new SolidBrush(_palette.Title);
+        using var brush = new SolidBrush(Colours.Text);
         g.FillEllipse(brush, x, y, d, d);
     }
 
-    // A five-point lightning bolt at the bar's end. Layout choice, matching GaugeRenderer's own bolt shape.
-    private void DrawBolt(Graphics g, Rectangle bar, bool fresh)
+    // The charging bolt, Fluent E945 at 12, in the reserved slot right of the value; five points drawn where no icon font is installed.
+    private void DrawBolt(Graphics g, Rectangle slot, Color ink)
     {
-        float h = bar.Height * 2.2f;
+        if (CardPaint.TryGlyph(g, FluentGlyphs.Bolt, slot, ink, _dpi, ReadTimeGlyphAt96, _look.TextScale))
+        {
+            return;
+        }
+
+        float h = slot.Height;
         float w = h * 0.6f;
-        float x = bar.Right + 2;
-        float y = bar.Y + (bar.Height / 2f) - (h / 2f);
+        float x = slot.X + ((slot.Width - w) / 2f);
+        float y = slot.Y;
         PointF[] points =
         [
             new PointF(x + (w * 0.55f), y),
@@ -1152,82 +1246,144 @@ internal sealed partial class WidgetCard : Form
             new PointF(x + w, y + (h * 0.38f)),
             new PointF(x + (w * 0.58f), y + (h * 0.38f)),
         ];
-        using var brush = new SolidBrush(fresh ? _palette.Title : MutedInk(_palette.Title));
+        using var brush = new SolidBrush(ink);
         g.FillPolygon(brush, points);
     }
 
-    // A line of text with its icon: the icon at the left, then the words. With no icon font the line says it in full
-    // words instead, since the icon is what made the short ones clear.
-    private void DrawIconLine(Graphics g, Rectangle bounds, char glyph, string text, string fullText, TypeRole role = TypeRole.Caption)
+    // The status row: its icon (16), then the words (Body) and, with Bluetooth off, a chevron to Bluetooth settings. Nothing
+    // heard (and the case not yet opened) is the caution ink with the Open the case glyph; Bluetooth off has its own glyph;
+    // otherwise On this PC, or the iPhone, in the primary ink.
+    private void DrawStatusRow(Graphics g, Rectangle bounds)
     {
-        int box = CardPlacement.Scale(CardPaint.GlyphSizeAt96, _dpi);
+        CardColours colours = Colours;
+        (char glyph, string text, Color ink) = StatusRow;
+        int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
         var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
-        if (!CardPaint.TryGlyph(g, glyph, iconRect, _palette.Status, _dpi))
+        int gap = CardPlacement.Scale(8, _dpi);
+        int chevron = BluetoothOff ? TextFit.Grow(ChevronGlyphAt96, _dpi, _look.TextScale) : 0;
+        if (!CardPaint.TryGlyph(g, glyph, iconRect, ink, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
         {
-            DrawLine(g, bounds, fullText, _palette.Status, role);
-            return;
+            DrawText(g, bounds, text, ink, TypeRole.Body, StringAlignment.Near);
+        }
+        else
+        {
+            int textX = iconRect.Right + gap;
+            DrawText(g, new Rectangle(textX, bounds.Y, Math.Max(1, bounds.Right - chevron - textX), bounds.Height), text, ink, TypeRole.Body, StringAlignment.Near);
         }
 
-        int indent = box + CardPlacement.Scale(8, _dpi);
-        DrawLine(g, new Rectangle(bounds.X + indent, bounds.Y, Math.Max(1, bounds.Width - indent), bounds.Height), text, _palette.Status, role);
+        if (BluetoothOff)
+        {
+            if (!_notice && _focus == WidgetCardFocus.Status && FocusShown)
+            {
+                CardPaint.Focus(g, bounds, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
+            }
+
+            var chevronRect = new Rectangle(bounds.Right - chevron, bounds.Y + ((bounds.Height - chevron) / 2), chevron, chevron);
+            _ = CardPaint.TryGlyph(g, FluentGlyphs.ChevronRight, chevronRect, colours.TextSecondary, _dpi, ChevronGlyphAt96, _look.TextScale);
+        }
     }
 
-    // A line that says something is wrong (a refresh that heard nothing, Bluetooth off): the caution triangle in the
-    // caution colour in the icon's place, then the words. The triangle is drawn, not a font glyph, so it is there
-    // where no icon font is installed. The sub-page triangle is 20 px; here it is scaled into the 16 px icon box.
-    private void DrawProblemLine(Graphics g, Rectangle bounds, string text)
+    // The chevrons are 12 epx glyphs.
+    internal const int ChevronGlyphAt96 = 12;
+
+    // What the status row holds now, for the painter, the tooltip and tests.
+    internal (char Glyph, string Text, Color Ink) StatusRow
     {
-        int box = CardPlacement.Scale(CardPaint.GlyphSizeAt96, _dpi);
-        var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
-        GraphicsState saved = g.Save();
-        g.TranslateTransform(iconRect.X, iconRect.Y);
-        float shrink = CardPaint.GlyphSizeAt96 / 20f;
-        g.ScaleTransform(shrink, shrink);
-        CardPaint.CautionIcon(g, new Rectangle(0, 0, 20, 20), Colours.Caution, _dpi);
-        g.Restore(saved);
+        get
+        {
+            CardColours colours = Colours;
+            if (BluetoothOff)
+            {
+                return (FluentGlyphs.BluetoothOff, WidgetCopy.BluetoothOff, colours.Text);
+            }
 
-        int indent = box + CardPlacement.Scale(8, _dpi);
-        DrawLine(g, new Rectangle(bounds.X + indent, bounds.Y, Math.Max(1, bounds.Width - indent), bounds.Height), text, _palette.Status);
+            if (_model.Refresh is { IsProblem: true } problem && problem.Outcome == BatteryRefreshOutcome.NothingHeard)
+            {
+                return (FluentGlyphs.Warning, WidgetCopy.OpenTheCase, colours.Caution);
+            }
+
+            if (_model.Refresh is { IsProblem: true } other)
+            {
+                return (FluentGlyphs.Warning, other.ReadLine ?? string.Empty, colours.Caution);
+            }
+
+            if (AsksToOpenTheCase)
+            {
+                return (FluentGlyphs.Warning, WidgetCopy.OpenTheCaseToShowBattery, colours.Caution);
+            }
+
+            char glyph = !_notice && _model.Snapshot.Where == AirPodsWhere.Elsewhere ? FluentGlyphs.CellPhone : FluentGlyphs.OnThisPc;
+            return (glyph, WhereLineText, colours.Text);
+        }
     }
 
-    private void DrawLine(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role = TypeRole.Caption)
+    // Bluetooth is off: the refresh outcome says so, or the watcher stopped for the radio's absence. The refresh icon and
+    // Connect are disabled while it is.
+    internal bool BluetoothOff =>
+        !_notice
+        && (_model.Refresh?.Outcome == BatteryRefreshOutcome.BluetoothOff
+            || (_model.Snapshot.Watcher == WidgetWatcherState.Stopped && _model.Snapshot.WatcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode));
+
+    private void DrawText(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role, StringAlignment horizontal)
     {
         using Font font = _type.Role(role);
         using var brush = new SolidBrush(colour);
-        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = horizontal, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
         g.DrawString(text, font, brush, bounds, format);
     }
 
+    // The button: 4 px corners, the accent when it connects (the text on it the token for text on accent) and the standard control
+    // otherwise; the disabled control fill and the disabled text colour while it cannot be used.
     private void DrawButton(Graphics g, Rectangle rect)
     {
+        CardColours colours = Colours;
         bool connect = _model.ConnectIntent;
-        Color fill = connect
-            ? Colours.Accent
-            : (_dark ? Color.FromArgb(0x3A, 0x3A, 0x3A) : Color.FromArgb(0xE4, 0xE4, 0xE4));
-        if (!_model.ButtonEnabled)
-        {
-            fill = Color.FromArgb(120, fill);
-        }
-
-        Color text = connect ? Colours.OnAccent : _palette.Title;
-        using var path = new GraphicsPath();
-        AddRoundedRect(path, rect, rect.Height / 2f);
+        bool enabled = ButtonUsable;
+        Color fill = !enabled ? colours.ControlFillDisabled : connect ? colours.Accent : colours.ControlFill;
+        Color stroke = !enabled ? colours.ControlStroke : connect ? colours.Accent : colours.ControlStroke;
+        Color text = !enabled ? colours.TextDisabled : connect ? colours.OnAccent : colours.Text;
+        int radius = CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi);
+        using GraphicsPath path = CardPaint.RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
         using (var brush = new SolidBrush(fill))
         {
             g.FillPath(brush, path);
         }
 
-        using (Font font = _type.Role(TypeRole.Body))
-        using (var textBrush = new SolidBrush(text))
-        using (var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+        using (var pen = new Pen(stroke, 1f))
         {
-            g.DrawString(connect ? WidgetCopy.Connect : WidgetCopy.Disconnect, font, textBrush, rect, format);
+            g.DrawPath(pen, path);
         }
 
+        if (enabled && !connect)
+        {
+            using var bottom = new Pen(colours.ControlStrokeBottom, 1f);
+            g.DrawLine(bottom, rect.Left + radius, rect.Bottom - 1, rect.Right - radius - 1, rect.Bottom - 1);
+        }
+
+        DrawText(g, rect, connect ? WidgetCopy.Connect : WidgetCopy.Disconnect, text, TypeRole.Body, StringAlignment.Center);
         if (!_notice && _focus == WidgetCardFocus.Button && FocusShown)
         {
-            CardPaint.Focus(g, rect, rect.Height / 2, Colours, _dpi);
+            CardPaint.Focus(g, rect, radius, colours, _dpi);
         }
+    }
+
+    // Whether Connect and Disconnect can be pressed: the model says so, and Bluetooth is not off.
+    internal bool ButtonUsable => _model.ButtonEnabled && !BluetoothOff;
+
+    // A line of text with its icon at the left, in the primary ink; with no icon font the words alone.
+    private void DrawIconLine(Graphics g, Rectangle bounds, char glyph, string text, TypeRole role = TypeRole.Body)
+    {
+        CardColours colours = Colours;
+        int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
+        var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
+        if (!CardPaint.TryGlyph(g, glyph, iconRect, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
+        {
+            DrawText(g, bounds, text, colours.Text, role, StringAlignment.Near);
+            return;
+        }
+
+        int indent = box + CardPlacement.Scale(8, _dpi);
+        DrawText(g, new Rectangle(bounds.X + indent, bounds.Y, Math.Max(1, bounds.Width - indent), bounds.Height), text, colours.Text, role, StringAlignment.Near);
     }
 
     // The switch row: the label, and the design's toggle (accent when on, no fill and a secondary-text outline when
@@ -1238,7 +1394,7 @@ internal sealed partial class WidgetCard : Form
         int trackWidth = CardPlacement.Scale(WidgetCardLayout.ToggleWidthAt96, _dpi);
         int trackHeight = CardPlacement.Scale(WidgetCardLayout.ToggleHeightAt96, _dpi);
         var labelRect = new Rectangle(rect.X, rect.Y, Math.Max(0, rect.Width - trackWidth - 8), rect.Height);
-        DrawIconLine(g, labelRect, FluentGlyphs.EarbudForThisPc(), WidgetCopy.AutoPauseSwitch, WidgetCopy.NamePauseBud, TypeRole.Body);
+        DrawIconLine(g, labelRect, FluentGlyphs.EarbudForThisPc(), WidgetCopy.AutoPauseSwitch);
 
         var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
         CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi);
@@ -1260,6 +1416,14 @@ internal sealed partial class WidgetCard : Form
             for (int i = 0; i < setup.Buttons.Count; i++)
             {
                 targets.Add(new SetupTarget(SetupTargetKind.Button, i));
+            }
+
+            if (_setupLayout is { } layout)
+            {
+                foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
+                {
+                    targets.Add(new SetupTarget(SetupTargetKind.Row, row.Index));
+                }
             }
         }
 
@@ -1283,6 +1447,19 @@ internal sealed partial class WidgetCard : Form
             if (layout.Frame.Buttons[i].Contains(point))
             {
                 return new SetupTarget(SetupTargetKind.Button, i);
+            }
+        }
+
+        if (!layout.Action.IsEmpty && layout.Action.Contains(point))
+        {
+            return new SetupTarget(SetupTargetKind.Button, 0);
+        }
+
+        foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
+        {
+            if (row.Surface.Contains(point))
+            {
+                return new SetupTarget(SetupTargetKind.Row, row.Index);
             }
         }
 
@@ -1317,7 +1494,7 @@ internal sealed partial class WidgetCard : Form
                 SetupActionRequested?.Invoke(this, SetupAction.Back);
                 break;
             case Keys.Enter:
-                if (_setupFocus.Kind == SetupTargetKind.Button)
+                if (_setupFocus.Kind != SetupTargetKind.Back)
                 {
                     ActivateSetupTarget(_setupFocus);
                 }
@@ -1356,6 +1533,14 @@ internal sealed partial class WidgetCard : Form
                 }
 
                 break;
+            case SetupTargetKind.Row:
+                SetupActionRequested?.Invoke(this, target.Index switch
+                {
+                    0 => SetupAction.ToggleAutoCheck,
+                    1 => SetupAction.WhatsNew,
+                    _ => SetupAction.Repair,
+                });
+                break;
         }
     }
 
@@ -1366,6 +1551,12 @@ internal sealed partial class WidgetCard : Form
         SetupTarget focus = _setupFocus;
 
         SubPageFrame.DrawHeader(g, layout.Frame, setup.Title, setup.Step, colours, _type, _dpi, backFocused: focusVisible && focus.Kind == SetupTargetKind.Back);
+
+        if (setup.Rows is { } updateRows)
+        {
+            DrawUpdatesPage(g, setup, updateRows, layout, colours, focusVisible, focus);
+            return;
+        }
 
         if (setup.Prompt is not null)
         {
@@ -1413,6 +1604,116 @@ internal sealed partial class WidgetCard : Form
         var buttons = setup.Buttons.Select(b => (b.Label, b.Primary)).ToList();
         int focusedButton = focusVisible && focus.Kind == SetupTargetKind.Button ? focus.Index : -1;
         SubPageFrame.DrawFooter(g, layout.Frame, buttons, colours, _type, _dpi, focusedButton);
+    }
+
+    // The updates page: the status row (the accent tile with the earbud mark in the text on accent, the title, the caption and the action),
+    // then Check automatically, What's new and Repair, each on a surface of the settings page's own fill and stroke.
+    private void DrawUpdatesPage(Graphics g, SetupViewModel setup, UpdatesRows rows, WidgetCardLayout.SetupLayout layout, CardColours colours, bool focusVisible, SetupTarget focus)
+    {
+        int radius = CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi);
+        int twelve = CardPlacement.Scale(12, _dpi);
+        int fourteen = CardPlacement.Scale(14, _dpi);
+
+        void Surface(Rectangle rect)
+        {
+            using GraphicsPath path = CardPaint.RoundedRectangle(new RectangleF(rect.X + 0.5f, rect.Y + 0.5f, rect.Width - 1, rect.Height - 1), radius);
+            using var fill = new SolidBrush(colours.RowFill);
+            g.FillPath(fill, path);
+            using var pen = new Pen(colours.RowStroke, 1f);
+            g.DrawPath(pen, path);
+        }
+
+        Surface(layout.StatusSurface);
+        using (GraphicsPath tilePath = CardPaint.RoundedRectangle(layout.Tile, radius))
+        using (var tileFill = new SolidBrush(colours.Accent))
+        {
+            g.FillPath(tileFill, tilePath);
+        }
+
+        DrawTileMark(g, layout.Tile, colours.OnAccent);
+        string title = rows.Version is { } version ? WidgetCopy.CardApp + " " + version : WidgetCopy.CardApp;
+        CardPaint.Text(g, title, layout.StatusTitle, _type, fourteen, bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.Wrapped(g, UpdatesCaptionText(setup), layout.StatusCaption, _type, twelve, bold: false, setup.Icon == SetupIcon.Caution ? colours.Caution : colours.TextSecondary);
+        if (setup.Icon == SetupIcon.Spinner && layout.Action.IsEmpty)
+        {
+            CardPaint.Spinner(g, layout.StatusIcon, colours.Accent, setup.SpinnerFrame, _dpi);
+        }
+
+        if (!layout.Action.IsEmpty && setup.Buttons.Count == 1)
+        {
+            // The action is the accent when it is the page's main one (Install, Restart), the standard button otherwise (Check).
+            CardPaint.Button(g, layout.Action, setup.Buttons[0].Label, setup.Buttons[0].Primary, colours, _type, _dpi, focusVisible && focus == new SetupTarget(SetupTargetKind.Button, 0));
+        }
+
+        if (setup.ShowProgress && !layout.Progress.IsEmpty)
+        {
+            DrawProgress(g, setup, layout.Progress, colours);
+        }
+
+        if (setup.Caption is not null && !layout.Caption.IsEmpty)
+        {
+            CardPaint.Wrapped(g, setup.Caption, layout.Caption, _type, twelve, bold: false, colours.TextSecondary);
+        }
+
+        foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
+        {
+            Surface(row.Surface);
+            char glyph = row.Index switch { 0 => FluentGlyphs.Sync, 1 => FluentGlyphs.WhatsNew, _ => FluentGlyphs.Repair };
+            string label = row.Index switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, _ => WidgetCopy.RepairEarshot };
+            CardPaint.Glyph(g, glyph, row.Icon, colours.Text, _dpi);
+            CardPaint.Text(g, label, row.Label, _type, fourteen, bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
+            bool focused = focusVisible && focus == new SetupTarget(SetupTargetKind.Row, row.Index);
+            switch (row.Index)
+            {
+                case 0:
+                    CardPaint.Toggle(g, row.Control, rows.AutoCheck, colours, _dpi);
+                    if (focused)
+                    {
+                        CardPaint.Focus(g, row.Control, row.Control.Height / 2, colours, _dpi);
+                    }
+
+                    break;
+                case 1:
+                    if (!CardPaint.TryGlyph(g, FluentGlyphs.OpenExternal, row.Control, colours.TextSecondary, _dpi, FluentGlyphs.ChevronSizeAt96, 1.0))
+                    {
+                        CardPaint.Chevron(g, row.Control, up: false, colours.TextSecondary, _dpi);
+                    }
+
+                    if (focused)
+                    {
+                        CardPaint.Focus(g, row.Surface, radius, colours, _dpi);
+                    }
+
+                    break;
+                default:
+                    CardPaint.SmallButton(g, row.Control, WidgetCopy.RepairButton, colours, _type, _dpi, focused);
+                    break;
+            }
+        }
+
+        var buttons = setup.Buttons.Select(b => (b.Label, b.Primary)).ToList();
+        int focusedButton = focusVisible && focus.Kind == SetupTargetKind.Button ? focus.Index : -1;
+        if (layout.Action.IsEmpty)
+        {
+            SubPageFrame.DrawFooter(g, layout.Frame, buttons, colours, _type, _dpi, focusedButton);
+        }
+    }
+
+    // The earbud pair in the status tile, in the colour for text on the accent: the gauge's own pair scaled to the tile.
+    private static void DrawTileMark(Graphics g, Rectangle tile, Color ink)
+    {
+        var grid = new GaugeLayout(
+            96, 0, 0, tile, 0, 0, tile, Rectangle.Empty, Rectangle.Empty, Size.Empty, 0, 0, 0);
+        (RectangleF[] shapes, float radius) = grid.EarbudShapes();
+        using var path = new GraphicsPath { FillMode = FillMode.Winding };
+        foreach (RectangleF shape in shapes)
+        {
+            using GraphicsPath one = CardPaint.RoundedRectangle(shape, radius);
+            path.AddPath(one, connect: false);
+        }
+
+        using var brush = new SolidBrush(ink);
+        g.FillPath(brush, path);
     }
 
     // The download's bar, 4 px, with its percentage 36 wide at the right. While the size is not known the bar has

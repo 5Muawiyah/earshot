@@ -76,4 +76,27 @@ internal sealed partial class TrayContext
             ShowCard(TrayStatus.AppName, WidgetCopy.SoundSettingsNotOpened, place);
         }
     }
+
+    // The card's "Bluetooth off" row: opens Windows' Bluetooth page, which turns the radio on. Opens a page and changes nothing.
+    // https://learn.microsoft.com/en-us/windows/apps/develop/launch/launch-settings-app
+    internal const string BluetoothSettingsUri = "ms-settings:bluetooth";
+
+    internal void OpenBluetoothSettings(CardPlace place)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        Launch("open bluetooth settings", () => OpenBluetoothSettingsAsync(place), place);
+    }
+
+    private async Task OpenBluetoothSettingsAsync(CardPlace place)
+    {
+        bool opened = await _settingsLauncher.OpenAsync(BluetoothSettingsUri, CancellationToken.None);
+        if (!opened)
+        {
+            ShowCard(TrayStatus.AppName, WidgetCopy.BluetoothSettingsNotOpened, place);
+        }
+    }
 }
