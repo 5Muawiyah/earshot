@@ -9,7 +9,7 @@
       2. empties publish\Earshot, because the publish step refuses to write its file
          manifest into a folder that already holds files it did not write;
       3. dotnet publish src\Earshot -c Release -r win-x64 --self-contained true
-         -p:PublishSingleFile=false, in folder form, never single file;
+         -p:PublishSingleFile=false -p:PublishReadyToRun=true, in folder form, never single file;
       4. checks Earshot.files.json is there, that every file it lists is present with
          the SHA-256 it records, and that the folder holds nothing else. install reads
          the same manifest, so a release that fails here could not be installed;
@@ -107,7 +107,10 @@ $publishLog = $result.log
 # 150 MB self-contained folder is a fair price for a log the owner can act on. (Measured on the v1.1
 # audio streaming build. The folder was 125 MB before the target framework gained a Windows version:
 # that brought in the WinRT projection, Microsoft.Windows.SDK.NET.dll and WinRT.Runtime.dll, 25 MB.)
-& dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o $publishDir *> $publishLog
+# PublishReadyToRun precompiles the managed code to native code beside the IL, so the tray starts without
+# the JIT compiling its start-up path. It is set here, on the command line with -r win-x64, and not in the
+# project file: ReadyToRun needs a runtime identifier, which the project leaves unset (see Earshot.csproj).
+& dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishReadyToRun=true -o $publishDir *> $publishLog
 $publishExit = $LASTEXITCODE
 $publishText = Get-Content $publishLog -Raw
 if ($null -eq $publishText) { $publishText = '' }

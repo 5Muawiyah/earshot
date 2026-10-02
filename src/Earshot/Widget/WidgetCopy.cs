@@ -200,6 +200,17 @@ internal static class WidgetCopy
 
     public static string LowBatteryCaseText(int percent) => LowBatteryText(CaseLabel, percent);
 
+    // The fully charged notice's line: "Left AirPod at 100%, fully charged" for a live reading, and for an estimate
+    // "Left AirPod ≈100%, estimated", with the sign before the value as everywhere an estimate is shown.
+    public static string FullyChargedLeftText(bool estimated) => FullyChargedText(LeftAirPodLabel, estimated);
+
+    public static string FullyChargedRightText(bool estimated) => FullyChargedText(RightAirPodLabel, estimated);
+
+    public static string FullyChargedCaseText(bool estimated) => FullyChargedText(CaseLabel, estimated);
+
+    private static string FullyChargedText(string partLabel, bool estimated) =>
+        estimated ? partLabel + " " + EstimateSign + "100%, estimated" : partLabel + " at 100%, fully charged";
+
     private static string LowBatteryText(string partLabel, int percent) =>
         partLabel + " at " + percent.ToString(CultureInfo.InvariantCulture) + "%";
 

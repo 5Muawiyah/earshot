@@ -38,6 +38,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // Where the owner's pair's last readings and learned rates are kept between runs, or null to keep them in memory only.
     private readonly ILastReadingStore? _lastReadingStore;
 
+    // Where the live readings of the linked pair are kept for the history page, or null to keep none.
+    private readonly IHistoryStore? _history;
+
     // The decode table is the documented one. Only a test hands in another, to exercise bits the documented table
     // does not set (in-ear, the lid).
     private readonly ProximityDecodeTable _table;
@@ -154,9 +157,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         TimeProvider timeProvider,
         IPairedModelSource pairedModel,
         IHandsFreeBatterySource? handsFree = null,
-        ILastReadingStore? lastReadings = null)
+        ILastReadingStore? lastReadings = null,
+        IHistoryStore? history = null)
         : this(sourceFactory, settings, deviceMonitor, blockStatus, log, uiPost, timeProvider, pairedModel, handsFree, ProximityDecodeTable.Documented,
-            lastReadings: lastReadings)
+            lastReadings: lastReadings, history: history)
     {
     }
 
@@ -174,7 +178,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         IHandsFreeBatterySource? handsFree,
         ProximityDecodeTable table,
         Action<Action>? runInBackground = null,
-        ILastReadingStore? lastReadings = null)
+        ILastReadingStore? lastReadings = null,
+        IHistoryStore? history = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFactory);
         ArgumentNullException.ThrowIfNull(settings);
@@ -200,6 +205,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         // The last readings are read once, at start, and shown from then on until newer ones are heard.
         _lastReadingStore = lastReadings;
+        _history = history;
         _book = lastReadings?.Load() ?? LastReadingBook.Empty;
         _savedBook = _book;
         _highWater = new EstimateHighWater(_book.Marks);
@@ -1257,6 +1263,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         if (toSave is not null)
         {
             _lastReadingStore?.Save(toSave);
+        }
+
+        // Only a message of the linked set gets here as applied, and it is live: the history keeps nothing else.
+        if (applied is not null)
+        {
+            _history?.Record(applied, at);
         }
 
         if (heard is not null)

@@ -325,4 +325,40 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         Assert.AreEqual(LatchState.Armed, service.LeftLatchStateForTest);
         Assert.AreEqual(LatchState.Armed, service.CaseLatchStateForTest);
     }
+    [TestMethod]
+    public void ALiveLowCaseAlertsOnceAndAnEstimatedOrLastLowCaseNever()
+    {
+        const ushort Model = BroadcastFixtures.PairedModel;
+        using LowBatteryAlertService service = NewService();
+
+        _status.Raise(Snapshot(box: 15));
+        _status.Raise(Snapshot(box: 15));
+        Assert.AreEqual(1, _notifier.Calls.Count);
+        Assert.AreEqual(("Earshot", "Case at 15%"), _notifier.Calls[0]);
+
+        // A second service, so the case latch starts armed: the case shown as an estimate (5% charging an hour ago at
+        // 5 points an hour is 10%) and as a last reading is not a live value, so it alerts nothing.
+        using LowBatteryAlertService fresh = NewService();
+        DateTimeOffset readAt = _clock.GetUtcNow() - TimeSpan.FromHours(1);
+        var estimated = new LastReadingBook(
+            null, null, new SavedReading(5, true, readAt, Model),
+            [new LearnedRate(Model, ChargePart.Case, 5, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]);
+        WidgetSnapshot estimate = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
+        {
+            Where = AirPodsWhere.ThisPc,
+            LastReadings = estimated,
+            PairedModel = Model,
+            HighWater = new EstimateHighWater(),
+        };
+        Assert.AreEqual(ReadingKind.Estimated, BatteryFreshness.Shown(estimate, _clock.GetUtcNow()).Case.Kind);
+        _notifier.Calls.Clear();
+
+        _status.Raise(estimate);
+        WidgetSnapshot last = estimate with { LastReadings = new LastReadingBook(null, null, new SavedReading(10, false, readAt, Model), []) };
+        Assert.AreEqual(ReadingKind.Last, BatteryFreshness.Shown(last, _clock.GetUtcNow()).Case.Kind);
+        _status.Raise(last);
+
+        Assert.AreEqual(0, _notifier.Calls.Count);
+        Assert.AreEqual(LatchState.Armed, fresh.CaseLatchStateForTest);
+    }
 }

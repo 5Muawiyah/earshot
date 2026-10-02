@@ -77,6 +77,9 @@ internal sealed class Paths
     // models only, no address or name.
     public string LastReadingFile => Path.Combine(WidgetFolder, "last-reading.json");
 
+    // The live readings of the owner's pair for the last 7 days (HistoryStore): levels, charging flags and times only.
+    public string BatteryHistoryFile => Path.Combine(WidgetFolder, "battery-history.json");
+
     // The paths for this process, read from its environment each time.
     public static Paths Current => FromEnvironment(Environment.GetEnvironmentVariable);
 

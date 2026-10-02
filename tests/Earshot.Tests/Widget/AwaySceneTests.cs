@@ -446,4 +446,40 @@ public sealed class AwaySceneTests : IDisposable
             previous = book.Sequence;
         }
     }
+
+    private sealed class RecordingHistory : IHistoryStore
+    {
+        public List<(DecodedReading Reading, DateTimeOffset At)> Recorded { get; } = [];
+
+        public void Record(DecodedReading reading, DateTimeOffset at) => Recorded.Add((reading, at));
+    }
+
+    // Only a live message of the linked pair reaches the history: a stranger's, however strong, and the owner's pair before
+    // it is linked, never do; nothing is recorded for a reading the service only shows from the saved book.
+    [TestMethod]
+    public void OnlyLiveMessagesOfTheLinkedPairReachTheHistory()
+    {
+        var history = new RecordingHistory();
+        _source = new FakeAdvertisementSource();
+        using var service = new WidgetStatusService(
+            () => _source, _settings, _monitor, () => null, _log, action => action(), _clock, _paired, null,
+            ProximityDecodeTable.Documented, runInBackground: work => work(), lastReadings: new LastReadingStore(StoreFile, _log), history: history);
+        service.Start();
+        Connect();
+
+        for (int i = 0; i < 40; i++)
+        {
+            bool one = i % 2 == 0;
+            Raise(one ? StrangerBud : StrangerOtherBud, BroadcastFixtures.Bud(one, caseNibble: AllCharging | 0x2, pairHigh: 0x3, pairLow: 0x3), -80);
+            Tick(0.25);
+        }
+
+        Assert.IsEmpty(history.Recorded, "A stranger's pair is not recorded.");
+
+        OwnerCaseOpen(3, budLevel: 0x6, caseLevel: 0x8);
+
+        Assert.IsNotEmpty(history.Recorded, "The owner's pair, once linked, is.");
+        Assert.IsTrue(history.Recorded.All(r => r.Reading.Left.Percent is null or 60 && r.Reading.Case.Percent is null or 80));
+        service.Close();
+    }
 }

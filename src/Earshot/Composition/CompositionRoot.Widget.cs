@@ -60,7 +60,8 @@ internal static partial class CompositionRoot
             time,
             pairedModel ?? new NodePairedModelSource(),
             r.Battery as IHandsFreeBatterySource,
-            new LastReadingStore(Paths.Current.LastReadingFile, r.Log));
+            new LastReadingStore(Paths.Current.LastReadingFile, r.Log),
+            new HistoryStore(Paths.Current.BatteryHistoryFile, r.Log, time));
         r.WidgetStatus = status;
         return status;
     }

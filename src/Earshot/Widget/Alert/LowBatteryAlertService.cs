@@ -27,6 +27,7 @@ internal sealed class LowBatteryAlertService : IDisposable
     private readonly INotifier _notifier;
     private readonly TimeProvider _time;
     private readonly LowBatteryLatch _latch;
+    private readonly FullyChargedLatch _fullLatch = new();
     private bool _disposed;
 
     public LowBatteryAlertService(IWidgetStatus status, ISettingsStore settings, INotifier notifier, TimeProvider time)
@@ -70,6 +71,13 @@ internal sealed class LowBatteryAlertService : IDisposable
         ShownBattery shown = BatteryFreshness.Shown(snapshot, _time.GetUtcNow());
         bool alertOn = _settings.Current.Widget.LowBatteryAlert;
 
+        // The fully charged notice reads the same shown values, wherever the pair is: a case charging on a desk, away from this
+        // PC, is the use for an estimate reaching 100. Fed always, notified only while the setting is on.
+        bool fullOn = _settings.Current.Widget.FullyChargedNotice;
+        NotifyFull(_fullLatch.Apply(ChargeComponent.Left, shown.Left), fullOn, WidgetCopy.FullyChargedLeftText);
+        NotifyFull(_fullLatch.Apply(ChargeComponent.Right, shown.Right), fullOn, WidgetCopy.FullyChargedRightText);
+        NotifyFull(_fullLatch.Apply(ChargeComponent.Case, shown.Case), fullOn, WidgetCopy.FullyChargedCaseText);
+
         // The card and the gauge show the owner's pair wherever it is; the alert stays for AirPods on this PC, as it was:
         // a live value of a pair that is not here is not one the person is listening on.
         if (snapshot.Where != AirPodsWhere.ThisPc)
@@ -95,6 +103,14 @@ internal sealed class LowBatteryAlertService : IDisposable
         if (_latch.ApplyHeadset(shown.WindowsPercent) && alertOn && shown.WindowsPercent is int headset)
         {
             Notify(WidgetCopy.LowBatteryHeadsetText(headset));
+        }
+    }
+
+    private void NotifyFull(FullyChargedStep step, bool on, Func<bool, string> text)
+    {
+        if (step != FullyChargedStep.None && on)
+        {
+            Notify(text(step == FullyChargedStep.Estimated));
         }
     }
 
