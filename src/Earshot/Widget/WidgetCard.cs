@@ -1152,9 +1152,10 @@ internal sealed partial class WidgetCard : Form
             g.FillPath(brush, glyph);
         }
 
-        // Like the figure, the mark is of the part's shown reading (connected, linked): a raw value of the snapshot that is not
-        // shown must not be drawn, and nothing decodes an in-ear bit today, so this is only ever a guard.
-        if (shown.HasValue && part.InEar == true)
+        // Like the figure, the mark is of the part's shown reading, but only a live one while the AirPods are on this PC: a last
+        // reading or an estimate (shown at any age, and for AirPods that are away) says nothing of where a bud is now. A raw value of
+        // the snapshot that is not shown must not be drawn either, and nothing decodes an in-ear bit today, so this is only a guard.
+        if (shown.Fresh && _model.Snapshot.Where == AirPodsWhere.ThisPc && part.InEar == true)
         {
             DrawInEarMark(g, square, mirror);
         }
