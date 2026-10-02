@@ -373,7 +373,8 @@ public sealed class GaugeRendererTests
     [TestMethod]
     public void ASnapshotDrawsThroughTheContentRules()
     {
-        var buds = new PartReading(70, true, null) { ReadAt = Now - TimeSpan.FromMinutes(2) };
+        // A reading heard a moment ago is live: the arc is the accent. (One heard two minutes ago is a last reading, in tertiary.)
+        var buds = new PartReading(70, true, null) { ReadAt = Now - TimeSpan.FromSeconds(2) };
         WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with { Where = AirPodsWhere.ThisPc, Selection = BroadcastSelectionState.Linked, Left = buds, Right = buds with { Percent = 60 } };
         GaugeLayout layout = GaugeLayout.For(96);
 
@@ -382,6 +383,10 @@ public sealed class GaugeRendererTests
         Assert.IsTrue(IsFill(RingPixel(bitmap, layout, 8), Accent));
         Assert.IsTrue(IsTrack(RingPixel(bitmap, layout, 348), Palette(true).Track), "60% is the lower bud, so the ring is not full.");
         Assert.IsNotEmpty(Painted(bitmap, layout.ChargingSlot, 100), "The left bud is charging, a proved flag.");
+
+        using Bitmap stale = GaugeRenderer.Render(snapshot, Now + TimeSpan.FromMinutes(2), 96, 48, Color.Black, hover: false, FontFamily, accent: Accent);
+        Assert.IsFalse(IsFill(RingPixel(stale, layout, 8), Accent), "A reading two minutes old is a last reading: its arc is not the accent.");
+        Assert.IsNotEmpty(Painted(stale, layout.NumberSlot, 20), "But it is still drawn.");
     }
 
     [TestMethod]
