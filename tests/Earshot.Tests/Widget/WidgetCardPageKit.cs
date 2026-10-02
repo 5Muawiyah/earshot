@@ -317,7 +317,7 @@ internal static class CardKit
         {
             for (int x = bounds.Left; x < bounds.Right; x++)
             {
-                if (bitmap.GetPixel(x, y) != background)
+                if (bitmap.GetPixel(x, y).ToArgb() != background.ToArgb())
                 {
                     count++;
                 }

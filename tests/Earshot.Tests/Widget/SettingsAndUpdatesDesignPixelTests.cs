@@ -38,7 +38,10 @@ public sealed class SettingsAndUpdatesDesignPixelTests
             Assert.IsNotEmpty(layout.Surfaces);
             foreach (Rectangle surface in layout.Surfaces)
             {
-                AssertNear(fill, bitmap.GetPixel(surface.X + 3, surface.Y + (surface.Height / 2)), 2, "The fill of " + surface);
+                // Sampled at the middle of the surface's first row: the middle of a surface that holds several rows can be exactly
+                // where one row's divider is, which is the stroke and not the fill.
+                SettingsItem first = layout.Items.First(i => surface.Contains(i.Bounds));
+                AssertNear(fill, bitmap.GetPixel(surface.X + 3, first.Bounds.Y + (first.Bounds.Height / 2)), 2, "The fill of " + surface);
                 AssertNear(DesignPixels.Over(c.RowStroke, fill), bitmap.GetPixel(surface.X + (surface.Width / 2), surface.Y), 4, "The stroke along the top of " + surface);
             }
         });
@@ -78,7 +81,7 @@ public sealed class SettingsAndUpdatesDesignPixelTests
             using (Bitmap on = CardKit.Render(card))
             {
                 Rectangle track = CardKit.Row(card, SettingsRowId.LeftClick).A;
-                Assert.AreEqual(c.Accent, on.GetPixel(track.X + (track.Width / 5), track.Y + (track.Height / 2)), "On: an accent track");
+                DesignPixels.AssertSameColour(c.Accent, on.GetPixel(track.X + (track.Width / 5), track.Y + (track.Height / 2)), "On: an accent track");
                 Assert.AreEqual(new Size(CardPlacement.Scale(40, dpi), CardPlacement.Scale(20, dpi)), track.Size, "40 by 20");
             }
 
@@ -129,12 +132,14 @@ public sealed class SettingsAndUpdatesDesignPixelTests
 
             Rectangle chosen = grid.Tiles[(int)GaugeOrder.NumberRingBolt];
             int middle = chosen.Y + (chosen.Height / 2);
-            Assert.AreEqual(c.Accent, bitmap.GetPixel(chosen.X + 1, middle), "The chosen picture: an accent stroke, its second pixel in");
-            Assert.AreEqual(c.Accent, bitmap.GetPixel(chosen.X, middle), "and its first");
+            DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(chosen.X + 1, middle), "The chosen picture: an accent stroke, its second pixel in");
+            DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(chosen.X, middle), "and its first");
 
             Rectangle other = grid.Tiles[(int)GaugeOrder.RingNumberBolt];
             AssertNear(DesignPixels.Over(c.ControlStroke, RowOver(tokens, c)), bitmap.GetPixel(other.X, other.Y + (other.Height / 2)), 6, "Another picture: the 1 px control stroke");
-            AssertNear(underTile, bitmap.GetPixel(other.X + 3, other.Y + 2), 8, "and the control fill inside it");
+            // Inside the stroke and clear of the rounded corner (radius 4 at 100%) and of the picture, which has a margin above it: a
+            // point 3 in and 14 across, at the scale. A point 3 by 2 in sits on the corner's curve, where anti-aliasing mixes in the stroke.
+            AssertNear(underTile, bitmap.GetPixel(other.X + CardPlacement.Scale(14, dpi), other.Y + CardPlacement.Scale(3, dpi)), 8, "and the control fill inside it");
             Assert.AreEqual(CardPlacement.Scale(52, dpi), other.Height, "Tiles are 52 high at 100%");
         });
     }
@@ -155,7 +160,7 @@ public sealed class SettingsAndUpdatesDesignPixelTests
             Color fill = RowOver(tokens, c);
 
             Assert.AreEqual(new Size(CardPlacement.Scale(40, dpi), CardPlacement.Scale(40, dpi)), layout.Tile.Size, "The tile is 40 by 40");
-            Assert.AreEqual(c.Accent, bitmap.GetPixel(layout.Tile.X + CardPlacement.Scale(5, dpi), layout.Tile.Y + CardPlacement.Scale(5, dpi)), "An accent tile");
+            DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(layout.Tile.X + CardPlacement.Scale(5, dpi), layout.Tile.Y + CardPlacement.Scale(5, dpi)), "An accent tile");
             AssertNear(c.OnAccent, DesignPixels.Extreme(bitmap, Rectangle.Inflate(layout.Tile, -4, -4), c.Accent), 4, "The earbud pair is the text on accent");
             AssertNear(fill, bitmap.GetPixel(layout.StatusSurface.X + 3, layout.StatusSurface.Y + (layout.StatusSurface.Height / 2)), 2, "The status surface");
             foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
@@ -165,7 +170,7 @@ public sealed class SettingsAndUpdatesDesignPixelTests
             }
 
             Rectangle toggle = layout.UpdateRows.Single(r => r.Index == 0).Control;
-            Assert.AreEqual(c.Accent, bitmap.GetPixel(toggle.X + (toggle.Width / 5), toggle.Y + (toggle.Height / 2)), "Check automatically is on: an accent track");
+            DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(toggle.X + (toggle.Width / 5), toggle.Y + (toggle.Height / 2)), "Check automatically is on: an accent track");
         });
     }
 
@@ -193,7 +198,7 @@ public sealed class SettingsAndUpdatesDesignPixelTests
             using (Bitmap primary = CardKit.Render(card))
             {
                 Rectangle action = card.CurrentSetupLayout!.Action;
-                Assert.AreEqual(c.Accent, primary.GetPixel(action.X + 6, action.Y + (action.Height / 2)), "Ready to install: the accent button");
+                DesignPixels.AssertSameColour(c.Accent, primary.GetPixel(action.X + 6, action.Y + (action.Height / 2)), "Ready to install: the accent button");
                 AssertNear(c.OnAccent, DesignPixels.Extreme(primary, Rectangle.Inflate(action, -10, -6), c.Accent), 60, "Its text is the token for text on accent");
             }
 
@@ -201,7 +206,7 @@ public sealed class SettingsAndUpdatesDesignPixelTests
             using (Bitmap progress = CardKit.Render(card))
             {
                 Rectangle row = card.CurrentSetupLayout!.Progress;
-                Assert.AreEqual(c.Accent, progress.GetPixel(row.X + 4, row.Y + (row.Height / 2)), "Downloading: the fill is the accent from the left");
+                DesignPixels.AssertSameColour(c.Accent, progress.GetPixel(row.X + 4, row.Y + (row.Height / 2)), "Downloading: the fill is the accent from the left");
                 Assert.AreNotEqual(c.Accent, progress.GetPixel(row.Right - 60, row.Y + (row.Height / 2)), "and is not full at 60%");
             }
         });

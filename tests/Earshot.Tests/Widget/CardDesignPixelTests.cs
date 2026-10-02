@@ -74,9 +74,13 @@ public sealed class CardDesignPixelTests
                 Color primary = DesignPixels.Over(c.Text, surface);
                 AssertNear(primary, DesignPixels.Extreme(bitmap, Rectangle.Inflate(column.Glyph, -2, -2), surface), 3, "The mark is Text primary");
                 AssertNear(primary, DesignPixels.Extreme(bitmap, Rectangle.Intersect(column.Percent, new Rectangle(column.Percent.X, column.Percent.Y, column.BoltSlot.X - column.Percent.X, column.Percent.Height)), surface), 40, "The value is Text primary");
-                AssertNear(DesignPixels.Over(c.TextSecondary, surface), DesignPixels.Extreme(bitmap, column.Label, surface), 60, "The label is Text secondary");
-                Assert.AreEqual(c.Accent, bitmap.GetPixel(column.Bar.X + 1, column.Bar.Y), "The bar's fill is the accent, on its first row");
-                Assert.AreEqual(c.Accent, bitmap.GetPixel(column.Bar.X + 1, column.Bar.Bottom - 1), "and its last row: the fill is the whole bar height");
+                // The darkest pixel of 12 px text falls short of the ink by anti-aliasing, in proportion to the ink's contrast with the surface:
+                // measured at 100% with pure black on white (high contrast) it is 81 of 255. So the allowance is 40% of the contrast, at least 60.
+                Color secondary = DesignPixels.Over(c.TextSecondary, surface);
+                int labelAllowance = Math.Max(60, (int)(DesignPixels.Distance(secondary, surface) * 0.4));
+                AssertNear(secondary, DesignPixels.Extreme(bitmap, column.Label, surface), labelAllowance, "The label is Text secondary");
+                DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(column.Bar.X + 1, column.Bar.Y), "The bar's fill is the accent, on its first row");
+                DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(column.Bar.X + 1, column.Bar.Bottom - 1), "and its last row: the fill is the whole bar height");
                 Assert.IsFalse(CardKit.HasInk(bitmap, column.ReadTime, surface), "A fresh value shows no read time, and the line's place is kept");
             }
 
@@ -180,7 +184,7 @@ public sealed class CardDesignPixelTests
             Assert.IsTrue(CardKit.HasInk(bitmap, layout.WhereLine, surface), "Case open is drawn");
             Assert.IsTrue(CardKit.HasInk(bitmap, layout.Gear, surface), "The close button is where the gear is");
             AssertNear(DesignPixels.Over(c.Text, surface), DesignPixels.Extreme(bitmap, Rectangle.Inflate(layout.Left.Glyph, -2, -2), surface), 3, "The mark is Text primary");
-            Assert.AreEqual(c.Accent, bitmap.GetPixel(layout.Left.Bar.X + 1, layout.Left.Bar.Y), "A fresh value has the accent bar");
+            DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(layout.Left.Bar.X + 1, layout.Left.Bar.Y), "A fresh value has the accent bar");
         });
     }
 
@@ -235,7 +239,7 @@ public sealed class CardDesignPixelTests
             using (bitmap)
             {
                 Rectangle b = layout.Button;
-                Assert.AreEqual(c.Accent, bitmap.GetPixel(b.X + 6, b.Y + (b.Height / 2)), "Connect is the accent");
+                DesignPixels.AssertSameColour(c.Accent, bitmap.GetPixel(b.X + 6, b.Y + (b.Height / 2)), "Connect is the accent");
                 AssertNear(c.OnAccent, DesignPixels.Extreme(bitmap, Rectangle.Inflate(b, -12, -8), c.Accent), 60, "The text on it is the token for text on accent");
             }
 

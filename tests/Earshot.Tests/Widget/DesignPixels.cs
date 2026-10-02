@@ -1,5 +1,6 @@
 using System.Drawing;
 using Earshot.Widget;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
@@ -61,6 +62,11 @@ internal static class DesignPixels
         return Color.FromArgb((int)Math.Round(outA * 255), Channel(top.R, under.R), Channel(top.G, under.G), Channel(top.B, under.B));
     }
 
+    // The same colour by its value. Color's own equality also compares how it was made, so a system colour (Highlight under high
+    // contrast, which the tokens give by name) never equals the pixel of the same value read from a bitmap.
+    public static void AssertSameColour(Color expected, Color actual, string? message = null) =>
+        Assert.AreEqual(expected.ToArgb(), actual.ToArgb(), (message ?? "The colour") + ": expected " + expected + " (" + expected.ToArgb().ToString("X8") + "), drawn " + actual);
+
     public static int Distance(Color a, Color b) => Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Max(Math.Abs(a.B - b.B), Math.Abs(a.A - b.A))));
 
     // The pixel of a rectangle that differs most from the background: the ink of text at its fullest.
@@ -96,7 +102,7 @@ internal static class DesignPixels
         {
             for (int y = bounds.Top; y < bounds.Bottom; y++)
             {
-                if (bitmap.GetPixel(x, y) != background)
+                if (bitmap.GetPixel(x, y).ToArgb() != background.ToArgb())
                 {
                     first = first < 0 ? x : first;
                     last = x;

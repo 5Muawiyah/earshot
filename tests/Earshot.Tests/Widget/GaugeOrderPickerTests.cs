@@ -105,7 +105,7 @@ public sealed class GaugeOrderPickerTests
                         {
                             for (int y = area.Top; y < area.Bottom; y++)
                             {
-                                if (bitmap.GetPixel(x, y) != tileFill)
+                                if (bitmap.GetPixel(x, y).ToArgb() != tileFill.ToArgb())
                                 {
                                     first = x;
                                     break;
