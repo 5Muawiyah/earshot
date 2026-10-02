@@ -24,17 +24,19 @@ namespace Earshot.Widget;
 // monitor is on no output, as in some remote sessions) the raw HRESULT is logged once and frames are stamped an hour ahead,
 // so every motion reaches its end in one frame, as with animation effects off: nothing is paced to a guessed rate.
 //
-// A display that is off breaks WaitForVBlank in two ways, both seen on the owner's PC and a reviewer's: the wait returns at once with
-// success (tens of thousands a second), or it does not return at all. Neither may drive the animation:
-//   - A wait that returns in under MinRealWait (half a millisecond: the period of a display at 2000 Hz, so no real refresh is that
-//     short, and a wait chained straight after the last one lasts about one period; the instant return measured on the sleeping
-//     display took about 27 microseconds) three times running is not a blank. The clock logs it once, says it is probably off, and
-//     draws unpaced (frames stamped an hour ahead: each motion ends in one frame, and no more frames are posted than the UI thread
+// A display that is off can break WaitForVBlank in two ways. The first was observed on the owner's PC; the second is a case the code
+// guards against and has not been observed. Neither may drive the animation:
+//   - The wait returns at once with success, tens of thousands of times a second. A wait that returns in under MinRealWait (half a
+//     millisecond: the period of a display at 2000 Hz, and a wait chained straight after the last one lasts about one period) three
+//     times running is not a blank. On the owner's PC the whole frame cycle of such a run took about 27 microseconds (164,883 ms over
+//     6,074,765 frames), an upper bound on the wait itself. The clock logs it once, says the display is probably off, and draws
+//     unpaced (frames stamped an hour ahead: each motion ends in one frame, and no more frames are posted than the UI thread
 //     delivers). It listens for the display's return by chaining three waits at the start of each run: when all three last a real
 //     period it is paced again.
-//   - A wait that has not returned within WatchdogAfter (100 ms: several refresh periods of any display that could be asked to
-//     animate) is stuck. A watchdog timer then delivers unpaced frames itself, logged once, and the stuck thread is left where it is:
-//     it holds up nothing, not a subscriber, not Dispose. Paced frames resume when its wait returns.
+//   - The wait does not return. Never seen: a 30 s timeout could not tell a hang from a flood of instant returns. A wait that has not
+//     returned within WatchdogAfter (100 ms: several refresh periods of any display that could be asked to animate) is taken to be
+//     stuck. A watchdog timer then delivers unpaced frames itself, logged once, and the stuck thread is left where it is: it holds up
+//     nothing, not a subscriber, not Dispose. Paced frames resume when its wait returns.
 // At rest the thread waits on an event and wakes for nothing: the event is set only while someone is subscribed. A frame is
 // not posted while the last one has not reached the UI thread yet, so a busy UI thread is never handed a queue of them.
 internal sealed class VBlankFrameClock : IFrameClock, IDisposable
