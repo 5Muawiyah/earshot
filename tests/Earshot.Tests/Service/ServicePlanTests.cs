@@ -41,7 +41,7 @@ public sealed class ServicePlanTests
         Assert.AreEqual("EarshotHandBack", spec.Name);
         Assert.AreEqual("Earshot hand-back", spec.DisplayName, "What the Services list and Task Manager show: not the raw name.");
         Assert.AreEqual(
-            "Blocks the AirPods on this PC when Windows shuts down, so they can go back to your phone, even if Earshot is not running. Does nothing while the PC is in use.",
+            "When Block at boot and Hand back are on, blocks the AirPods on this PC as Windows shuts down, so they can go back to your phone, even if Earshot is not running. Does nothing while the PC is in use.",
             spec.Description, "A plain sentence that says what the service does and starts with what it does.");
         Assert.AreEqual("\"C:\\Program Files\\Earshot\\Earshot.exe\" service", spec.ImagePath);
         Assert.AreEqual(0x10u, spec.ServiceType, "Its own process, never interactive.");
@@ -137,8 +137,7 @@ public sealed class ServicePlanTests
         (ServiceQuery Read, string Names)[] cases =
         [
             (Registered() with { FailureActionCount = 1 }, "failure action"),
-            (Registered() with { FailureCommand = @"C:\Temp
-un.exe" }, "command when it fails"),
+            (Registered() with { FailureCommand = @"C:\Temp\run.exe" }, "command when it fails"),
             (Registered() with { DelayedAutoStart = true }, "delayed start"),
             (Registered() with { TriggerCount = 2 }, "trigger count"),
             (Registered() with { ServiceSidType = 1 }, "service security identifier type"),

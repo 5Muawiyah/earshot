@@ -132,9 +132,9 @@ blocks the AirPods at shut down when the tray is not running.
 
 **The hand-back service.** `EarshotHandBack` (its name, which does not change: the
 uninstaller and the live tests use it) is listed in the Services list as
-"Earshot hand-back" (Task Manager's Services tab shows it in its Description column), with the description "Blocks the AirPods on this PC when Windows
-shuts down, so they can go back to your phone, even if Earshot is not running. Does
-nothing while the PC is in use." Setup sets both when it creates the service, and
+"Earshot hand-back" (Task Manager's Services tab shows it in its Description column), with the description "When Block at boot and Hand back are on, blocks the AirPods on this
+PC as Windows shuts down, so they can go back to your phone, even if Earshot is not
+running. Does nothing while the PC is in use." Setup sets both when it creates the service, and
 again on a service that is there already: an update and Repair Earshot run the same
 install, which reconfigures the registration and sets the description with each
 call's raw code recorded, and its read-back checks both. It runs as the local system account,
