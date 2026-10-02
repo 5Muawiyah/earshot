@@ -18,12 +18,15 @@ public sealed class WidgetCardAccessibilityTests
     private static readonly string[] FullNames = ["Connect", "Pause when a bud comes out", "Update", "Settings", "Refresh battery"];
     private static readonly bool[] OnOff = [false, true];
 
+    // The settings page as the design groups it (round 3): Taskbar, Behaviour, Audio, Shortcuts and About, then More opened. The order's
+    // pictures are named separately (PictureNames). Repair and Check for updates automatically are on the Updates page.
     private static readonly string[] SettingsNames =
     [
-        "Right end", "Next to apps", "Gauge display", "Other device name", "Pause when a bud comes out", "Pause when AirPods leave this PC",
-        "Lower the low battery level", "Raise the low battery level", "Left click connects", "Hand back on shut down, sleep and Exit",
-        "Connect shortcut", "Disconnect shortcut", "Clear connect shortcut", "Clear disconnect shortcut", "Check for updates", "Repair Earshot",
-        "Check for updates automatically",
+        "Gauge display", "Gauge order", "Case-open card", "More case-open card settings", "Hand back on shut down, sleep and Exit",
+        "Microphone off mode", "Connect shortcut", "Clear connect shortcut", "Disconnect shortcut", "Clear disconnect shortcut", "Card shortcut",
+        "Updates", "More settings", "Gauge position", "Other device name", "Pause when a bud comes out", "Pause when AirPods leave this PC",
+        "Lower the low battery level", "Raise the low battery level", "Fully charged notice", "Left click connects", "Battery history",
+        "Copy diagnostics",
     ];
 
     private static readonly string[] PictureNames =
@@ -146,6 +149,9 @@ public sealed class WidgetCardAccessibilityTests
         {
             CardSettingsValues values = FakeCardHost.Defaults() with { InstalledVersion = "1.1.0", GaugeOrder = GaugeOrder.NumberRingBolt, InstallExists = true };
             using WidgetCard card = ShownMain(CardKit.SettingsModel(values));
+
+            // The page opens with More and the order's pictures closed; a person opens them, and a test reaches every row by doing the same.
+            CardKit.OpenExpanders(card, more: true, order: true);
             List<AccessibleObject> children = Children(card);
 
             Assert.IsTrue(children.All(c => !string.IsNullOrWhiteSpace(c.Name)), "Every child has a name.");
@@ -160,9 +166,7 @@ public sealed class WidgetCardAccessibilityTests
                 Assert.AreEqual(1, children.Count(c => c.Name == name), "One child called \"" + name + "\".");
             }
 
-            AccessibleObject rightEnd = children.Single(c => c.Name == "Right end");
-            Assert.AreEqual(AccessibleRole.RadioButton, rightEnd.Role);
-            Assert.IsTrue(rightEnd.State.HasFlag(AccessibleStates.Checked));
+            Assert.AreEqual(AccessibleRole.PushButton, children.Single(c => c.Name == "Gauge position").Role, "The position is a choice button, as the display is.");
             Assert.AreEqual(AccessibleRole.CheckButton, children.Single(c => c.Name == "Left click connects").Role);
             Assert.AreEqual(AccessibleRole.Text, children.Single(c => c.Name == "Other device name").Role);
         });
@@ -174,6 +178,7 @@ public sealed class WidgetCardAccessibilityTests
         Phase5.CardDesktop.Run(() =>
         {
             using WidgetCard card = ShownMain(CardKit.SettingsModel(FakeCardHost.Defaults()));
+            CardKit.OpenExpanders(card, more: false, order: true);
             SettingChange? seen = null;
             card.SettingChanged += (_, change) => seen = change;
 
@@ -364,10 +369,11 @@ public sealed class WidgetCardAccessibilityTests
         Phase5.CardSta.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
-            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96, order: true);
             SettingsLayout layout = card.CurrentSettingsLayout!;
 
-            foreach (SettingsItem row in layout.Items.Where(i => i.Kind == SettingsItemKind.Row))
+            // The order's pictures are the second item of their row and have no label of their own: a picture says what it is below.
+            foreach (SettingsItem row in layout.Items.Where(i => i.Kind == SettingsItemKind.Row && i.Tiles.Count == 0))
             {
                 (string Text, Rectangle Anchor)? tip = card.TooltipAt(Centre(row.LabelRect));
                 Assert.IsNotNull(tip, row.Row + ": a tooltip over the label.");
@@ -376,7 +382,7 @@ public sealed class WidgetCardAccessibilityTests
 
             Assert.AreEqual("Back", card.TooltipAt(Centre(layout.Frame.Back))!.Value.Text);
             Assert.AreEqual("Clear", card.TooltipAt(Centre(CardKit.Row(card, SettingsRowId.Connect).B))!.Value.Text);
-            Assert.AreEqual("Ring, bolt, number", card.TooltipAt(Centre(CardKit.Row(card, SettingsRowId.GaugeOrder).Tiles[1]))!.Value.Text, "A picture says what it is a picture of.");
+            Assert.AreEqual("Ring, bolt, number", card.TooltipAt(Centre(layout.Items.Single(i => i.Row == SettingsRowId.GaugeOrder && i.Tiles.Count == 6).Tiles[1]))!.Value.Text, "A picture says what it is a picture of.");
             Assert.AreEqual(
                 "Pause when a bud comes out, and play again when it goes back",
                 card.TooltipAt(Centre(CardKit.Row(card, SettingsRowId.PauseBud).LabelRect))!.Value.Text,
