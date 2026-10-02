@@ -1415,7 +1415,10 @@ internal sealed class TrayHarness : IDisposable
         Func<bool>? cardAnimationsEnabled = null,
         Func<MouseButtons>? mouseButtonsDown = null,
         bool realTrayIconSurface = false,
-        Func<Earshot.Widget.SecondaryTaskbarReading>? secondaryTaskbars = null)
+        Func<Earshot.Widget.SecondaryTaskbarReading>? secondaryTaskbars = null,
+        Action<string>? setClipboardText = null,
+        Earshot.Diagnostics.IFrameLogSource? frameLog = null,
+        Func<string>? diagnosticsLogPath = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1499,6 +1502,10 @@ internal sealed class TrayHarness : IDisposable
             // A fake, never the real User32Hotkeys: a TrayContext test must never register a real global
             // hotkey on the machine that runs it.
             NativeHotkeys = NativeHotkeys,
+            // A capture, never the real clipboard: a TrayContext test must never touch the owner's clipboard.
+            SetClipboardText = setClipboardText ?? (text => ClipboardTexts.Add(text)),
+            FrameLog = frameLog,
+            DiagnosticsLogPath = diagnosticsLogPath ?? (() => _folder.File("data/logs/earshot.log")),
             VoiceEngineFactory = () => Voice,
             // One platform per switch-on when a test supplies a queue of them, so it can tell the first from the second;
             // otherwise the same one every time.
@@ -1624,6 +1631,9 @@ internal sealed class TrayHarness : IDisposable
     }
 
     public WindowsFormsSynchronizationContext Ui { get; }
+
+    // What "Copy diagnostics" put on the clipboard, in order.
+    public List<string> ClipboardTexts { get; } = new();
 
     public CapturingLog Log { get; } = new();
 

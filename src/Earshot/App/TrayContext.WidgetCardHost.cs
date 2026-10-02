@@ -84,6 +84,8 @@ internal sealed partial class TrayContext
                 InEarProofMissing: !snapshot.AutoPauseAvailable,
                 InstallExists: _tray.BlockStatus is { InstallExists: true })
             {
+                OpenCardChord = hotkeys.Chord(HotkeyAction.OpenCard),
+                OpenCardFailure = hotkeys.FailureMessage(HotkeyAction.OpenCard),
                 HandsFreeMicrophoneOff = HandsFreeMicrophoneMode.IsOn(settings),
                 MicrophoneState = HandsFreeMicrophoneMode.Describe(_tray._snapshot).State,
                 GaugeDisplayId = widget.GaugeDisplay,
@@ -156,7 +158,12 @@ internal sealed partial class TrayContext
             Write("check for updates automatically (card)", s => s.CheckForUpdatesAutomatically = on, place);
 
         private static HotkeyAction ActionOf(CardShortcut shortcut) =>
-            shortcut == CardShortcut.Connect ? HotkeyAction.SwitchToPc : HotkeyAction.SwitchToPhone;
+            shortcut switch
+            {
+                CardShortcut.Connect => HotkeyAction.SwitchToPc,
+                CardShortcut.Disconnect => HotkeyAction.SwitchToPhone,
+                _ => HotkeyAction.OpenCard,
+            };
 
         public string? SetShortcut(CardShortcut shortcut, Keys key, bool control, bool alt, bool shift, CardPlace place)
         {

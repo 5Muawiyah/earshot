@@ -349,9 +349,12 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         CardSettingsValues values = _host!.ReadSettings();
         if (_shortcutNote is { } note)
         {
-            values = note.Shortcut == CardShortcut.Connect
-                ? values with { ConnectFailure = note.Reason }
-                : values with { DisconnectFailure = note.Reason };
+            values = note.Shortcut switch
+            {
+                CardShortcut.Connect => values with { ConnectFailure = note.Reason },
+                CardShortcut.Disconnect => values with { DisconnectFailure = note.Reason },
+                _ => values with { OpenCardFailure = note.Reason },
+            };
         }
 
         return values;

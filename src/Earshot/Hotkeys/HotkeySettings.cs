@@ -19,6 +19,12 @@ namespace Earshot.Hotkeys;
 // build wrote carries "Enabled": false, typed or not, so that value says nothing about a wish when no chord was
 // typed. Only then, and only while the file has neither new member, is it read as on. Once the file is saved it
 // has both members and this never runs again, so an owner who later turns shortcuts off keeps them off.
+//
+// OpenCard (Ctrl+Alt+Shift+E) was added after those two and follows the same rule for the member alone: a file
+// without it takes the default, a file with it, empty included, keeps what the owner left, so a cleared card
+// shortcut stays cleared once the file is saved. It does not infer Enabled: a file that already has the switch
+// members was written by a build that expressed the owner's wish for it. A typed chord the same as the default
+// keeps it and the default steps aside, as above.
 public sealed class HotkeySettings : IJsonOnDeserialized
 {
     public const string DefaultSwitchToPc = "Ctrl+Alt+Shift+A";
@@ -26,8 +32,12 @@ public sealed class HotkeySettings : IJsonOnDeserialized
     public const string DefaultSwitchToPhone = "Ctrl+Alt+Shift+D";
 
     private string _switchToPc = DefaultSwitchToPc;
+    public const string DefaultOpenCard = "Ctrl+Alt+Shift+E";
+
     private string _switchToPhone = DefaultSwitchToPhone;
+    private string _openCard = DefaultOpenCard;
     private bool _newMembersInFile;
+    private bool _openCardInFile;
 
     public bool Enabled { get; set; } = true;
 
@@ -59,6 +69,16 @@ public sealed class HotkeySettings : IJsonOnDeserialized
         }
     }
 
+    public string OpenCard
+    {
+        get => _openCard;
+        set
+        {
+            _openCard = value;
+            _openCardInFile = true;
+        }
+    }
+
     public static HotkeySettings Defaults => new();
 
     // The text for an action, or an empty string. Never null.
@@ -70,6 +90,7 @@ public sealed class HotkeySettings : IJsonOnDeserialized
         HotkeyAction.SpeakStatus => SpeakStatus,
         HotkeyAction.SwitchToPc => SwitchToPc,
         HotkeyAction.SwitchToPhone => SwitchToPhone,
+        HotkeyAction.OpenCard => OpenCard,
         _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown hotkey action."),
     };
 
@@ -97,6 +118,9 @@ public sealed class HotkeySettings : IJsonOnDeserialized
             case HotkeyAction.SwitchToPhone:
                 SwitchToPhone = text;
                 break;
+            case HotkeyAction.OpenCard:
+                OpenCard = text;
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown hotkey action.");
         }
@@ -106,11 +130,44 @@ public sealed class HotkeySettings : IJsonOnDeserialized
     // of the upgrade.
     void IJsonOnDeserialized.OnDeserialized()
     {
-        if (_newMembersInFile)
+        if (!_newMembersInFile)
         {
-            return;
+            UpgradeSwitchMembers();
         }
 
+        if (!_openCardInFile &&
+            HotkeyText.TryParse(_openCard, out HotkeyCombination card, out _) &&
+            HeldByAnother(card))
+        {
+            _openCard = string.Empty;
+        }
+    }
+
+    // True when another command, as read, already holds the combination.
+    private bool HeldByAnother(HotkeyCombination combination)
+    {
+        HotkeyAction[] others =
+        [
+            HotkeyAction.ToggleConnection,
+            HotkeyAction.ToggleAudioProtection,
+            HotkeyAction.ToggleBlockAtBoot,
+            HotkeyAction.SpeakStatus,
+            HotkeyAction.SwitchToPc,
+            HotkeyAction.SwitchToPhone,
+        ];
+        foreach (HotkeyAction action in others)
+        {
+            if (HotkeyText.TryParse(TextFor(action), out HotkeyCombination held, out _) && held == combination)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void UpgradeSwitchMembers()
+    {
         bool oldTextsEmpty = string.IsNullOrWhiteSpace(ToggleConnection) &&
                              string.IsNullOrWhiteSpace(ToggleAudioProtection) &&
                              string.IsNullOrWhiteSpace(ToggleBlockAtBoot) &&

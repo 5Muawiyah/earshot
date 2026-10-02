@@ -16,6 +16,9 @@ namespace Earshot.Tests.Phase1;
 [TestClass]
 public sealed class TrayHotkeyTests
 {
+    // What Clipboard.SetText throws when another program holds the clipboard open: an ExternalException carrying the HRESULT.
+    private sealed class ClipboardBusy(int hresult) : System.Runtime.InteropServices.ExternalException("The clipboard is busy.", hresult);
+
     [TestMethod]
     public void ToggleConnectionHotkeyUsesTheSameMethodAsTheLeftClick()
     {
@@ -411,6 +414,152 @@ public sealed class TrayHotkeyTests
             tray.Context.Dispose();
 
             Assert.IsTrue(tray.NativeHotkeys.Calls.Any(c => c.Method == "UnregisterHotKey"), "Close must unregister what was held.");
+        });
+    }
+
+    // ----- the card shortcut -----
+
+    [TestMethod]
+    public void TheCardShortcutIsRegisteredAtStartWithItsDefaultChord()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness();
+            tray.PumpUntilIdle();
+
+            NativeCall call = tray.NativeHotkeys.Calls.Single(c => c.Method == "RegisterHotKey" && c.Id == HotkeyManager.HotkeyIdBase + (int)HotkeyAction.OpenCard);
+            Assert.AreEqual(0x45u, call.VirtualKey);
+            Assert.AreEqual((uint)(HotkeyModifiers.Control | HotkeyModifiers.Alt | HotkeyModifiers.Shift) | 0x4000u, call.Modifiers);
+        });
+    }
+
+    [TestMethod]
+    public void AClearedCardShortcutIsNotRegisteredAtStart()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(settings: s => s.Hotkeys.OpenCard = string.Empty);
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.NativeHotkeys.Calls.Any(c => c.Id == HotkeyManager.HotkeyIdBase + (int)HotkeyAction.OpenCard));
+        });
+    }
+
+    // Reported on the card the way the other shortcuts' failures are: Windows' own code, in the outcome's own words.
+    [TestMethod]
+    public void ACardShortcutAnotherProgramHoldsIsReportedOnACard()
+    {
+        StaThread.Run(() =>
+        {
+            var native = new FakeNativeHotkeys();
+            native.SetResult(HotkeyManager.HotkeyIdBase + (int)HotkeyAction.OpenCard, NativeCallResult.Failure(1409));
+            using var tray = new TrayHarness(nativeHotkeys: native);
+            tray.PumpUntilIdle();
+
+            Assert.HasCount(1, tray.Cards.Statuses);
+            Assert.AreEqual("Ctrl+Alt+Shift+E is already in use by another program, so it was not set. Windows reported error 1409.", tray.Cards.Statuses[0]);
+        });
+    }
+
+    // With no gauge the shortcut shows what a left click on the tray icon shows, and it never starts a connect.
+    [TestMethod]
+    public void TheCardShortcutWithNoGaugeShowsTheTrayIconsCardAndTouchesNoDevice()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), settings: s => s.Widget = s.Widget with { LeftClickConnects = true });
+            tray.PumpUntilIdle();
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.OpenCard));
+            tray.PumpUntilIdle();
+
+            Assert.HasCount(1, tray.Cards.Shown);
+            Assert.IsEmpty(tray.Connection.Calls, "The card shortcut must not connect or disconnect.");
+        });
+    }
+
+    [TestMethod]
+    public void TheCardShortcutOpensTheCardAboveTheGaugeAndAPressWhileItIsOpenClosesIt()
+    {
+        Earshot.Tests.Phase5.CardDesktop.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                taskbarWatcherPollIntervalMs: 30,
+                settings: s => s.Widget = s.Widget with { Enabled = true, ShowOnTaskbar = true, CaseOpenCard = true, LeftClickConnects = true });
+            tray.PumpUntilIdle();
+            Assert.IsFalse(tray.Context.WidgetCardIsShownForTest);
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.OpenCard));
+            TrayHarness.PumpUntil(() => tray.Context.WidgetCardIsShownForTest, "The card shortcut did not open the card.");
+            Assert.IsTrue(tray.Context.WidgetCardFocusCueVisibleForTest, "Opened from the keyboard, so the focus visual shows from the start.");
+            Assert.IsEmpty(tray.Connection.Calls, "LeftClickConnects is on, and the shortcut still only opens the card.");
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.OpenCard));
+            TrayHarness.PumpUntil(() => !tray.Context.WidgetCardIsShownForTest, "A second press did not close the card.");
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.OpenCard));
+            TrayHarness.PumpUntil(() => tray.Context.WidgetCardIsShownForTest, "A third press did not open it again.");
+        });
+    }
+
+    [TestMethod]
+    public void NothingOpensFromTheCardShortcutWhileClosing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness();
+            tray.Context.Menu.Strip.Items.Cast<ToolStripItem>().OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.Exit).PerformClick();
+            tray.PumpUntilIdle();
+            tray.Cards.Shown.Clear();
+
+            tray.Context.OnHotkeyActivated(null, new HotkeyActivatedEventArgs(HotkeyAction.OpenCard));
+            tray.PumpUntilIdle();
+
+            Assert.IsEmpty(tray.Cards.Shown);
+        });
+    }
+
+    // ----- Copy diagnostics -----
+
+    [TestMethod]
+    public void CopyDiagnosticsPutsTheRedactedTextOnTheClipboardAndSaysSo()
+    {
+        StaThread.Run(() =>
+        {
+            using var temp = new TempFolder();
+            string logPath = temp.File("earshot.log");
+            File.WriteAllText(logPath, "2026-10-02T09:15:30.000Z INFO chose AA:BB:CC:DD:EE:FF container 6f1c2a3e-9b7d-4c10-8a55-0123456789ab\n2026-10-02T09:15:31.000Z INFO a harmless line\n");
+            using var tray = new TrayHarness(diagnosticsLogPath: () => logPath);
+            tray.PumpUntilIdle();
+
+            tray.Context.Menu.Strip.Items.Cast<ToolStripItem>().OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.CopyDiagnostics).PerformClick();
+            tray.PumpUntilIdle();
+
+            string copied = tray.ClipboardTexts.Single();
+            StringAssert.Contains(copied, "a harmless line");
+            StringAssert.Contains(copied, "<address>");
+            Assert.IsFalse(copied.Contains("AA:BB:CC:DD:EE:FF", StringComparison.Ordinal));
+            Assert.IsFalse(copied.Contains("6f1c2a3e", StringComparison.Ordinal));
+            Assert.AreEqual(TrayContext.DiagnosticsCopiedMessage, tray.Cards.Shown[^1].Content.Status);
+        });
+    }
+
+    // A clipboard another program holds open refuses the text; the raw HRESULT is logged and the card says it failed.
+    [TestMethod]
+    public void ARefusedClipboardIsLoggedWithItsHresultAndSaidOnACard()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(setClipboardText: _ => throw new ClipboardBusy(unchecked((int)0x800401D0)));
+            tray.PumpUntilIdle();
+
+            tray.Context.Menu.Strip.Items.Cast<ToolStripItem>().OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.CopyDiagnostics).PerformClick();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(TrayContext.DiagnosticsNotCopiedMessage, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Level == LogLevel.Warn && e.Message.Contains("0x800401D0", StringComparison.Ordinal)),
+                "The raw HRESULT was not logged: " + string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
         });
     }
 }

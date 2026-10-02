@@ -42,6 +42,20 @@ internal sealed record CardSettingsValues(
     // decides the line under the row and whether the row offers to open sound settings. Init-only for the same reason.
     public bool HandsFreeMicrophoneOff { get; init; }
 
+    // The shortcut that opens or closes the card, and why it is not registered, or null. Init-only for the same reason.
+    public string OpenCardChord { get; init; } = string.Empty;
+
+    public string? OpenCardFailure { get; init; }
+
+    // The chord a shortcut row holds, "" when none.
+    public string ChordFor(SettingsRowId row) => row switch
+    {
+        SettingsRowId.Connect => ConnectChord,
+        SettingsRowId.Disconnect => DisconnectChord,
+        SettingsRowId.OpenCard => OpenCardChord,
+        _ => string.Empty,
+    };
+
     public MicrophoneRowState MicrophoneState { get; init; } = MicrophoneRowState.OpenSettings;
 
     // Why Check for updates and Repair do nothing now (a setup, repair or update is running), or null. The rows say it in place
@@ -134,8 +148,8 @@ internal interface IWidgetCardHost
     event EventHandler? UpdateChanged;
 }
 
-// The two shortcuts the settings page edits.
-internal enum CardShortcut { Connect, Disconnect }
+// The shortcuts the settings page edits.
+internal enum CardShortcut { Connect, Disconnect, OpenCard }
 
 internal enum SettingsRowId
 {
@@ -151,6 +165,7 @@ internal enum SettingsRowId
     HandBack,
     Connect,
     Disconnect,
+    OpenCard,
     CheckForUpdates,
     Repair,
     CheckAutomatically,
@@ -513,6 +528,7 @@ internal static class SettingsPageLayout
 
         ShortcutRow(SettingsRowId.Connect, WidgetCopy.Connect, values.ConnectChord, values.ConnectFailure);
         ShortcutRow(SettingsRowId.Disconnect, WidgetCopy.Disconnect, values.DisconnectChord, values.DisconnectFailure);
+        ShortcutRow(SettingsRowId.OpenCard, ShortcutCopy.Card, values.OpenCardChord, values.OpenCardFailure);
 
         Divider();
         Head(WidgetCopy.SettingsUpdates);

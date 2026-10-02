@@ -20,6 +20,7 @@ internal static class SettingsRows
         SettingsRowId.HandBack => new(FluentGlyphs.PowerButton, WidgetCopy.TipHandBack, WidgetCopy.NameHandBack),
         SettingsRowId.Connect => new(FluentGlyphs.KeyboardShortcut, WidgetCopy.TipConnectShortcut, WidgetCopy.NameConnectShortcut),
         SettingsRowId.Disconnect => new(FluentGlyphs.KeyboardShortcut, WidgetCopy.TipDisconnectShortcut, WidgetCopy.NameDisconnectShortcut),
+        SettingsRowId.OpenCard => new(FluentGlyphs.KeyboardShortcut, ShortcutCopy.TipCardShortcut, ShortcutCopy.NameCardShortcut),
         SettingsRowId.CheckForUpdates => new(FluentGlyphs.Sync, WidgetCopy.TipCheckForUpdates, WidgetCopy.NameCheckForUpdates),
         SettingsRowId.Repair => new(FluentGlyphs.Repair, WidgetCopy.TipRepair, WidgetCopy.NameRepair),
         SettingsRowId.CheckAutomatically => new(FluentGlyphs.UpdateRestore, WidgetCopy.TipAutoCheck, WidgetCopy.NameAutoCheck),
@@ -39,6 +40,7 @@ internal static class SettingsRows
         (SettingsRowId.LowBattery, SettingsPart.Plus) => WidgetCopy.NameRaiseLowBattery,
         (SettingsRowId.Connect, SettingsPart.Clear) => WidgetCopy.NameClearConnectShortcut,
         (SettingsRowId.Disconnect, SettingsPart.Clear) => WidgetCopy.NameClearDisconnectShortcut,
+        (SettingsRowId.OpenCard, SettingsPart.Clear) => ShortcutCopy.NameClearCardShortcut,
         (SettingsRowId.GaugeOrder, SettingsPart.Tile) => GaugeOrders.AccessibleName(GaugeOrders.FromStored((GaugeOrder)index)),
         _ => For(row).Name ?? string.Empty,
     };
@@ -48,7 +50,7 @@ internal static class SettingsRows
     public static string? TipOf(SettingsRowId row, SettingsPart part, int index = 0) => (row, part) switch
     {
         (SettingsRowId.None, SettingsPart.Back) => WidgetCopy.TipBack,
-        (SettingsRowId.Connect, SettingsPart.Clear) or (SettingsRowId.Disconnect, SettingsPart.Clear) => WidgetCopy.TipClear,
+        (SettingsRowId.Connect, SettingsPart.Clear) or (SettingsRowId.Disconnect, SettingsPart.Clear) or (SettingsRowId.OpenCard, SettingsPart.Clear) => WidgetCopy.TipClear,
         (SettingsRowId.GaugeOrder, SettingsPart.Tile) => GaugeOrders.AccessibleName(GaugeOrders.FromStored((GaugeOrder)index)),
         _ => For(row).Tip,
     };

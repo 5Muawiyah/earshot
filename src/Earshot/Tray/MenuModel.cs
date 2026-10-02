@@ -48,6 +48,7 @@ internal sealed record MenuState(
     MenuItemState Repair,
     MenuItemState CheckForUpdates,
     MenuItemState CheckAutomatically,
+    MenuItemState CopyDiagnostics,
     MenuItemState Exit);
 
 // The tray menu as a pure function of cached state. The menu applies it in its Opening handler, which
@@ -76,6 +77,7 @@ internal static class MenuModel
     // word the same thing two ways.
     public const string CheckForUpdates = Earshot.Update.UpdateCopy.CheckRowLabel;
     public const string CheckAutomatically = Earshot.Update.UpdateCopy.CheckAutomaticallyLabel;
+    public const string CopyDiagnostics = "Copy diagnostics";
     public const string Exit = "Exit";
 
     // safeMode (EARSHOT_SAFE_MODE) adds one caption at the top and changes nothing else: every item stays as it
@@ -163,6 +165,8 @@ internal static class MenuModel
             // update step does.
             CheckForUpdates: new MenuItemState(WithReason(CheckForUpdates, elevatedRun), Checked: false, Enabled: !updateInProgress && elevatedRun is null, Visible: true),
             CheckAutomatically: new MenuItemState(CheckAutomatically, Checked: settings.CheckForUpdatesAutomatically, Enabled: !busy, Visible: true),
+            // Reads the log and the frame log from disk and copies text, never touches a device, so it is always there.
+            CopyDiagnostics: new MenuItemState(CopyDiagnostics, Checked: false, Enabled: true, Visible: true),
             Exit: new MenuItemState(Exit, Checked: false, Enabled: true, Visible: true));
     }
 

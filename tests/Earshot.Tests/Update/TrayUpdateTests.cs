@@ -17,7 +17,7 @@ public sealed class TrayUpdateTests
     private static string[] AvailableTexts(TrayMenu menu) =>
         menu.Items.Where(i => i.Available).Select(i => i is ToolStripSeparator ? "-" : i.Text ?? "").ToArray();
 
-    private static readonly string[] BeforeExit = ["Check for updates", "Check automatically", "-", "Exit"];
+    private static readonly string[] BeforeExit = ["Check for updates", "Check automatically", "-", "Copy diagnostics", "Exit"];
 
     private static string UpdateFolder(string root) => Path.Combine(root, "Local", "Earshot", "update");
 
@@ -46,7 +46,7 @@ public sealed class TrayUpdateTests
 
             string[] texts = AvailableTexts(tray.Context.Menu);
 
-            CollectionAssert.AreEqual(BeforeExit, texts[^4..]);
+            CollectionAssert.AreEqual(BeforeExit, texts[^5..]);
             Assert.AreEqual(CheckState.Unchecked, tray.MenuItem("Check automatically").CheckState, "Off by default.");
         });
     }

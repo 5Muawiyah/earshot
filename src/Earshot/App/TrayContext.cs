@@ -124,6 +124,15 @@ internal sealed record TrayStartOptions(
     // the real one by default, a fake in tests, so a tray-level test never registers a real global hotkey.
     public INativeHotkeys NativeHotkeys { get; init; } = new User32Hotkeys();
 
+    // What "Copy diagnostics" reads and writes, injected the same way: the frame log (a null one when not given), the log
+    // file's path (the real log when null) and the clipboard write (Clipboard.SetText when null), so a tray-level test
+    // never touches the owner's clipboard or log.
+    public Earshot.Diagnostics.IFrameLogSource? FrameLog { get; init; }
+
+    public Func<string>? DiagnosticsLogPath { get; init; }
+
+    public Action<string>? SetClipboardText { get; init; }
+
     // Builds the speech engine VoiceOver opens against, injected the same way: the real one by default, a
     // fake in tests, so a tray-level test never constructs a real SpeechSynthesizer. Called from
     // ApplyVoiceOver only when settings ask for a running announcer that is not running yet.
@@ -508,6 +517,8 @@ internal sealed partial class TrayContext : ApplicationContext
             CardPlace place = ClickPlace();
             _ = ExitAsync(place);
         };
+
+        WireDiagnostics(options);
 
         _notifyIcon = new NotifyIcon { ContextMenuStrip = _menu.Strip };
         _notifyIconVisibility = new NotifyIconVisibility(_notifyIcon);
@@ -1984,6 +1995,10 @@ internal sealed partial class TrayContext : ApplicationContext
             case HotkeyAction.SwitchToPc:
             case HotkeyAction.SwitchToPhone:
                 OnSwitchHotkey(e.Action);
+                break;
+
+            case HotkeyAction.OpenCard:
+                OnOpenCardHotkey();
                 break;
 
             default:

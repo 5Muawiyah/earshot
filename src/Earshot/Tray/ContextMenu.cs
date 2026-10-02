@@ -41,6 +41,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _repair = new();
     private readonly ToolStripMenuItem _checkForUpdates = new();
     private readonly ToolStripMenuItem _checkAutomatically = new();
+    private readonly ToolStripMenuItem _copyDiagnostics = new();
     private readonly ToolStripMenuItem _exit = new();
 
     public TrayMenu(Func<MenuState> state)
@@ -77,6 +78,7 @@ internal sealed class TrayMenu : IDisposable
             _checkForUpdates,
             _checkAutomatically,
             new ToolStripSeparator(),
+            _copyDiagnostics,
             _exit,
         ]);
 
@@ -97,6 +99,7 @@ internal sealed class TrayMenu : IDisposable
         _repair.Click += (_, _) => RepairClicked?.Invoke(this, EventArgs.Empty);
         _checkForUpdates.Click += (_, _) => CheckForUpdatesClicked?.Invoke(this, EventArgs.Empty);
         _checkAutomatically.Click += (_, _) => CheckAutomaticallyClicked?.Invoke(this, EventArgs.Empty);
+        _copyDiagnostics.Click += (_, _) => CopyDiagnosticsClicked?.Invoke(this, EventArgs.Empty);
         _exit.Click += (_, _) => ExitClicked?.Invoke(this, EventArgs.Empty);
         Strip.Opening += OnOpening;
 
@@ -143,6 +146,8 @@ internal sealed class TrayMenu : IDisposable
 
     public event EventHandler? CheckAutomaticallyClicked;
 
+    public event EventHandler? CopyDiagnosticsClicked;
+
     public event EventHandler? ExitClicked;
 
     public ContextMenuStrip Strip { get; }
@@ -182,6 +187,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_repair, state.Repair);
         Set(_checkForUpdates, state.CheckForUpdates);
         Set(_checkAutomatically, state.CheckAutomatically);
+        Set(_copyDiagnostics, state.CopyDiagnostics);
         Set(_exit, state.Exit);
     }
 

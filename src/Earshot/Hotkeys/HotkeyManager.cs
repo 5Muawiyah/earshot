@@ -20,7 +20,7 @@ namespace Earshot.Hotkeys;
 // would reorder the owner's key presses.
 public sealed class HotkeyManager : IDisposable
 {
-    // Base of the hot key ids: 0x4A00 through 0x4A05, one per HotkeyAction, inside the application
+    // Base of the hot key ids: 0x4A00 through 0x4A06, one per HotkeyAction, inside the application
     // range 0x0000 to 0xBFFF that RegisterHotKey requires (0xC000 and above is reserved for shared
     // DLLs, which take theirs from GlobalAddAtom).
     public const int HotkeyIdBase = 0x4A00;
@@ -47,6 +47,7 @@ public sealed class HotkeyManager : IDisposable
         HotkeyAction.SpeakStatus,
         HotkeyAction.SwitchToPc,
         HotkeyAction.SwitchToPhone,
+        HotkeyAction.OpenCard,
     ];
 
     private readonly IMessageWindow _window;

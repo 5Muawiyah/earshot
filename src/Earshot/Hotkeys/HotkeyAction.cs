@@ -4,6 +4,8 @@ namespace Earshot.Hotkeys;
 // names which one a registered key combination asked for. Connecting, protecting audio and blocking at boot are
 // the host's own controllers; speaking a status aloud is the announcer's.
 //
+// OpenCard opens the widget card, or closes it when it is open; it never touches the device.
+//
 // SwitchToPc and SwitchToPhone are stated directions: a press asks for that end state whatever the tray last
 // believed, unlike ToggleConnection, which does the opposite of what the tray shows. New members are only ever
 // appended, because each one's hot key id is HotkeyManager.HotkeyIdBase plus its value.
@@ -15,4 +17,5 @@ public enum HotkeyAction
     SpeakStatus,
     SwitchToPc,
     SwitchToPhone,
+    OpenCard,
 }

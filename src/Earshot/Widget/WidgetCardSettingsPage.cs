@@ -415,6 +415,7 @@ internal sealed partial class WidgetCard
     {
         SettingsRowId.Connect => CardShortcut.Connect,
         SettingsRowId.Disconnect => CardShortcut.Disconnect,
+        SettingsRowId.OpenCard => CardShortcut.OpenCard,
         _ => null,
     };
 
@@ -802,8 +803,8 @@ internal sealed partial class WidgetCard
                     break;
                 case SettingsRowId.Connect:
                 case SettingsRowId.Disconnect:
-                    string chord = item.Row == SettingsRowId.Connect ? values.ConnectChord : values.DisconnectChord;
-                    DrawShortcut(g, item, colours, chord, focusVisible, focus);
+                case SettingsRowId.OpenCard:
+                    DrawShortcut(g, item, colours, values.ChordFor(item.Row), focusVisible, focus);
                     break;
                 case SettingsRowId.CheckForUpdates:
                     CardPaint.SmallButton(g, item.A, WidgetCopy.CheckButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
@@ -870,7 +871,7 @@ internal sealed partial class WidgetCard
         _capturing == row ? WidgetCopy.ShortcutPressKeys : string.IsNullOrEmpty(chord) ? WidgetCopy.ShortcutNotSet : chord;
 
     internal string ShortcutBoxText(SettingsRowId row) => _model.Settings is { } values
-        ? ShortcutBoxText(row, row == SettingsRowId.Connect ? values.ConnectChord : values.DisconnectChord)
+        ? ShortcutBoxText(row, values.ChordFor(row))
         : string.Empty;
 
     // The shortcut box, 136 by 28, and its 28 by 28 clear button. "Not set" in the tertiary colour when empty,

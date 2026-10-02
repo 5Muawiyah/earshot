@@ -23,10 +23,10 @@ public sealed class TrayMenuTests
         "Name your other device...", "-",
         "Choose device...", "Set up Earshot...", "-",
         "Check for updates", "Check automatically", "-",
-        "Exit",
+        "Copy diagnostics", "Exit",
     ];
 
-    private static readonly string[] CommandOrder = ["toggle", "block", "handback", "protect", "startup", "device", "setup", "exit"];
+    private static readonly string[] CommandOrder = ["toggle", "block", "handback", "protect", "startup", "device", "setup", "diagnostics", "exit"];
 
     private static readonly string[] WidgetCommandOrder = ["taskbar", "leftclick", "lowbattery", "othername"];
 
@@ -370,6 +370,7 @@ public sealed class TrayMenuTests
             menu.OpenOnStartupClicked += (_, _) => raised.Add("startup");
             menu.ChooseDeviceClicked += (_, _) => raised.Add("device");
             menu.SetUpClicked += (_, _) => raised.Add("setup");
+            menu.CopyDiagnosticsClicked += (_, _) => raised.Add("diagnostics");
             menu.ExitClicked += (_, _) => raised.Add("exit");
 
             foreach (ToolStripMenuItem item in menu.Items.OfType<ToolStripMenuItem>().Where(i => i.Available && i.Enabled))

@@ -51,7 +51,7 @@ public sealed class HotkeyBindingModelTests
 
         Assert.AreEqual(string.Empty, model.Chord(HotkeyAction.SwitchToPhone));
         Assert.IsFalse(model.RegistrationFailed(HotkeyAction.SwitchToPhone), "No chord is not a failure.");
-        Assert.AreEqual(1, native.Calls.Count(c => c.Method == "RegisterHotKey"), "Only the connect shortcut should be registered.");
+        Assert.AreEqual(2, native.Calls.Count(c => c.Method == "RegisterHotKey"), "Only the connect and card shortcuts should be registered.");
     }
 
     [TestMethod]

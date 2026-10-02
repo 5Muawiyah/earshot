@@ -601,6 +601,24 @@ internal sealed partial class TrayContext
         }
     }
 
+    // The card shortcut: the same open a left click makes, so the card goes above the gauge when it is shown and where
+    // the tray icon click puts it when there is no gauge, and a press while the card is open closes it (the presenter's
+    // own second-click rule, so the update page, which a stray click must not close, is left open here too). It never
+    // starts a connect or a disconnect, whatever the LeftClickConnects setting says, since it opens a card and nothing
+    // else. A keyboard open shows the card's focus visual from the start, as an icon selected from the keyboard does.
+    private void OnOpenCardHotkey()
+    {
+        _log.Info("Hotkey: open or close the card.");
+        if (_widgetCardPresenter is not null)
+        {
+            OpenWidgetCard(openedByKeyboard: true);
+        }
+        else
+        {
+            ShowStatusCard();
+        }
+    }
+
     // IWidgetStatus.CaseOpened, documented as already raised on the UI thread. The presenter itself runs
     // every gate (the setting, closing, the owner's own card already open, the notification state,
     // hand-back or a session end) before it shows anything; this only supplies where the gauge is, the same

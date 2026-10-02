@@ -40,6 +40,7 @@ public sealed class MenuModelTests
         Assert.AreEqual("Choose device...", state.ChooseDevice.Text);
         Assert.AreEqual("Set up Earshot...", state.SetUp.Text);
         Assert.AreEqual("Repair Earshot...", state.Repair.Text);
+        Assert.AreEqual("Copy diagnostics", state.CopyDiagnostics.Text);
         Assert.AreEqual("Exit", state.Exit.Text);
     }
 

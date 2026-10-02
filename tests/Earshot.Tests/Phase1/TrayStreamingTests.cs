@@ -123,7 +123,7 @@ public sealed class TrayStreamingTests
                     "Name your other device...", "-",
                     "Choose device...", "Repair Earshot...", "-",
                     "Check for updates", "Check automatically", "-",
-                    "Exit"),
+                    "Copy diagnostics", "Exit"),
                 texts);
         });
     }
