@@ -247,15 +247,18 @@ internal static class WidgetCopy
     public static string LowBatteryCaseText(int percent) => LowBatteryText(CaseLabel, percent);
 
     // The fully charged notice's line: "Left AirPod at 100%, fully charged" for a live reading, and for an estimate
-    // "Left AirPod ≈100%, estimated", with the sign before the value as everywhere an estimate is shown.
-    public static string FullyChargedLeftText(bool estimated) => FullyChargedText(LeftAirPodLabel, estimated);
+    // "Left AirPod ≈100%, estimated from a reading 2 h ago", with the sign before the value as everywhere an estimate is
+    // shown, and the age of the reading the estimate grew from (the notice's own time, StaleAgeAmount), as every estimate carries.
+    public static string FullyChargedLeftText(bool estimated, TimeSpan age) => FullyChargedText(LeftAirPodLabel, estimated, age);
 
-    public static string FullyChargedRightText(bool estimated) => FullyChargedText(RightAirPodLabel, estimated);
+    public static string FullyChargedRightText(bool estimated, TimeSpan age) => FullyChargedText(RightAirPodLabel, estimated, age);
 
-    public static string FullyChargedCaseText(bool estimated) => FullyChargedText(CaseLabel, estimated);
+    public static string FullyChargedCaseText(bool estimated, TimeSpan age) => FullyChargedText(CaseLabel, estimated, age);
 
-    private static string FullyChargedText(string partLabel, bool estimated) =>
-        estimated ? partLabel + " " + EstimateSign + "100%, estimated" : partLabel + " at 100%, fully charged";
+    private static string FullyChargedText(string partLabel, bool estimated, TimeSpan age) =>
+        estimated
+            ? partLabel + " " + EstimateSign + "100%, estimated from a reading " + StaleAgeAmount(age) + " ago"
+            : partLabel + " at 100%, fully charged";
 
     private static string LowBatteryText(string partLabel, int percent) =>
         partLabel + " at " + percent.ToString(CultureInfo.InvariantCulture) + "%";

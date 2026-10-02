@@ -733,6 +733,8 @@ driven by a timer on the tray's clock and tested on a fake one. With Windows' An
 a constant window opacity (a layered window with `SetLayeredWindowAttributes`), and Microsoft does not
 say whether the system backdrop and the rounded corners survive that style, so there is one switch,
 `CardMotion.UseAlphaFade`, that turns the fade off and drops the layered style if they do not.
+The card lays out at its target size while the window height moves, so mid-resize the card is clipped by the
+window; that is a design choice, not a defect.
 
 **Focus.** No control draws a dotted focus rectangle. Keyboard focus draws the Windows 11 focus visual:
 a gap of 1 px, a 1 px inner stroke and a 2 px outer stroke round the control, scaled with the display, in

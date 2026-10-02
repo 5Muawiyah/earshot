@@ -118,7 +118,7 @@ internal sealed class LowBatteryAlertService : IDisposable
 
     // Feeds one part to the fully charged latch and keeps the spent marks beside it: a part saved as spent on the reading it is
     // shown from is spent again at the first look (a restart is not a new charge), and a change of the latch is written.
-    private void NotifyFull(ChargeComponent component, ShownPart part, bool on, Func<bool, string> text)
+    private void NotifyFull(ChargeComponent component, ShownPart part, bool on, Func<bool, TimeSpan, string> text)
     {
         int index = (int)component;
         SpentMark? key = part is { HasValue: true, ReadAt: DateTimeOffset readAt, Percent: int percent }
@@ -148,7 +148,9 @@ internal sealed class LowBatteryAlertService : IDisposable
 
         if (step != FullyChargedStep.None && on)
         {
-            Notify(text(step == FullyChargedStep.Estimated));
+            // The age is of the reading an estimate grew from (ShownPart.ReadAt), so the notice carries it as the card does.
+            TimeSpan age = part.ReadAt is DateTimeOffset grownFrom ? _time.GetUtcNow() - grownFrom : TimeSpan.Zero;
+            Notify(text(step == FullyChargedStep.Estimated, age));
         }
     }
 

@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Globalization;
-using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
 
@@ -37,17 +36,24 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
     private readonly List<Action<TimeSpan>> _subscribers = [];
     private readonly ManualResetEventSlim _wanted = new(false);
     private readonly AutoResetEvent _delivered = new(false);
-    private readonly Dictionary<nint, IDXGIOutput> _outputs = [];
+    private readonly IVBlankOutputs _outputs;
     private Thread? _thread;
-    private nint _hwnd;
     private int _posted;
     private volatile bool _disposed;
-    private int _lastProblem;
+    private bool _failing;
 
-    // window: the window whose display paces the frames, read on the UI thread at each subscription (0 while it has no
+    // window: the window whose display paces the frames, read on the clock's thread before every wait (0 while it has no
     // handle: the primary display's nearest output is used).
     public VBlankFrameClock(Func<nint> window, Action<Action> uiPost, ILog log)
+        : this(window, uiPost, log, new DxgiVBlankOutputs())
     {
+    }
+
+    // outputs: the display system, a fake in tests.
+    internal VBlankFrameClock(Func<nint> window, Action<Action> uiPost, ILog log, IVBlankOutputs outputs)
+    {
+        ArgumentNullException.ThrowIfNull(outputs);
+        _outputs = outputs;
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(uiPost);
         ArgumentNullException.ThrowIfNull(log);
@@ -62,13 +68,12 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
     {
         ArgumentNullException.ThrowIfNull(onFrame);
         _subscribers.Add(onFrame);
-        Volatile.Write(ref _hwnd, _window());
         if (_subscribers.Count == 1 && !_disposed)
         {
             if (_thread is null)
             {
                 _thread = new Thread(Run) { IsBackground = true, Name = "Earshot frame clock" };
-                _thread.SetApartmentState(ApartmentState.MTA);
+                _outputs.ConfigureThread(_thread);
                 _thread.Start();
             }
 
@@ -78,17 +83,31 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
         return new Subscription(this, onFrame);
     }
 
+    // UI thread. The thread, once started, ends on seeing the flag and disposes the events itself (it may be waiting on them);
+    // with no thread started they are disposed here.
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
         _subscribers.Clear();
+        if (_thread is null)
+        {
+            _wanted.Dispose();
+            _delivered.Dispose();
+            return;
+        }
+
         _wanted.Set();
         _delivered.Set();
     }
 
     private void Unsubscribe(Action<TimeSpan> onFrame)
     {
-        if (_subscribers.Remove(onFrame) && _subscribers.Count == 0)
+        if (_subscribers.Remove(onFrame) && _subscribers.Count == 0 && !_disposed)
         {
             _wanted.Reset();
         }
@@ -101,19 +120,24 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
             _wanted.Wait();
             if (_disposed)
             {
-                ReleaseOutputs();
+                _outputs.Release();
+                _wanted.Dispose();
+                _delivered.Dispose();
                 return;
             }
 
             bool paced = WaitForBlank();
             TimeSpan at = paced ? Now : Now + Unpaced;
-            if (_wanted.IsSet && Interlocked.CompareExchange(ref _posted, 1, 0) == 0)
+            bool posted = false;
+            if (_wanted.IsSet && !_disposed && Interlocked.CompareExchange(ref _posted, 1, 0) == 0)
             {
+                posted = true;
                 _uiPost(() => Deliver(at));
             }
 
             // With nothing to wait on, the thread waits for the frame it posted to arrive instead, which ends every motion.
-            if (!paced)
+            // Nothing posted (a frame still in flight, or nobody wanting one) means nothing will arrive to wait for.
+            if (!paced && posted)
             {
                 _delivered.WaitOne();
             }
@@ -123,12 +147,13 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
     // UI thread.
     private void Deliver(TimeSpan at)
     {
-        Volatile.Write(ref _posted, 0);
-        _delivered.Set();
         if (_disposed)
         {
             return;
         }
+
+        Volatile.Write(ref _posted, 0);
+        _delivered.Set();
 
         foreach (Action<TimeSpan> subscriber in _subscribers.ToArray())
         {
@@ -142,113 +167,39 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
     // Waits for the next blank of the window's display. False when there was nothing to wait on.
     private bool WaitForBlank()
     {
-        nint monitor = Shell.MonitorFromWindow(Volatile.Read(ref _hwnd), Shell.MONITOR_DEFAULTTONEAREST);
-        if (!_outputs.TryGetValue(monitor, out IDXGIOutput? output))
+        nint monitor = _outputs.MonitorFor(_window());
+        if (!_outputs.Has(monitor))
         {
             // Displays come and go: the outputs are listed again whenever a monitor is not among them.
-            int listed = ListOutputs();
-            if (listed < 0 || !_outputs.TryGetValue(monitor, out output))
+            int listed = _outputs.ListOutputs();
+            if (listed < 0 || !_outputs.Has(monitor))
             {
                 Problem(listed < 0 ? listed : Dxgi.DXGI_ERROR_NOT_FOUND, "no DXGI output shows the window's display");
                 return false;
             }
         }
 
-        int hr = output.WaitForVBlank();
+        int hr = _outputs.WaitForVBlank(monitor);
         if (hr < 0)
         {
             Problem(hr, "IDXGIOutput::WaitForVBlank failed");
-            ReleaseOutputs();
+            _outputs.Release();
             return false;
         }
 
+        _failing = false;
         return true;
     }
 
-    // Every output of every adapter, by its monitor. Returns the first failing HRESULT, or 0.
-    private int ListOutputs()
-    {
-        ReleaseOutputs();
-        int hr = Dxgi.CreateFactory(out IDXGIFactory1? factory);
-        if (hr < 0 || factory is null)
-        {
-            return hr < 0 ? hr : ComActivation.E_POINTER;
-        }
-
-        try
-        {
-            for (uint a = 0; ; a++)
-            {
-                hr = factory.EnumAdapters(a, out nint adapterPointer);
-                if (hr == Dxgi.DXGI_ERROR_NOT_FOUND)
-                {
-                    return 0;
-                }
-
-                hr = ComActivation.TakeInterface(hr, adapterPointer, out IDXGIAdapter? adapter);
-                if (hr < 0 || adapter is null)
-                {
-                    return hr < 0 ? hr : ComActivation.E_POINTER;
-                }
-
-                try
-                {
-                    for (uint o = 0; ; o++)
-                    {
-                        hr = adapter.EnumOutputs(o, out nint outputPointer);
-                        if (hr == Dxgi.DXGI_ERROR_NOT_FOUND)
-                        {
-                            break;
-                        }
-
-                        hr = ComActivation.TakeInterface(hr, outputPointer, out IDXGIOutput? output);
-                        if (hr < 0 || output is null)
-                        {
-                            return hr < 0 ? hr : ComActivation.E_POINTER;
-                        }
-
-                        hr = output.GetDesc(out DXGI_OUTPUT_DESC desc);
-                        if (hr < 0 || !_outputs.TryAdd(desc.Monitor, output))
-                        {
-                            Marshal.ReleaseComObject(output);
-                            if (hr < 0)
-                            {
-                                return hr;
-                            }
-                        }
-                    }
-                }
-                finally
-                {
-                    Marshal.ReleaseComObject(adapter);
-                }
-            }
-        }
-        finally
-        {
-            Marshal.ReleaseComObject(factory);
-        }
-    }
-
-    private void ReleaseOutputs()
-    {
-        foreach (IDXGIOutput output in _outputs.Values)
-        {
-            Marshal.ReleaseComObject(output);
-        }
-
-        _outputs.Clear();
-    }
-
-    // Each distinct failure is logged once, with its raw code.
+    // A run of failures is logged once, with the raw code of its first; the next success ends the run, so a later run is logged again.
     private void Problem(int hr, string what)
     {
-        if (hr == _lastProblem)
+        if (_failing)
         {
             return;
         }
 
-        _lastProblem = hr;
+        _failing = true;
         _log.Warn("Motion: " + what + " (HRESULT 0x" + hr.ToString("X8", CultureInfo.InvariantCulture) + "), so this motion ends in one frame.");
     }
 

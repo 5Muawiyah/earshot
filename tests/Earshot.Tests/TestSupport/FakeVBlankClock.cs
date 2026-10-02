@@ -13,6 +13,9 @@ internal sealed class FakeVBlankClock(double hz) : IFrameClock
 
     public double Hz { get; } = hz;
 
+    // How far ahead of Now each frame is stamped: zero for a display, an hour for the real clock's unpaced fallback.
+    public TimeSpan StampAhead { get; set; }
+
     public TimeSpan Now { get; private set; }
 
     // Live subscriptions now, and how many were ever made.
@@ -48,7 +51,7 @@ internal sealed class FakeVBlankClock(double hz) : IFrameClock
         {
             if (_subscribers.Contains(subscriber))
             {
-                subscriber(Now);
+                subscriber(Now + StampAhead);
             }
         }
 

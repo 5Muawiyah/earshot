@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Earshot.Diagnostics;
 using Earshot.Tests.Streaming;
 using Earshot.Widget;
@@ -133,4 +134,29 @@ public sealed class UiStallMonitorTests
     }
 
     private static Action SlowAction(TestTimeProvider time) => () => time.Advance(TimeSpan.FromMilliseconds(50));
+
+    // DWM_TIMING_INFO is declared between pshpack1.h and poppack.h in dwmapi.h, so its fields are packed to one byte, and
+    // cbSize must be the size that packing gives or DwmGetCompositionTimingInfo refuses the call. The size is worked out here
+    // from the documented field list, not from the struct under test.
+    // https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ns-dwmapi-dwm_timing_info
+    [TestMethod]
+    public void TheTimingInfoIsTheSizeOfTheDocumentedFieldListPackedToOneByte()
+    {
+        // UINT32 fields: cbSize (1); rateRefresh and rateCompose, each an UNSIGNED_RATIO of two UINT32 (2 x 2 = 4); and the six
+        // UINT counters cDXRefresh, cDXPresent, cDXPresentSubmitted, cDXPresentConfirmed, cDXRefreshConfirmed, cFramesOutstanding.
+        const int Uint32Fields = 1 + (2 * 2) + 6;
+
+        // UINT64 fields (QPC_TIME and DWM_FRAME_COUNT are both unsigned 64 bit): qpcRefreshPeriod, qpcVBlank, cRefresh,
+        // qpcCompose, cFrame, cRefreshFrame, cFrameSubmitted, cFrameConfirmed, cRefreshConfirmed, cFramesLate, cFrameDisplayed,
+        // qpcFrameDisplayed, cRefreshFrameDisplayed, cFrameComplete, qpcFrameComplete, cFramePending, qpcFramePending,
+        // cFramesDisplayed, cFramesComplete, cFramesPending, cFramesAvailable, cFramesDropped, cFramesMissed,
+        // cRefreshNextDisplayed, cRefreshNextPresented, cRefreshesDisplayed, cRefreshesPresented, cRefreshStarted,
+        // cPixelsReceived, cPixelsDrawn, cBuffersEmpty: thirty one.
+        const int Uint64Fields = 31;
+
+        // 11 x 4 + 31 x 8 = 44 + 248 = 292 bytes.
+        const int PackedSize = (Uint32Fields * 4) + (Uint64Fields * 8);
+
+        Assert.AreEqual(PackedSize, Marshal.SizeOf<RefreshInterval.DwmTimingInfo>());
+    }
 }

@@ -228,9 +228,9 @@ internal sealed partial class WidgetCard
     private void ForgetMovingParts()
     {
         ForgetFills();
-        foreach (AnimatedValue knob in _knobs.Values)
+        foreach (ShownValue knob in _knobs.Values)
         {
-            _driver?.Stop(knob);
+            knob.Stop(_driver);
         }
 
         _knobs.Clear();
@@ -378,7 +378,7 @@ internal sealed partial class WidgetCard
 
     // ---- Toggle knobs
 
-    private readonly Dictionary<object, AnimatedValue> _knobs = [];
+    private readonly Dictionary<object, ShownValue> _knobs = [];
     private readonly Dictionary<object, Rectangle> _knobBounds = [];
 
     // Where the knob of the toggle named key is drawn, 0 off to 1 on. A toggle seen for the first time is where it rests; one
@@ -387,9 +387,9 @@ internal sealed partial class WidgetCard
     {
         double target = on ? 1 : 0;
         _knobBounds[key] = bounds;
-        if (!_knobs.TryGetValue(key, out AnimatedValue? knob))
+        if (!_knobs.TryGetValue(key, out ShownValue? knob))
         {
-            _knobs[key] = new AnimatedValue(target);
+            _knobs[key] = new ShownValue(target);
             return target;
         }
 
@@ -398,19 +398,20 @@ internal sealed partial class WidgetCard
             knob.AnimateTo(target, CanAnimateContent ? _driver : null, FluentMotion.ToggleDuration, FluentMotion.ToggleCurve, _ =>
             {
                 // A knob put there in one step is drawn by the paint under way; only frames ask for more.
-                if (_driver?.IsRunning(knob) == true)
+                if (knob.IsMoving(_driver))
                 {
                     MarkDirty(Rectangle.Inflate(_knobBounds[key], 1, 1));
                 }
             });
         }
 
-        return _driver is null ? knob.Target : knob.ValueAt(_driver.Now);
+        // The value the last frame was given (not one read from the wall clock): a frame may be stamped ahead of now.
+        return knob.Level(_driver);
     }
 
     // ---- Expanders
 
-    private sealed record ExpanderBand(SettingsRowId Row, SettingsLayout Expanded, int Split, int Delta, AnimatedValue Reveal);
+    private sealed record ExpanderBand(SettingsRowId Row, SettingsLayout Expanded, int Split, int Delta, ShownValue Reveal);
 
     private ExpanderBand? _band;
 
@@ -431,16 +432,19 @@ internal sealed partial class WidgetCard
         double from = opening ? 0 : delta;
         if (_band is { } running && running.Row == row && running.Delta == delta)
         {
-            from = running.Reveal.ValueAt(_driver!.Now);
+            from = running.Reveal.Level(_driver);
         }
 
         StopExpander();
-        var reveal = new AnimatedValue(from);
+        var reveal = new ShownValue(from);
         _band = new ExpanderBand(row, expanded, head.Bounds.Bottom, delta, reveal);
-        reveal.AnimateTo(opening ? delta : 0, _driver, FluentMotion.HeightDuration, FluentMotion.PointToPoint, _ =>
+        double to = opening ? delta : 0;
+        reveal.AnimateTo(to, _driver, FluentMotion.HeightDuration, FluentMotion.PointToPoint, v =>
         {
             MarkDirty(ClientRectangle);
-            if (!_driver!.IsRunning(reveal) || !reveal.MovingAt(_driver.Now))
+
+            // The frame's own value, not the wall clock's: the step that hands over the end is the last, so the band is done.
+            if (!reveal.IsMoving(_driver) || v == to)
             {
                 _band = null;
             }
@@ -451,25 +455,25 @@ internal sealed partial class WidgetCard
     {
         if (_band is { } band)
         {
-            _driver?.Stop(band.Reveal);
+            band.Reveal.Stop(_driver);
             _band = null;
         }
     }
 
     // How far the band is open now, for tests, or null when no expander is moving.
-    internal double? ExpanderRevealForTest => _band is { } band && _driver is not null ? band.Reveal.ValueAt(_driver.Now) : null;
+    internal double? ExpanderRevealForTest => _band is { } band && _driver is not null ? band.Reveal.Level(_driver) : null;
 
     // The rows of the settings page, with a moving band where an expander opens or closes: the rows above it as they are, the
     // band cut to how far it is open, and the rows below moved up by what is not yet open.
     private void DrawSettingsRowsMoving(Graphics g, CardSettingsValues values, SettingsLayout layout, CardColours colours, bool focusVisible, SettingsTarget focus)
     {
-        if (_band is not { } band || _driver is null || !band.Reveal.MovingAt(_driver.Now))
+        if (_band is not { } band || !band.Reveal.IsMoving(_driver))
         {
             DrawSettingsRows(g, values, layout, colours, focusVisible, focus);
             return;
         }
 
-        int open = (int)Math.Round(band.Reveal.ValueAt(_driver.Now), MidpointRounding.AwayFromZero);
+        int open = (int)Math.Round(band.Reveal.Level(_driver), MidpointRounding.AwayFromZero);
         int width = band.Expanded.Frame.Width;
         const int Far = 1 << 20;
         Rectangle[] parts =

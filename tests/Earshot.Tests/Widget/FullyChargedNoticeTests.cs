@@ -133,7 +133,7 @@ public sealed class FullyChargedNoticeTests : IDisposable
         _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(45)));
 
         Assert.AreEqual(1, _notifier.Calls.Count);
-        Assert.AreEqual(("Earshot", "Case ≈100%, estimated"), _notifier.Calls[0]);
+        Assert.AreEqual(("Earshot", "Case ≈100%, estimated from a reading 41 min ago"), _notifier.Calls[0]);
     }
 
     [TestMethod]
@@ -188,7 +188,7 @@ public sealed class FullyChargedNoticeTests : IDisposable
         _status.Raise(Live(box: 100));
 
         Assert.AreEqual(1, _notifier.Calls.Count);
-        Assert.AreEqual(("Earshot", "Case ≈100%, estimated"), _notifier.Calls[0]);
+        Assert.AreEqual(("Earshot", "Case ≈100%, estimated from a reading 41 min ago"), _notifier.Calls[0]);
     }
 
     [TestMethod]

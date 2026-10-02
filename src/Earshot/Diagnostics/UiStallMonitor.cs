@@ -80,9 +80,11 @@ internal static class RefreshInterval
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern int DwmGetCompositionTimingInfo(nint hwnd, ref DwmTimingInfo info);
 
-    // DWM_TIMING_INFO (dwmapi.h), every field in its documented order; only the refresh rate is read.
-    [StructLayout(LayoutKind.Sequential)]
-    private struct DwmTimingInfo
+    // DWM_TIMING_INFO (dwmapi.h), every field in its documented order; only the refresh rate is read. The header packs it to one
+    // byte, so Pack = 1 gives the size cbSize must carry (without it the UINT64 fields are aligned and the struct is larger).
+    // https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ns-dwmapi-dwm_timing_info
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct DwmTimingInfo
     {
         public uint cbSize;
         public uint rateRefreshNumerator;
