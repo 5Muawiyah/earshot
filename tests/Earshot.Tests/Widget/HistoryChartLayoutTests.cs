@@ -129,7 +129,8 @@ public sealed class HistoryChartLayoutTests
         DateTimeOffset end = new(2026, 10, 2, 0, 0, 0, TimeSpan.Zero);
         HistoryChartGeometry chart = HistoryChartLayout.Compute(Plot, WindowOf(end), Utc);
 
-        Assert.AreEqual("00:00 06:00 12:00 18:00", string.Join(" ", chart.XLabels.Select(l => l.Text)));
+        string[] labels = ["00:00", "06:00", "12:00", "18:00"];
+        CollectionAssert.AreEqual(labels, chart.XLabels.Select(l => l.Text).ToArray());
         Assert.AreEqual("10 70 130 190", string.Join(" ", chart.XLabels.Select(l => l.Position)));
     }
 
@@ -139,7 +140,8 @@ public sealed class HistoryChartLayoutTests
         // 15:00 now: the window starts at 15:00 yesterday, so the labels are 18:00, 00:00, 06:00, 12:00.
         HistoryChartGeometry chart = HistoryChartLayout.Compute(Plot, WindowOf(Now), Utc);
 
-        Assert.AreEqual("18:00 00:00 06:00 12:00", string.Join(" ", chart.XLabels.Select(l => l.Text)));
+        string[] labels = ["18:00", "00:00", "06:00", "12:00"];
+        CollectionAssert.AreEqual(labels, chart.XLabels.Select(l => l.Text).ToArray());
         Assert.AreEqual(10f + (3f * 10f), chart.XLabels[0].Position, 0.001f, "Three hours into the window.");
     }
 
@@ -148,7 +150,8 @@ public sealed class HistoryChartLayoutTests
     {
         HistoryChartGeometry chart = HistoryChartLayout.Compute(Plot, WindowOf(Now), Plus1);
 
-        Assert.AreEqual("18:00 00:00 06:00 12:00", string.Join(" ", chart.XLabels.Select(l => l.Text)));
+        string[] labels = ["18:00", "00:00", "06:00", "12:00"];
+        CollectionAssert.AreEqual(labels, chart.XLabels.Select(l => l.Text).ToArray());
         Assert.AreEqual(10f + (2f * 10f), chart.XLabels[0].Position, 0.001f, "17:00 UTC is 18:00 at +1, two hours into the window.");
     }
 

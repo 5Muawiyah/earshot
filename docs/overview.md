@@ -671,9 +671,9 @@ whether or not a pair is linked.
 **The accepted risk.** A pair of the same model, and the same colour once one is
 held, that opens its case next to the PC more strongly than yours can be linked
 instead, and one whose levels equal your pair's last, heard within 30 seconds of
-yours going quiet, can be followed as if it were yours. The owner accepted that risk
-rather than add a set-up step to rule it out. Opening your own case next to the PC,
-at least 8 dB stronger than the other pair, takes the link back. The case-open
+yours going quiet, can be followed as if it were yours. And once your pair has been unheard for more than ten seconds (the case shut, or out of range), any pair of the same model that opens its case at -70 dBm or stronger is linked at once, with no 8 dB margin. The owner accepted that risk
+rather than add a set-up step to rule it out. Opening your own case next to the PC takes the link back:
+at least 8 dB stronger while the other pair is still heard, or at -70 dBm or stronger once it has been unheard for 10 seconds. The case-open
 card follows the link, so a pair that takes it that way also shows the card.
 
 ### What still needs a kernel driver

@@ -153,7 +153,7 @@ internal sealed partial class WidgetCard
             using var pen = new Pen(ink, Math.Max(1f, 1.2f * s)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
             SmoothingMode before = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.DrawLines(pen, [new PointF(cx - dx, cy - (5 * s)), new PointF(cx + dx, cy), new PointF(cx - dx, cy + (5 * s))]);
+            g.DrawLines(pen, new PointF[] { new(cx - dx, cy - (5 * s)), new(cx + dx, cy), new(cx - dx, cy + (5 * s)) });
             g.SmoothingMode = before;
         }
 

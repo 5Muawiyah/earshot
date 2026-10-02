@@ -142,6 +142,16 @@ public sealed class ComVtableOrderTests
         "get_AutomationElementMode", "put_AutomationElementMode",
     ];
 
+    // The DXGI interfaces up to the last method Earshot calls (shared\dxgi.h). Each starts with IDXGIObject's four after IUnknown;
+    // IDXGIFactory1 declares IDXGIFactory's first method too (EnumAdapters), the one it calls, not its own EnumAdapters1.
+    private static readonly string[] DxgiObject = ["SetPrivateData", "SetPrivateDataInterface", "GetPrivateData", "GetParent"];
+
+    private static readonly string[] DxgiFactory1 = [.. DxgiObject, "EnumAdapters"];
+
+    private static readonly string[] DxgiAdapter = [.. DxgiObject, "EnumOutputs"];
+
+    private static readonly string[] DxgiOutput = [.. DxgiObject, "GetDesc", "GetDisplayModeList", "FindClosestMatchingMode", "WaitForVBlank"];
+
     public static IEnumerable<object[]> Interfaces =>
     [
         [typeof(IMMDeviceEnumerator), IUnknownSlots, MMDeviceEnumerator],
@@ -174,6 +184,9 @@ public sealed class ComVtableOrderTests
         [typeof(IUIAutomationElement), IUnknownSlots, UIAutomationElement],
         [typeof(IUIAutomationElementArray), IUnknownSlots, UIAutomationElementArray],
         [typeof(IUIAutomationCacheRequest), IUnknownSlots, UIAutomationCacheRequest],
+        [typeof(IDXGIFactory1), IUnknownSlots, DxgiFactory1],
+        [typeof(IDXGIAdapter), IUnknownSlots, DxgiAdapter],
+        [typeof(IDXGIOutput), IUnknownSlots, DxgiOutput],
     ];
 
     public static string InterfaceName(MethodInfo method, object[] data) => ((Type)data[0]).Name;

@@ -109,7 +109,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         _animationsEnabled = animationsEnabled;
 
         // Each card's frames come from the display it is on (VBlankFrameClock); a test hands in a fake clock.
-        _frameClockFor = frameClockFor ?? (card => new VBlankFrameClock(() => card.IsHandleCreated ? card.Handle : 0, uiPost, log));
+        _frameClockFor = frameClockFor ?? (card => new VBlankFrameClock(() => card.IsHandleCreated ? card.Handle : 0, uiPost, log, new NoVBlankOutputs()));
 
         // The work area of the display an anchor is on. The tray reads the real displays; a test hands in a fixed area so a
         // page's placement does not depend on the screen the tests happen to run on.

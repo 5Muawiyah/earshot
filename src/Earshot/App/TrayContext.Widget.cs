@@ -172,7 +172,8 @@ internal sealed partial class TrayContext
                 () => CreateWidgetCard(notice: true), _widgetCardCallbacks, caseOpenGate,
                 _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log,
                 new SystemCaseOpenCardScene(_displaySource, ShownGaugeBounds),
-                animationsEnabled: CardAnimationsEnabled());
+                animationsEnabled: CardAnimationsEnabled(),
+                frameClockFor: card => NewFrameClock(() => card.IsHandleCreated ? card.Handle : 0));
         }
 
         if (_registry.Settings.Current.Widget.ShowOnTaskbar)
@@ -528,7 +529,7 @@ internal sealed partial class TrayContext
     {
         if (_widgetCardPresenter is null)
         {
-            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost, CardAnimationsEnabled(), anchor => SystemDisplaySource.WorkAreaFor(_displaySource, anchor));
+            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost, CardAnimationsEnabled(), anchor => SystemDisplaySource.WorkAreaFor(_displaySource, anchor), frameClockFor: card => NewFrameClock(() => card.IsHandleCreated ? card.Handle : 0));
             WireLook();
         }
 
@@ -597,10 +598,12 @@ internal sealed partial class TrayContext
 
     // A real gauge window, with motion: its ring and hover fill move one frame per refresh of the display it is on, and not at
     // all with Windows' animation effects off (read at each change).
+    private VBlankFrameClock NewFrameClock(Func<nint> window) => new(window, _registry.UiPost, _log, new DxgiVBlankOutputs());
+
     private GaugeWindow CreateGaugeWindow()
     {
         var window = new GaugeWindow(_log, order: () => _registry.Settings.Current.Widget.GaugeOrder);
-        window.AttachMotion(new VBlankFrameClock(() => window.IsHandleCreated ? window.Handle : 0, _registry.UiPost, _log), new SystemAnimationSetting(_log).Enabled);
+        window.AttachMotion(NewFrameClock(() => window.IsHandleCreated ? window.Handle : 0), new SystemAnimationSetting(_log).Enabled);
         return window;
     }
 

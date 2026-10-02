@@ -85,8 +85,7 @@ paired model, a case level (which only a pair in an open case sends), a signal o
 at least -70 dBm held for about two seconds (the first such set, unless a pair opening
 its case later is 8 dB stronger). It then
 follows the pair across address changes by the levels it last said, and drops the
-link after two minutes without hearing it. A same-model pair that opens its case
-more strongly could be linked instead, a risk the owner accepts. See
+link after two minutes without hearing it. A same-model pair that opens its case more strongly could be linked instead, and once your pair has been unheard for ten seconds any same-model pair at -70 dBm or stronger is linked with no margin; a risk the owner accepts. See
 [overview.md](overview.md#whose-airpods-it-shows).
 
 **Live test.** A test run by hand against the real AirPods and, for some

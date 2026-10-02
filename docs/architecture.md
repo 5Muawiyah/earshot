@@ -386,7 +386,7 @@ definition of what the card, the gauge and its tooltip show. The owner's pair is
 shown wherever it is. A part's value is one of three kinds:
 
 - *Live*: a reading of the linked set heard by this run within 30 seconds, drawn
-  as current. In use the set sends about 35 documented messages a minute; a closed
+  as current. In the saved records the set in use sends about 35 documented messages a minute; a closed
   case sends nothing, so values stop being live about half a minute after the lid
   closes.
 - *Last*: the last reading of the part, of any age, drawn in the stale style
@@ -436,9 +436,7 @@ a model and one for the case, learned from the owner's own live readings by
 within two minutes of the reading before it, the last below 100%, 15 minutes to
 3 hours apart; a new sample replaces the rate held) and kept beside the last readings.
 There is no case estimate until a charge of the case has been learned. The buds of
-one model have a seed from Apple's published fast-charge figure (one hour of eight
-hours of listening in five minutes, 150 points an hour), which is off until the
-owner has confirmed the wording (`ChargeRates.UseAppleBudSeed`).
+one model have a seed from the fast-charge figure Apple's AirPods Pro 3 tech specs page (https://support.apple.com/en-us/125135) is said to give (about one hour of listening, of up to eight, in five minutes; worked out as 150 points an hour). That wording could not be fetched here and is unconfirmed, so the seed is off until the owner has read it (`ChargeRates.UseAppleBudSeed`).
 
 *The gauge.* On this PC its number is the lower bud, live or else last or estimated
 in tertiary ink, or Windows' own figure while that is current and no bud is live.
@@ -500,7 +498,7 @@ a topmost, layered overlay window, owned by the taskbar it sits on (an owned win
 owner in the z-order, so the system keeps the gauge above the bar wherever the shell raises the bar;
 https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#owned-windows), positioned over free taskbar space, which it finds by
 reading the taskbar's own button layout through UI Automation, when the shell
-says the taskbar moved or changed and on a 10 second safety poll (see Speed
+says the taskbar moved or changed and on a 10 second safety poll (a design choice) (see Speed
 below); the window's alpha-zero pixels let a click reach the taskbar
 underneath rather than the gauge
 (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
@@ -831,13 +829,12 @@ a pure function of the samples, the day and the card's scale.
 makes the card, lays it out, draws one frame into an off-screen bitmap and creates its window handle, without
 showing, placing or activating it, so the first open takes the path a later one does. The taskbar is read when
 `ShellWindowChangeHook` raises `EVENT_OBJECT_LOCATIONCHANGE` for a taskbar window of Explorer's process (the
-main and the secondary taskbars), coalesced, with a 10 second safety poll (`TaskbarWatcher.SafetyPollIntervalMs`)
+main and the secondary taskbars), coalesced, with a 10 second safety poll (`TaskbarWatcher.SafetyPollIntervalMs`, a design choice)
 in place of the 1 second poll while that event is installed; if it is not installed the 1 second poll stays.
 The linked set's silence check (`_linkTimer` in `WidgetStatusService`) is dormant while nothing is linked and is
 armed by the message that makes a link, so an Earshot with no AirPods in range wakes for nothing there. The
 release build is published with ReadyToRun (`tools\build-release.ps1`, `-p:PublishReadyToRun=true`, folder form,
-not single file), which precompiles the managed code beside the IL; the zip grew from about 57.6 MB to about
-68.4 MB in a local build. `StartupIdleAndCardMeasureTests` prints the start, idle and first card open figures;
+not single file), which precompiles the managed code beside the IL; the zip grew from about 57.6 MB to about 68.4 MB in one local publish on Linux (cross-targeted win-x64), not a Windows release build; the sizes were read off that publish, not timed or run. `StartupIdleAndCardMeasureTests` prints the start, idle and first card open figures;
 none has been measured on a release build.
 
 **Screen readers.** The gauge, the three battery columns, the buttons, the settings rows, the case-open card and

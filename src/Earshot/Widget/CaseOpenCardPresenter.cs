@@ -131,7 +131,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         _animationsEnabled = animationsEnabled;
 
         // Each card's frames come from the display it is on (VBlankFrameClock); a test hands in a fake clock.
-        _frameClockFor = frameClockFor ?? (card => new VBlankFrameClock(() => card.IsHandleCreated ? card.Handle : 0, uiPost, log));
+        _frameClockFor = frameClockFor ?? (card => new VBlankFrameClock(() => card.IsHandleCreated ? card.Handle : 0, uiPost, log, new NoVBlankOutputs()));
     }
 
     // True while a card is on screen on any display. For tests and the gauge card's own gate; the UI thread only.

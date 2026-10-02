@@ -44,13 +44,8 @@ internal sealed class VBlankFrameClock : IFrameClock, IDisposable
 
     // window: the window whose display paces the frames, read on the clock's thread before every wait (0 while it has no
     // handle: the primary display's nearest output is used).
-    public VBlankFrameClock(Func<nint> window, Action<Action> uiPost, ILog log)
-        : this(window, uiPost, log, new DxgiVBlankOutputs())
-    {
-    }
-
-    // outputs: the display system, a fake in tests.
-    internal VBlankFrameClock(Func<nint> window, Action<Action> uiPost, ILog log, IVBlankOutputs outputs)
+    // outputs: the display system (DXGI's, composed at the tray; a fake in tests).
+    public VBlankFrameClock(Func<nint> window, Action<Action> uiPost, ILog log, IVBlankOutputs outputs)
     {
         ArgumentNullException.ThrowIfNull(outputs);
         _outputs = outputs;

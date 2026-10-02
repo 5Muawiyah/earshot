@@ -168,7 +168,7 @@ What to know before you trust a number:
   case at -70 dBm or stronger is linked at once, with no 8 dB margin to clear.
   I accept that risk, and you should know it is there. Saved readings, estimates
   and the case-open card all follow that link, so a pair that takes it is shown
-  as mine. Opening your own case at least 8 dB stronger takes the link back.
+  as mine. Opening your own case takes the link back: at least 8 dB stronger while the other pair is still heard, or at -70 dBm or stronger once it has been unheard for 10 seconds.
 - **Last readings.** The last reading of each bud and the case of your linked
   pair is shown, greyed with its age, wherever the AirPods are and however old
   it is, until a newer one is heard. It is kept across a restart in
@@ -259,8 +259,7 @@ The .NET SDK 10 on Windows x64.
 self-test against a fake machine, and fails if any compiler or analyser
 warning is suppressed anywhere in the solution. `tools\build-release.ps1`
 publishes the self-contained win-x64 folder, checks it against the manifest,
-zips it to `artifacts\` and prints the zip's size and SHA-256. The release is
-precompiled (ReadyToRun) to start faster, which makes the zip larger. I have
+zips it to `artifacts\` and prints the zip's size and SHA-256. The release is precompiled (ReadyToRun), a design choice meant to start it faster, which makes the zip larger. I have
 not measured a release build yet.
 
 The live device tests under `tools\live-tests` are run by hand on real AirPods
