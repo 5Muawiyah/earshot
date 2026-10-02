@@ -624,12 +624,20 @@ internal static class SettingsPageLayout
         // order. The pictures are one stop in the keyboard order; the arrow keys move among them.
         {
             Size gaugeSize = GaugeLayout.SizeFor(dpi);
-            int header = Math.Max(CardPlacement.Scale(OrderHeaderAt96, dpi), gaugeSize.Height + (2 * rowPad));
             BeginGroup();
             int top = y;
-            var orderLabel = new Rectangle(labelLeft, top + ((header - labelLine) / 2), labelArea, labelLine);
-            var chevron = new Rectangle(right - chevronBox, top + ((header - chevronBox) / 2), chevronBox, chevronBox);
-            var preview = new Rectangle(chevron.X - gap - gaugeSize.Width, top + ((header - gaugeSize.Height) / 2), gaugeSize.Width, gaugeSize.Height);
+
+            // The label has the room left of the gauge picture, which is left of the chevron; a label that is wider than that (large
+            // text) wraps in it and makes the header taller, like a row's label beside its control, and never runs under the picture.
+            int chevronX = right - chevronBox;
+            int previewX = chevronX - gap - gaugeSize.Width;
+            int orderLabelWidth = Math.Max(1, previewX - gap - labelLeft);
+            int orderLabelHeight = labelLine * measure.Lines(WidgetCopy.SettingsOrder, orderLabelWidth, fourteen, labelLine);
+            int header = Math.Max(
+                Math.Max(CardPlacement.Scale(OrderHeaderAt96, dpi), gaugeSize.Height + (2 * rowPad)), orderLabelHeight + (2 * rowPad));
+            var orderLabel = new Rectangle(labelLeft, top + ((header - orderLabelHeight) / 2), orderLabelWidth, orderLabelHeight);
+            var chevron = new Rectangle(chevronX, top + ((header - chevronBox) / 2), chevronBox, chevronBox);
+            var preview = new Rectangle(previewX, top + ((header - gaugeSize.Height) / 2), gaugeSize.Width, gaugeSize.Height);
             var headBounds = new Rectangle(surfaceLeft, top, surfaceWidth, header);
             items.Add(Dressed(new SettingsItem(
                 SettingsItemKind.Row, SettingsRowId.GaugeOrder, WidgetCopy.SettingsOrder, null, false, headBounds, orderLabel,

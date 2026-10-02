@@ -13,7 +13,7 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class WidgetCardTextScaleTests
 {
-    private static readonly int[] Dpis = [96, 120, 144];
+    private static readonly int[] Dpis = [96, 120, 144, 168];
     private static readonly double[] Scales = [1.0, 1.5, 2.25];
 
     private static IEnumerable<Rectangle> MainRectangles(WidgetCardLayout.Layout layout)
@@ -114,8 +114,9 @@ public sealed class WidgetCardTextScaleTests
                         }
 
                         Assert.IsTrue(page.Contains(control), item.Row + " control inside the page: " + control + where);
-                        // A row that opens (the gauge order's header) takes a press anywhere on it: that part is the row itself, not a control
-                        // beside the label.
+                        // A row that opens (the gauge order's header, Updates, History) takes a press anywhere on it: that part is the row
+                        // itself, not a control beside the label. What is drawn beside the label in such a row, its gauge picture and its
+                        // chevron, is checked against the label below instead.
                         if (control == item.Bounds)
                         {
                             continue;
@@ -128,6 +129,28 @@ public sealed class WidgetCardTextScaleTests
                         }
                     }
 
+                    foreach ((string name, Rectangle part) in new[] { ("preview", item.Preview), ("chevron", item.Chevron) })
+                    {
+                        if (part.IsEmpty)
+                        {
+                            continue;
+                        }
+
+                        Assert.IsTrue(item.Bounds.Contains(part), item.Row + " " + name + " inside its row" + where);
+                        Assert.IsFalse(part.IntersectsWith(item.LabelRect), item.Row + " " + name + " clear of its label" + where);
+                    }
+
+                    if (!item.Preview.IsEmpty && !item.Chevron.IsEmpty)
+                    {
+                        Assert.IsFalse(item.Preview.IntersectsWith(item.Chevron), item.Row + " preview clear of its chevron" + where);
+                    }
+
+                    // The label's words fit the rectangle it is given, wrapped in it: the rectangle is what stays clear of the controls,
+                    // so text that needed more room than it would be drawn under them.
+                    int fourteen = CardPlacement.Scale(14, dpi);
+                    int labelLine = TextFit.Grow(SettingsPageLayout.LabelLineAt96, dpi, scale);
+                    int lines = measure.Lines(item.Label, item.LabelRect.Width, fourteen, labelLine);
+                    Assert.IsLessThanOrEqualTo(item.LabelRect.Height, lines * labelLine, item.Row + " label fits its rectangle" + where);
                     Assert.IsTrue(page.Contains(item.LabelRect), item.Row + " label inside the page" + where);
                     Assert.IsGreaterThan(CardPlacement.Scale(40, dpi) - 1, item.LabelRect.Width - 1, item.Row + " label has room to be read" + where);
                 }
