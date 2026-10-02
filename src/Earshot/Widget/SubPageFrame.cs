@@ -151,6 +151,14 @@ internal static partial class CardPaint
     // default format, which does, let the layout size a label to a width the drawing then wrapped inside and cut short.)
     internal const TextRenderingHint CardTextHint = TextRenderingHint.AntiAliasGridFit;
 
+    // Every piece of text a card draws, with the rectangle it was given and how it was drawn, for a test that checks each one fits.
+    // Null outside such a test: nothing is kept. Per thread, so a test on its own thread sees only its own card.
+    [ThreadStatic]
+    internal static List<DrawnText>? DrawnTextLog;
+
+    internal static void NoteDrawn(string text, Rectangle bounds, Font font, StringFormat format) =>
+        DrawnTextLog?.Add(new DrawnText(text, bounds, font.FontFamily.Name, font.Size, font.Style, font.Unit, format.FormatFlags, format.Alignment, format.LineAlignment, format.Trimming));
+
     // A line of text placed in bounds, cut with an ellipsis at a character when it is too long.
     internal static StringFormat SingleLineFormat(StringAlignment horizontal, StringAlignment vertical) =>
         new() { Alignment = horizontal, LineAlignment = vertical, Trimming = StringTrimming.EllipsisCharacter };
@@ -159,13 +167,57 @@ internal static partial class CardPaint
     internal static StringFormat WrappedFormat() =>
         new() { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Near, Trimming = StringTrimming.EllipsisWord };
 
+    // A single line of text in bounds. A line too long for the width is drawn smaller until it fits (a value, a time, a chord, a button's
+    // word, where there is nothing to wrap), never cut short with an ellipsis: the type size follows the person's text size, and where
+    // that does not leave room it gives way a little rather than lose the end of a number. Words that can take more lines are
+    // drawn with Wrapped in a rectangle the layout sized for them.
     public static void Text(
         Graphics g, string text, Rectangle bounds, CardType type, int pixelSize, bool bold, Color colour, StringAlignment horizontal, StringAlignment vertical)
     {
-        using Font font = type.Font(pixelSize, bold);
-        using var brush = new SolidBrush(colour);
         using StringFormat format = SingleLineFormat(horizontal, vertical);
+        using Font font = FittingFont(g, text, bounds, type, pixelSize, bold, format);
+        using var brush = new SolidBrush(colour);
         g.DrawString(text, font, brush, bounds, format);
+        NoteDrawn(text, bounds, font, format);
+    }
+
+    // The font at the asked size, or the largest smaller one (down to 55% of it) with which the whole text fits the rectangle.
+    internal static Font FittingFont(Graphics g, string text, Rectangle bounds, CardType type, int pixelSize, bool bold, StringFormat format)
+    {
+        int size = pixelSize;
+        int floor = Math.Max(6, pixelSize * 55 / 100);
+        while (true)
+        {
+            Font font = type.Font(size, bold);
+            if (size <= floor || FitsWhole(g, text, bounds, font, format))
+            {
+                return font;
+            }
+
+            font.Dispose();
+            size--;
+        }
+    }
+
+    // Whether GDI+ puts every character of text inside the rectangle in this font and format, at the card's text hint.
+    internal static bool FitsWhole(Graphics g, string text, Rectangle bounds, Font font, StringFormat format)
+    {
+        if (text.Length == 0 || bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return true;
+        }
+
+        TextRenderingHint before = g.TextRenderingHint;
+        g.TextRenderingHint = CardTextHint;
+        try
+        {
+            _ = g.MeasureString(text, font, new SizeF(bounds.Width, bounds.Height), format, out int fitted, out _);
+            return fitted >= text.Length;
+        }
+        finally
+        {
+            g.TextRenderingHint = before;
+        }
     }
 
     // Text that wraps inside bounds, top-aligned.
@@ -175,6 +227,7 @@ internal static partial class CardPaint
         using var brush = new SolidBrush(colour);
         using StringFormat format = WrappedFormat();
         g.DrawString(text, font, brush, bounds, format);
+        NoteDrawn(text, bounds, font, format);
     }
 
     // How many lines text takes when wrapped to width, at the given size, measured as Wrapped draws it; at least 1.
@@ -576,3 +629,8 @@ internal static partial class CardPaint
 
     private static int Scale(int valueAt96, int dpi) => CardPlacement.Scale(valueAt96, dpi);
 }
+
+// One piece of text as it was drawn: what, where, in which font and with which format.
+internal readonly record struct DrawnText(
+    string Text, Rectangle Bounds, string FontFamily, float FontSize, FontStyle FontStyle, GraphicsUnit FontUnit,
+    StringFormatFlags Flags, StringAlignment Horizontal, StringAlignment Vertical, StringTrimming Trimming);

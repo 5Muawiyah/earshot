@@ -243,15 +243,16 @@ internal static class WidgetCardLayout
     // button). Control is where the toggle, the glyph or the button is.
     internal sealed record UpdatesRowLayout(int Index, Rectangle Surface, Rectangle Icon, Rectangle Label, Rectangle Control);
 
-    // promptLines, captionLines and subLines: how many lines the prompt (14 px), the caption (12 px) and the
-    // status sub-line (12 px) wrap to at this width, measured by the caller since this layout draws nothing.
+    // promptLines, captionLines, subLines and statusLines: how many lines the prompt (14 px), the caption (12 px), the
+    // status sub-line (12 px) and the status line (14 px) wrap to at this width, measured by the caller since this layout draws nothing.
     public static SetupLayout Setup(
-        SetupViewModel view, int dpi, int promptLines = 1, int captionLines = 1, int subLines = 1, double textScale = 1.0, int actionWidth = 0)
+        SetupViewModel view, int dpi, int promptLines = 1, int captionLines = 1, int subLines = 1, double textScale = 1.0, int actionWidth = 0,
+        int titleLines = 1, ICardTextMeasure? measure = null, int statusLines = 1)
     {
         ArgumentNullException.ThrowIfNull(view);
         if (view.Rows is not null)
         {
-            return UpdatesPage(view, dpi, captionLines, subLines, textScale, actionWidth);
+            return UpdatesPage(view, dpi, captionLines, subLines, textScale, actionWidth, titleLines, measure);
         }
 
         if (view.History is not null)
@@ -305,13 +306,14 @@ internal static class WidgetCardLayout
         Rectangle statusSub = Rectangle.Empty;
         if (view.Status is not null)
         {
-            int textHeight = promptLine + (view.StatusSub is null ? 0 : captionLine * Math.Max(1, subLines));
+            int statusTextHeight = promptLine * Math.Max(1, statusLines);
+            int textHeight = statusTextHeight + (view.StatusSub is null ? 0 : captionLine * Math.Max(1, subLines));
             int rowHeight = Math.Max(iconSize, textHeight);
             int top = Place(rowHeight);
             statusIcon = new Rectangle(side, top + ((rowHeight - iconSize) / 2), iconSize, iconSize);
             int textX = statusIcon.Right + iconGap;
             int textTop = top + ((rowHeight - textHeight) / 2);
-            statusText = new Rectangle(textX, textTop, width - side - textX, promptLine);
+            statusText = new Rectangle(textX, textTop, width - side - textX, statusTextHeight);
             if (view.StatusSub is not null)
             {
                 statusSub = new Rectangle(textX, statusText.Bottom, width - side - textX, captionLine * Math.Max(1, subLines));
@@ -345,8 +347,10 @@ internal static class WidgetCardLayout
     // title, the caption and the action) and a row each for Check automatically, What's new and, with an install, Repair. A row is as
     // high as a single-line settings row, 20t + 12 for its control and 8 above and below. subLines is how many lines the status
     // caption wraps to; captionLines how many the cause under it wraps to. actionWidth is the action button's width, measured by the
-    // caller from its words (0 for a default).
-    internal static SetupLayout UpdatesPage(SetupViewModel view, int dpi, int captionLines, int subLines, double textScale, int actionWidth)
+    // caller from its words (0 for a default). titleLines is how many lines the title wraps to; measure counts the lines a row's name
+    // wraps to beside its control (without one every name is a line), and a row grows with them.
+    internal static SetupLayout UpdatesPage(
+        SetupViewModel view, int dpi, int captionLines, int subLines, double textScale, int actionWidth, int titleLines = 1, ICardTextMeasure? measure = null)
     {
         UpdatesRows rows = view.Rows!;
         int width = CardPlacement.Scale(SubPageFrame.WidthAt96, dpi);
@@ -364,7 +368,7 @@ internal static class WidgetCardLayout
         bool inline = view.Buttons.Count == 1;
 
         int y = CardPlacement.Scale(SettingsPageLayout.BodyTopAt96, dpi);
-        int textBlock = titleLine + (captionLine * Math.Max(1, subLines));
+        int textBlock = (titleLine * Math.Max(1, titleLines)) + (captionLine * Math.Max(1, subLines));
         int statusHeight = Math.Max(Math.Max(tileSize, textBlock) + (2 * pad), CardPlacement.Scale(UpdatesStatusMinAt96, dpi));
         var surface = new Rectangle(side, y, surfaceWidth, statusHeight);
         var tile = new Rectangle(surface.X + padLeft, surface.Y + ((statusHeight - tileSize) / 2), tileSize, tileSize);
@@ -376,7 +380,7 @@ internal static class WidgetCardLayout
         int textLeft = tile.Right + gap;
         int textRight = (inline ? action.X : surface.Right - padRight) - gap;
         int textTop = surface.Y + ((statusHeight - textBlock) / 2);
-        var title = new Rectangle(textLeft, textTop, Math.Max(1, textRight - textLeft), titleLine);
+        var title = new Rectangle(textLeft, textTop, Math.Max(1, textRight - textLeft), titleLine * Math.Max(1, titleLines));
         var caption = new Rectangle(textLeft, title.Bottom, Math.Max(1, textRight - textLeft), captionLine * Math.Max(1, subLines));
 
         // The turning arc while a check runs sits where the action would be.
@@ -399,13 +403,14 @@ internal static class WidgetCardLayout
         }
 
         var list = new List<UpdatesRowLayout>();
-        int rowHeight = control + (2 * pad);
         int iconSize = CardPlacement.Scale(SettingsPageLayout.IconSizeAt96, dpi);
         int labelLeft = surface.X + padLeft + iconSize + CardPlacement.Scale(SettingsPageLayout.IconGapAt96, dpi);
         int toggleWidth = CardPlacement.Scale(ToggleWidthAt96, dpi);
         int toggleHeight = CardPlacement.Scale(ToggleHeightAt96, dpi);
         int glyphBox = CardPlacement.Scale(SettingsPageLayout.ChevronAt96, dpi) + CardPlacement.Scale(8, dpi);
         int repairWidth = buttonWidth;
+        int fourteen = CardPlacement.Scale(14, dpi);
+        int labelLine = TextFit.Grow(SettingsPageLayout.LabelLineAt96, dpi, textScale);
         for (int i = 0; i < 3; i++)
         {
             if (i == 2 && !rows.ShowRepair)
@@ -413,12 +418,21 @@ internal static class WidgetCardLayout
                 continue;
             }
 
-            var rowSurface = new Rectangle(side, y, surfaceWidth, rowHeight);
             int controlWidth = i switch { 0 => toggleWidth, 1 => glyphBox, _ => repairWidth };
             int controlHeight = i == 0 ? toggleHeight : i == 1 ? glyphBox : control;
+
+            // The name wraps in the room left of the control, and the row is as high as it needs: the control row (20t + 12) or the
+            // name's lines, whichever is more, with 8 above and below.
+            string name = i switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, _ => WidgetCopy.RepairEarshot };
+            int labelWidth = Math.Max(1, (surface.Right - padRight - controlWidth) - gap - labelLeft);
+            int nameLines = measure is null ? 1 : Math.Max(1, measure.Lines(name, labelWidth, fourteen, labelLine));
+            int nameHeight = labelLine * nameLines;
+            int rowHeight = Math.Max(control, nameHeight) + (2 * pad);
+
+            var rowSurface = new Rectangle(side, y, surfaceWidth, rowHeight);
             var controlRect = new Rectangle(rowSurface.Right - padRight - controlWidth, rowSurface.Y + ((rowHeight - controlHeight) / 2), controlWidth, controlHeight);
             var icon = new Rectangle(surface.X + padLeft, rowSurface.Y + ((rowHeight - iconSize) / 2), iconSize, iconSize);
-            var label = new Rectangle(labelLeft, rowSurface.Y + pad, Math.Max(1, controlRect.X - gap - labelLeft), control);
+            var label = new Rectangle(labelLeft, rowSurface.Y + ((rowHeight - nameHeight) / 2), labelWidth, nameHeight);
             list.Add(new UpdatesRowLayout(i, rowSurface, icon, label, controlRect));
             y = rowSurface.Bottom + rowGap;
         }

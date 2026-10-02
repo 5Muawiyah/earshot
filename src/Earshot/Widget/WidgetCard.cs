@@ -417,6 +417,7 @@ internal sealed partial class WidgetCard : Form
         int promptLines = setup.Prompt is null ? 1 : CardPaint.Lines(measure, setup.Prompt, contentWidth, _type, CardPlacement.Scale(14, _dpi), bold: true);
         int captionLines = setup.Caption is null ? 1 : CardPaint.Lines(measure, setup.Caption, contentWidth, _type, CardPlacement.Scale(12, _dpi), bold: false);
         int subLines = setup.StatusSub is null ? 1 : CardPaint.Lines(measure, setup.StatusSub, textWidth, _type, CardPlacement.Scale(12, _dpi), bold: false);
+        int statusLines = setup.Status is null || setup.Rows is not null ? 1 : CardPaint.Lines(measure, setup.Status, textWidth, _type, CardPlacement.Scale(14, _dpi), bold: false);
         int actionWidth = 0;
         if (setup.Rows is not null)
         {
@@ -433,8 +434,22 @@ internal sealed partial class WidgetCard : Form
             subLines = CardPaint.Lines(measure, UpdatesCaptionText(setup), captionWidth, _type, CardPlacement.Scale(12, _dpi), bold: false);
         }
 
-        return WidgetCardLayout.Setup(setup, _dpi, promptLines, captionLines, subLines, _look.TextScale, actionWidth);
+        int titleLines = 1;
+        if (setup.Rows is { } updateRows)
+        {
+            int titlePadding = CardPlacement.Scale(SettingsPageLayout.RowPadLeftAt96 + SettingsPageLayout.RowPadRightAt96, _dpi);
+            int titleGap = CardPlacement.Scale(WidgetCardLayout.StatusIconGapAt96, _dpi);
+            int titleSurface = CardPlacement.Scale(SubPageFrame.WidthAt96, _dpi) - (2 * CardPlacement.Scale(SettingsPageLayout.BodySideAt96, _dpi));
+            int titleWidth = Math.Max(1, titleSurface - titlePadding - CardPlacement.Scale(WidgetCardLayout.UpdatesTileAt96, _dpi) - (3 * titleGap) - actionWidth);
+            titleLines = CardPaint.Lines(measure, UpdatesTitleText(updateRows), titleWidth, _type, CardPlacement.Scale(14, _dpi), bold: true);
+        }
+
+        return WidgetCardLayout.Setup(setup, _dpi, promptLines, captionLines, subLines, _look.TextScale, actionWidth, titleLines, new GraphicsTextMeasure(measure, _type), statusLines);
     }
+
+    // The updates page's title: the app's name and the version that is installed.
+    internal static string UpdatesTitleText(UpdatesRows rows) =>
+        rows.Version is { } version ? WidgetCopy.CardApp + " " + version : WidgetCopy.CardApp;
 
     // The updates page's status caption: the state in words, and its second line when it has one.
     internal static string UpdatesCaptionText(SetupViewModel setup) =>
@@ -1138,6 +1153,7 @@ internal sealed partial class WidgetCard : Form
         using var brush = new SolidBrush(Colours.TextSecondary);
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         g.DrawString(text, font, brush, bounds, format);
+        CardPaint.NoteDrawn(text, bounds, font, format);
     }
 
     // The mark is a filled shape in the primary text colour, never the accent: the earbud in a square of the mark's height.
@@ -1192,7 +1208,8 @@ internal sealed partial class WidgetCard : Form
         CardColours colours = Colours;
         if (shown.Percent is not { } percent)
         {
-            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Number, StringAlignment.Center);
+            // Words, not a number: in the body size, which at a large text size gives way to the column's width where the number's would not.
+            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Body, StringAlignment.Center);
             return;
         }
 
@@ -1352,10 +1369,27 @@ internal sealed partial class WidgetCard : Form
 
     private void DrawText(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role, StringAlignment horizontal)
     {
-        using Font font = _type.Role(role);
-        using var brush = new SolidBrush(colour);
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = horizontal, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+        using Font font = FittingRoleFont(g, text, bounds, role, format);
+        using var brush = new SolidBrush(colour);
         g.DrawString(text, font, brush, bounds, format);
+        CardPaint.NoteDrawn(text, bounds, font, format);
+    }
+
+    // The role's font, or the largest smaller one (down to 55% of its size) with which the whole text fits the rectangle.
+    private Font FittingRoleFont(Graphics g, string text, Rectangle bounds, TypeRole role, StringFormat format)
+    {
+        int asked = TypeRamp.SizePx(role, _dpi, _look.TextScale);
+        int floor = Math.Max(6, asked * 55 / 100);
+        Font font = _type.Role(role);
+        for (int size = asked - 1; size >= floor && !CardPaint.FitsWhole(g, text, bounds, font, format); size--)
+        {
+            Font smaller = new(font.FontFamily, size, font.Style, GraphicsUnit.Pixel);
+            font.Dispose();
+            font = smaller;
+        }
+
+        return font;
     }
 
     // The button: 4 px corners, the accent when it connects (the text on it the token for text on accent) and the standard control
@@ -1655,7 +1689,7 @@ internal sealed partial class WidgetCard : Form
                     break;
             }
 
-            CardPaint.Text(g, setup.Status, layout.StatusText, _type, CardPlacement.Scale(14, _dpi), bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
+            CardPaint.Wrapped(g, setup.Status, layout.StatusText, _type, CardPlacement.Scale(14, _dpi), bold: false, colours.Text);
             if (setup.StatusSub is not null)
             {
                 CardPaint.Wrapped(g, setup.StatusSub, layout.StatusSub, _type, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary);
@@ -1693,8 +1727,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         DrawTileMark(g, layout.Tile, colours.OnAccent);
-        string title = rows.Version is { } version ? WidgetCopy.CardApp + " " + version : WidgetCopy.CardApp;
-        CardPaint.Text(g, title, layout.StatusTitle, _type, fourteen, bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
+        CardPaint.Wrapped(g, UpdatesTitleText(rows), layout.StatusTitle, _type, fourteen, bold: true, colours.Text);
         CardPaint.Wrapped(g, UpdatesCaptionText(setup), layout.StatusCaption, _type, twelve, bold: false, setup.Icon == SetupIcon.Caution ? colours.Caution : colours.TextSecondary);
         if (setup.Icon == SetupIcon.Spinner && layout.Action.IsEmpty)
         {
@@ -1723,7 +1756,7 @@ internal sealed partial class WidgetCard : Form
             char glyph = row.Index switch { 0 => FluentGlyphs.Sync, 1 => FluentGlyphs.WhatsNew, _ => FluentGlyphs.Repair };
             string label = row.Index switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, _ => WidgetCopy.RepairEarshot };
             CardPaint.Glyph(g, glyph, row.Icon, colours.Text, _dpi);
-            CardPaint.Text(g, label, row.Label, _type, fourteen, bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
+            CardPaint.Wrapped(g, label, row.Label, _type, fourteen, bold: false, colours.Text);
             bool focused = focusVisible && focus == new SetupTarget(SetupTargetKind.Row, row.Index);
             switch (row.Index)
             {
