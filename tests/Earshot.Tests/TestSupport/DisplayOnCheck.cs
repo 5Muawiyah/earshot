@@ -34,7 +34,11 @@ internal static class InputIdle
 
 // What reading the display-off timeout gave. Timeout is null when it could not be read, zero when the setting is "never", else the
 // time. Code is the raw Win32 return of the call that failed (0 when none did); Step names that call, and Source is AC or DC.
-internal readonly record struct DisplayOffTimeoutReading(TimeSpan? Timeout, uint Code, string Step, string Source);
+internal readonly record struct DisplayOffTimeoutReading(TimeSpan? Timeout, uint Code, string Step, string Source)
+{
+    // Nothing was asked of Windows (no display to check), as opposed to a call that failed: no code, and the reason in Step.
+    internal static DisplayOffTimeoutReading NotRead(string reason) => new(null, 0, "not read: " + reason, "");
+}
 
 // The active power scheme's "Turn off display after" setting, read only: PowerGetActiveScheme for the scheme, then
 // PowerReadACValueIndex or PowerReadDCValueIndex for the power source in use (GetSystemPowerStatus: ACLineStatus 1 is online, 0 offline,
@@ -125,7 +129,11 @@ internal static class DisplayOffTimeout
 
 // What reading the session's lock state gave. Locked is null when it could not be read or the session says it does not know. Flags is
 // the raw SessionFlags, Code the raw Win32 error when the call failed (0 when it did not), Step what failed.
-internal readonly record struct SessionLockReading(bool? Locked, uint Flags, uint Code, string Step);
+internal readonly record struct SessionLockReading(bool? Locked, uint Flags, uint Code, string Step)
+{
+    // Nothing was asked of Windows (no display to check), as opposed to a call that failed: no code, and the reason in Step.
+    internal static SessionLockReading NotRead(string reason) => new(null, 0, 0, "not read: " + reason);
+}
 
 // Whether this session is locked, read only: WTSQuerySessionInformation with WTSSessionInfoEx for the current session returns a WTSINFOEXW
 // (a DWORD Level, then the level 1 data: SessionId, SessionState, SessionFlags, so SessionFlags is at offset 12), freed with WTSFreeMemory.
@@ -187,6 +195,19 @@ internal static class SessionLock
             WTSFreeMemory(buffer);
         }
     }
+}
+
+// What the machine says about its display before the clock is asked anything: the lock state, the display-off timeout and the time
+// since input. Read only on a local session; elsewhere (a hosted runner, a remote session, a machine with no screen) there is no
+// display to check and nothing is read.
+internal sealed record DisplayEvidence(SessionLockReading Lock, DisplayOffTimeoutReading Timeout, TimeSpan? IdleBefore)
+{
+    internal static DisplayEvidence Read(bool localSession) =>
+        localSession
+            ? new DisplayEvidence(SessionLock.Read(), DisplayOffTimeout.Read(), InputIdle.Read())
+            : new DisplayEvidence(SessionLockReading.NotRead(NotLocal), DisplayOffTimeoutReading.NotRead(NotLocal), null);
+
+    private const string NotLocal = "not a local session, so there is no display to check";
 }
 
 internal sealed record DisplayVerdict(bool KnownOn, string Branch, string Reason);

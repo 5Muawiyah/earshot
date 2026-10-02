@@ -50,9 +50,7 @@ public sealed class VBlankFrameClockRealTests
         // Whether the display is on, decided without the clock under test and read-only: the active power scheme's display-off timeout
         // against the time since the last keyboard or mouse input in this session (DisplayState). Input more recent than the timeout
         // means the display has not been turned off by it. Input is read again after the run, so input stopping during it does not count.
-        SessionLockReading sessionLock = localSession ? SessionLock.Read() : default;
-        DisplayOffTimeoutReading timeout = localSession ? DisplayOffTimeout.Read() : default;
-        TimeSpan? idleBefore = localSession ? InputIdle.Read() : null;
+        DisplayEvidence evidence = DisplayEvidence.Read(localSession);
 
         StaThread.Run(() =>
         {
@@ -128,9 +126,8 @@ public sealed class VBlankFrameClockRealTests
             }
 
             TimeSpan? idleAfter = localSession ? InputIdle.Read() : null;
-            DisplayVerdict display = DisplayState.Decide(localSession, sessionLock, timeout, idleBefore, idleAfter);
+            DisplayVerdict display = DisplayState.Decide(localSession, evidence.Lock, evidence.Timeout, evidence.IdleBefore, idleAfter);
             bool displayKnownOn = display.KnownOn;
-            string displayCheck = display.Reason;
             var seen = new Seen(
                 pacedFrames, unpacedFrames, tooClose, stamps.Count,
                 Warned: log.Has(LogLevel.Warn, "Motion:"),
@@ -138,18 +135,7 @@ public sealed class VBlankFrameClockRealTests
                 ClockSaidStuck: log.Has(LogLevel.Warn, "has not returned"),
                 ClockLoggedRawCode: log.Has(LogLevel.Warn, "HRESULT 0x"),
                 LogEmpty: log.Entries.Count == 0);
-            string kind = unpacedFrames == 0 && tooClose == 0
-                ? "paced by the display"
-                : seen.ClockSaidOff ? "unpaced because the clock says the display is off" : unpacedFrames == stamps.Count ? "unpaced (no output to wait on)" : "mixed";
-            string outcome = "Real display clock: " + kind + ", " + pacedFrames + " paced (" + tooClose + " closer than " + MinBlankSpacing.TotalMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
-                + " ms) and " + unpacedFrames + " unpaced of "
-                + stamps.Count + " frames in " + timer.Elapsed.TotalMilliseconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
-                + " ms; DXGI lists an output: " + outputListed + "; local session: " + localSession + "; hosted runner: " + hostedRunner
-                + "; power read: timeout " + (timeout.Timeout is { } t ? t.TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " s " + timeout.Source : "unreadable") + ", Win32 code " + timeout.Code + (timeout.Step.Length > 0 ? " from " + timeout.Step : "")
-                + "; session lock: " + (sessionLock.Locked is { } locked ? (locked ? "locked" : "unlocked") : "unreadable") + ", SessionFlags 0x" + sessionLock.Flags.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)
-                + ", Win32 code " + sessionLock.Code + (sessionLock.Step.Length > 0 ? " from " + sessionLock.Step : "")
-                + "; display check: " + displayCheck + "; branch: " + (displayKnownOn ? "display known on (" + display.Branch + "), so the clock must be paced with an empty log" : "display not known on (" + display.Branch + "), so the clock's own account is accepted")
-                + "; log: " + held;
+            string outcome = BuildOutcome(seen, timer.Elapsed, outputListed, localSession, hostedRunner, evidence, display, held);
             RecordOutcome(outcome);
 
             string? failure = Judge(seen, mustBePaced, displayKnownOn);
@@ -162,6 +148,27 @@ public sealed class VBlankFrameClockRealTests
             Application.DoEvents();
             Assert.AreEqual(atRest, stamps.Count, "No frames after the subscription ended.");
         });
+    }
+
+    // The line recorded for a run. Built from plain values so a test can give it the inputs of any machine, including one where nothing
+    // about the display could be read.
+    internal static string BuildOutcome(Seen seen, TimeSpan elapsed, bool outputListed, bool localSession, bool hostedRunner, DisplayEvidence evidence, DisplayVerdict display, string held)
+    {
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        string kind = seen.Unpaced == 0 && seen.TooClose == 0
+            ? "paced by the display"
+            : seen.ClockSaidOff ? "unpaced because the clock says the display is off" : seen.Unpaced == seen.Frames ? "unpaced (no output to wait on)" : "mixed";
+        DisplayOffTimeoutReading timeout = evidence.Timeout;
+        SessionLockReading sessionLock = evidence.Lock;
+        return "Real display clock: " + kind + ", " + seen.Paced + " paced (" + seen.TooClose + " closer than " + MinBlankSpacing.TotalMilliseconds.ToString("0.0", invariant)
+            + " ms) and " + seen.Unpaced + " unpaced of "
+            + seen.Frames + " frames in " + elapsed.TotalMilliseconds.ToString("F0", invariant)
+            + " ms; DXGI lists an output: " + outputListed + "; local session: " + localSession + "; hosted runner: " + hostedRunner
+            + "; power read: timeout " + (timeout.Timeout is { } t ? t.TotalSeconds.ToString("F0", invariant) + " s " + timeout.Source : "unreadable") + ", Win32 code " + timeout.Code + (string.IsNullOrEmpty(timeout.Step) ? "" : " from " + timeout.Step)
+            + "; session lock: " + (sessionLock.Locked is { } locked ? (locked ? "locked" : "unlocked") : "unreadable") + ", SessionFlags 0x" + sessionLock.Flags.ToString("X8", invariant)
+            + ", Win32 code " + sessionLock.Code + (string.IsNullOrEmpty(sessionLock.Step) ? "" : " from " + sessionLock.Step)
+            + "; display check: " + display.Reason + "; branch: " + (display.KnownOn ? "display known on (" + display.Branch + "), so the clock must be paced with an empty log" : "display not known on (" + display.Branch + "), so the clock's own account is accepted")
+            + "; log: " + held;
     }
 
     // The least spacing between two paced stamps that is a real blank: the product's own floor for a wait that counts as one (the
@@ -426,5 +433,29 @@ public sealed class VBlankFrameClockRealJudgeTests
         {
             Assert.AreNotEqual(string.Empty, reading.Step, "An unreadable lock state names why.");
         }
+    }
+
+    // The inputs of a hosted runner or a remote session: not a local session, so nothing about the display is read. The first hosted run
+    // of the real test threw NullReferenceException building its outcome, because the unread readings were default values whose text
+    // fields were null. This drives the same path, with the same real call that gives the unread readings, and holds what the hosted
+    // branch held before: frames may be unpaced when the clock says why with the raw code, and not otherwise.
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void HostedShapedInputsGiveAnOutcomeAndTheSameVerdictWithoutThrowing(bool hostedRunner)
+    {
+        DisplayEvidence evidence = DisplayEvidence.Read(localSession: false);
+        DisplayVerdict display = DisplayState.Decide(false, evidence.Lock, evidence.Timeout, evidence.IdleBefore, null);
+        Assert.IsFalse(display.KnownOn, "Nothing was read, so the display is not known to be on.");
+
+        // What a machine with no output to wait on gave: every frame unpaced, the failure logged with its raw code.
+        VBlankFrameClockRealTests.Seen unpaced = Run(paced: 0, unpaced: 5, warned: true, rawCode: true);
+        string outcome = VBlankFrameClockRealTests.BuildOutcome(unpaced, TimeSpan.FromMilliseconds(138), false, false, hostedRunner, evidence, display, "Motion: no output (HRESULT 0x887A0003)");
+
+        StringAssert.Contains(outcome, "local session: False");
+        StringAssert.Contains(outcome, "not read", "The outcome says the display evidence was not read, and why.");
+        Assert.IsNull(VBlankFrameClockRealTests.Judge(unpaced, mustBePaced: false, displayKnownOn: display.KnownOn), "The hosted branch accepts unpaced frames that the clock explained.");
+        Assert.IsNotNull(VBlankFrameClockRealTests.Judge(Run(paced: 0, unpaced: 5), mustBePaced: false, displayKnownOn: display.KnownOn), "It still asks the clock to say why.");
+        Assert.IsNotNull(VBlankFrameClockRealTests.Judge(Run(paced: 0, unpaced: 5, warned: true), mustBePaced: false, displayKnownOn: display.KnownOn), "And to give the raw code of a failure.");
     }
 }
