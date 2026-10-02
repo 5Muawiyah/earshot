@@ -63,13 +63,16 @@ public sealed class GaugeDesignPixelTests
         AssertColour(Color.FromArgb(drawn.A, ink), drawn, 12, message + " (its colour)");
     }
 
-    private static void AssertNoInk(Bitmap bitmap, Rectangle area, string message)
+    // No ink in an area: every pixel at the idle alpha. Except the one column named as the ring's anti-alias fringe, where the alpha
+    // may reach FringeAlphaCap and no more (so a pixel of real ink there still fails).
+    private static void AssertNoInk(Bitmap bitmap, Rectangle area, string message, int fringeColumn = -1, int fringeCap = 0)
     {
         for (int y = area.Top; y < area.Bottom; y++)
         {
             for (int x = area.Left; x < area.Right; x++)
             {
-                Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)bitmap.GetPixel(x, y).A, message + " at " + x + "," + y);
+                int allowed = x == fringeColumn ? fringeCap : GaugePalette.IdleAlpha + 1;
+                Assert.IsLessThanOrEqualTo(allowed, (int)bitmap.GetPixel(x, y).A, message + " at " + x + "," + y);
             }
         }
     }
@@ -248,9 +251,11 @@ public sealed class GaugeDesignPixelTests
 
     // GDI+ anti-aliases an edge a little past the geometry it is given: probed on this machine (Windows 11, GDI+ with
     // SmoothingMode.AntiAlias and PixelOffsetMode.HighQuality), the ring's outer edge, which sits exactly on its box's edge, writes alpha
-    // 0x14 to 0x1D (8 to 11%) into the one pixel column beyond the box, and nothing into the second. So the first pixel column next to
-    // a slot is its anti-alias fringe, and the empty gap and padding are checked from the second.
-    private const int AntiAliasFringe = 1;
+    // 0x14 to 0x1D (8 to 11%) into the one pixel column to the right of the box in light and dark, and up to 0x2F (18%) under high
+    // contrast (a reviewer measured 0x20 there; this probe, run over every theme, scale and order, is the figure kept), and at most 1
+    // into the second column or into the column to its left. So that one column may hold alpha up to a little over the measured top
+    // (0x24, and 0x34 under high contrast) and every other pixel of a gap or padding must be clear.
+    internal static int FringeAlphaCap(bool highContrast) => highContrast ? 0x34 : 0x24;
 
     // All six orders at the three scales: the ring's track, the value and the bolt are each where the layout puts them, and the gaps
     // between them are empty.
@@ -274,14 +279,18 @@ public sealed class GaugeDesignPixelTests
         Rectangle Slot(GaugePiece piece) => piece switch { GaugePiece.Ring => layout.RingBox, GaugePiece.Number => layout.NumberSlot, _ => layout.ChargingSlot };
         foreach ((GaugePiece left, GaugePiece right) in new[] { (first, second), (second, third) })
         {
-            int gapLeft = Slot(left).Right + AntiAliasFringe;
-            int gapRight = Slot(right).Left - AntiAliasFringe;
-            AssertNoInk(bitmap, new Rectangle(gapLeft, 0, Math.Max(0, gapRight - gapLeft), layout.Height), "The gap between " + left + " and " + right + where);
+            int gapLeft = Slot(left).Right;
+            int gapRight = Slot(right).Left;
+            AssertNoInk(
+                bitmap, new Rectangle(gapLeft, 0, Math.Max(0, gapRight - gapLeft), layout.Height), "The gap between " + left + " and " + right + where,
+                fringeColumn: left == GaugePiece.Ring ? layout.RingBox.Right : -1, fringeCap: FringeAlphaCap(theme == DesignTheme.HighContrast));
         }
 
-        AssertNoInk(bitmap, new Rectangle(0, 0, Math.Max(0, Slot(first).Left - AntiAliasFringe), layout.Height), "The left padding" + where);
-        int rightPadStart = Slot(third).Right + AntiAliasFringe;
-        AssertNoInk(bitmap, new Rectangle(rightPadStart, 0, Math.Max(0, layout.Width - rightPadStart), layout.Height), "The right padding" + where);
+        AssertNoInk(bitmap, new Rectangle(0, 0, Slot(first).Left, layout.Height), "The left padding" + where);
+        int rightPadStart = Slot(third).Right;
+        AssertNoInk(
+            bitmap, new Rectangle(rightPadStart, 0, Math.Max(0, layout.Width - rightPadStart), layout.Height), "The right padding" + where,
+            fringeColumn: third == GaugePiece.Ring ? layout.RingBox.Right : -1, fringeCap: FringeAlphaCap(theme == DesignTheme.HighContrast));
     }
 
     // The earbud pair's four shapes are filled in ink at their grid places.

@@ -72,11 +72,14 @@ public sealed class GaugeOrderRenderTests
                     {
                         for (int x = 0; x < bitmap.Width; x++)
                         {
-                            if (Painted(bitmap.GetPixel(x, y)))
+                            // GDI+ anti-aliases the ring's outer edge, which sits on its box's edge, into the one column to the right of the
+                            // box (alpha 0x14 to 0x1D when probed here in light): that column may hold alpha up to GaugeDesignPixelTests.FringeAlphaCap(highContrast: false),
+                            // and every other pixel of the padding is ink or it is clear.
+                            bool fringe = x == slots.RingBox.Right;
+                            Color pixel = bitmap.GetPixel(x, y);
+                            if (fringe ? pixel.A > GaugeDesignPixelTests.FringeAlphaCap(highContrast: false) : Painted(pixel))
                             {
-                                // GDI+ anti-aliases the ring's outer edge, which sits on its box's edge, into the one pixel column beyond it
-                                // (alpha 0x14 to 0x1D when probed here), so that column is the pad's anti-alias fringe, not ink.
-                                Assert.IsTrue(x >= leftPad - 1 && x < bitmap.Width - rightPad + 1, "Ink at column " + x + " is inside the padding" + where);
+                                Assert.IsTrue(x >= leftPad && x < bitmap.Width - rightPad, "Ink at column " + x + " is inside the padding" + where);
                             }
                         }
                     }
