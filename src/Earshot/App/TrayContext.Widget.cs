@@ -41,6 +41,10 @@ internal sealed partial class TrayContext
     private CaseOpenCardPresenter? _caseOpenCardPresenter;
     private WidgetCardPresenterCallbacks? _widgetCardCallbacks;
 
+    // Builds the gauge's card, hidden, a little after the first taskbar layout (CardPrewarm), so the first click opens as fast
+    // as a later one. Only where the surfaces are real: a tray whose surfaces are fakes (a test) makes no window it was not asked for.
+    private CardPrewarm? _cardPrewarm;
+
     // The main display's own scale, from the last read of its taskbar: what the main gauge and a card opened from it or the tray icon
     // are drawn at. A card opened from another display's gauge brings that display's scale with the request instead.
     private int _widgetLayoutDpi = CardPlacement96;
@@ -51,7 +55,10 @@ internal sealed partial class TrayContext
     // taskbar with UI Automation. See WidgetRealSurfaceGuardTests.
     private readonly Func<IAdvertisementSource>? _advertisementSourceFactory;
     private readonly Func<ITaskbarReader> _taskbarReaderFactory;
-    private readonly int _taskbarWatcherPollIntervalMs;
+    private readonly int? _taskbarWatcherPollIntervalMs;
+
+    // Whether the taskbar-change events are installed, so the poll is only the safety net. UI thread only.
+    private bool _taskbarEventsActive;
     private readonly Func<ITrayIconVisibility>? _trayIconVisibilityFactory;
     private readonly Func<ICardEnvironment>? _cardEnvironmentFactory;
     private readonly SystemLookService? _lookServiceOverride;
@@ -200,6 +207,10 @@ internal sealed partial class TrayContext
             _gaugeController = controller;
 
             EnsureWidgetCardPresenter();
+            if (_trayIconVisibilityFactory is null && _cardPrewarm is null)
+            {
+                _cardPrewarm = new CardPrewarm(_time, _registry.UiPost, () => { if (!_closing) { _widgetCardPresenter?.Prewarm(); } });
+            }
         }
 
         if (_taskbarWatcher is null)
@@ -215,7 +226,7 @@ internal sealed partial class TrayContext
 
             _gaugeDisplayForWorker = GaugeDisplayChoice.ReaderChoice(_registry.Settings.Current.Widget.GaugeDisplay);
             _taskbarWatcher = new TaskbarWatcher(
-                _taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time, _taskbarWatcherPollIntervalMs, ReadChosenDisplay);
+                _taskbarReaderFactory(), ReadShownGauge, OnTaskbarLayout, _registry.UiPost, _log, _time, EffectivePollIntervalMs(), ReadChosenDisplay);
             _taskbarWatcher.Start();
             _taskbarWatcher.Poke();
         }
@@ -238,14 +249,49 @@ internal sealed partial class TrayContext
             // the foreground window. Bound to the Explorer that runs now; TaskbarCreated moves it to a new one.
             IShellWindowChangeSource source = _shellWindowSourceFactory?.Invoke() ?? new ShellWindowChangeHook(_log);
             source.ShellWindowChanged += OnShellWindowChanged;
+            source.TaskbarLocationChanged += OnTaskbarLocationChanged;
             _shellWindowSource = source;
             StepOutcome outcome = source.Install();
             _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn, "Shell window hook: " + TrayReport.DescribeStep(outcome));
+            ApplyPollBaseline(source);
         }
     }
 
+    // The poll rate follows whether the events that make a fast poll unnecessary are installed. An override from the options
+    // (a test) always wins.
+    private int EffectivePollIntervalMs() =>
+        _taskbarWatcherPollIntervalMs ?? (_taskbarEventsActive ? TaskbarWatcher.SafetyPollIntervalMs : TaskbarWatcher.ShownPollIntervalMs);
+
+    private void ApplyPollBaseline(IShellWindowChangeSource source)
+    {
+        bool active = source.TaskbarLocationEventsActive;
+        if (active == _taskbarEventsActive)
+        {
+            return;
+        }
+
+        _taskbarEventsActive = active;
+        _log.Write(LogLevel.Debug, "Taskbar poll: " + (active ? "events installed, safety poll every " : "no location events, poll every ") +
+            EffectivePollIntervalMs().ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms.");
+        if (_taskbarWatcherPollIntervalMs is null)
+        {
+            _taskbarWatcher?.SetBaselinePollInterval(EffectivePollIntervalMs());
+            _secondaryGauges?.SetBaselinePollInterval(EffectivePollIntervalMs());
+        }
+    }
+
+    // A change in the taskbar's place or the windows around it: read it now (coalesced) instead of at the next safety poll.
+    private void NotifyTaskbarChanged()
+    {
+        _taskbarWatcher?.NotifyChanged();
+        _secondaryGauges?.NotifyChanged();
+    }
+
+    private void OnTaskbarLocationChanged(object? sender, EventArgs e) => NotifyTaskbarChanged();
+
     private void OnForegroundChanged(object? sender, ForegroundChangedEventArgs e)
     {
+        NotifyTaskbarChanged();
         _gaugeController?.OnForegroundChanged(e.RootClassName);
         _secondaryGauges?.OnForegroundChanged(e.RootClassName);
 
@@ -255,6 +301,7 @@ internal sealed partial class TrayContext
 
     private void OnShellWindowChanged(object? sender, ShellWindowChangedEventArgs e)
     {
+        NotifyTaskbarChanged();
         _gaugeController?.OnShellWindowChanged(e.RootClassName, e.Shown);
         _secondaryGauges?.OnShellWindowChanged(e.RootClassName, e.Shown);
     }
@@ -270,6 +317,7 @@ internal sealed partial class TrayContext
 
         StepOutcome outcome = source.Reinstall();
         _log.Write(outcome.Ok ? LogLevel.Debug : LogLevel.Warn, "Shell window hook: " + TrayReport.DescribeStep(outcome));
+        ApplyPollBaseline(source);
     }
 
     // Unhooks on the UI thread, before the controller it calls is torn down.
@@ -281,7 +329,9 @@ internal sealed partial class TrayContext
         }
 
         source.ShellWindowChanged -= OnShellWindowChanged;
+        source.TaskbarLocationChanged -= OnTaskbarLocationChanged;
         source.Dispose();
+        _taskbarEventsActive = false;
         _shellWindowSource = null;
     }
 
@@ -578,6 +628,9 @@ internal sealed partial class TrayContext
 
         controller.OnLayout(result);
         RefreshShownGaugeForWorker();
+
+        // The first layout is the point start-up has settled enough to build the card in the background.
+        _cardPrewarm?.Arm();
         RenderGaugeIfShown();
 
         // Each read of the main taskbar is also when the other displays' gauges are matched to the displays and taskbars there are.
@@ -792,6 +845,8 @@ internal sealed partial class TrayContext
         _lowBatteryAlertService?.Dispose();
         _lowBatteryAlertService = null;
         UnwireLook();
+        _cardPrewarm?.Dispose();
+        _cardPrewarm = null;
         _widgetCardPresenter?.Dispose();
         _widgetCardPresenter = null;
         _caseOpenCardPresenter?.Dispose();

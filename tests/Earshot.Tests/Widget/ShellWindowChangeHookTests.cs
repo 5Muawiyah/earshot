@@ -25,6 +25,12 @@ internal sealed class FakeShellWindowChangeSource : IShellWindowChangeSource
 
     public event EventHandler<ShellWindowChangedEventArgs>? ShellWindowChanged;
 
+    public event EventHandler? TaskbarLocationChanged;
+
+    public bool TaskbarLocationEventsActive { get; set; }
+
+    public void RaiseTaskbarLocationChanged() => TaskbarLocationChanged?.Invoke(this, EventArgs.Empty);
+
     public StepOutcome Install()
     {
         Installs++;

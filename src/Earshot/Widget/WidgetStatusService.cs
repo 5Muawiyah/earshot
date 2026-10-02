@@ -84,6 +84,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private ITimer? _countersLogTimer;
     private ITimer? _headsetTimer;
     private ITimer? _linkTimer;
+    private bool _linkCheckArmed;
 
     // Due when the linked pair's case counts as closed if no case-known message comes first (CaseOpenTracker.CloseDueAt).
     private ITimer? _caseCloseTimer;
@@ -288,10 +289,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 WidgetTiming.CountersLogInterval, WidgetTiming.CountersLogInterval);
 
             // Silence brings no message to notice it with, so a linked set that has been lost for too long is found by
-            // looking at the clock now and then.
+            // looking at the clock now and then. The timer is made dormant and runs only while a set is linked (a link
+            // is made by a message, ArmLinkCheckLocked), so an Earshot with no AirPods in range wakes for nothing here.
             _linkTimer ??= _timeProvider.CreateTimer(
                 static state => ((WidgetStatusService)state!).OnLinkCheckDue(), this,
-                WidgetTiming.LinkCheckInterval, WidgetTiming.LinkCheckInterval);
+                Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
 
             // Windows' own figure is read once a minute, only while the AirPods are on this PC (the tick checks).
             if (_handsFree is not null)
@@ -1199,6 +1201,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 _setsInRange = seen.SetsInRange;
             }
 
+            ArmLinkCheckLocked();
             if (seen.Dropped)
             {
                 // The linked set was lost for longer than the limit before this message: nothing is linked, so nothing of
@@ -1328,6 +1331,16 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     // Runs on a real timer thread, so like the other timers it catches what nothing else would, logs it with its code and
     // never lets it end the process.
+    // Starts the clock check while a set is linked; called with _gate held after every message. A no-op once it runs.
+    private void ArmLinkCheckLocked()
+    {
+        if (!_linkCheckArmed && _linkTimer is { } timer && _selector.IsLinked)
+        {
+            _linkCheckArmed = true;
+            timer.Change(WidgetTiming.LinkCheckInterval, WidgetTiming.LinkCheckInterval);
+        }
+    }
+
     private void OnLinkCheckDue()
     {
         try
@@ -1344,6 +1357,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 if (dropped)
                 {
                     DropLinkLocked();
+                }
+
+                if (!_selector.IsLinked && _linkCheckArmed)
+                {
+                    // Nothing is linked any more: the check sleeps until a message links a set again.
+                    _linkCheckArmed = false;
+                    _linkTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
                 }
             }
 

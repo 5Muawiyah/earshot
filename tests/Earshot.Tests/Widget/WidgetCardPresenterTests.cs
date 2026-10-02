@@ -336,6 +336,37 @@ public sealed class WidgetCardPresenterTests
             Selection = BroadcastSelectionState.Linked,
         };
 
+    // The card is built ahead of the first click (CardPrewarm asks for it): the factory runs once, nothing is shown or
+    // activated, and the first open reuses that card instead of making another.
+    [TestMethod]
+    public void PrewarmBuildsTheCardOnceShowsNothingAndTheFirstOpenReusesIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks();
+            var time = new Streaming.TestTimeProvider();
+            var log = new CapturingLog();
+            int made = 0;
+            WidgetCard? card = null;
+            using var presenter = new WidgetCardPresenter(() => { made++; return card = new WidgetCard(log); }, callbacks.Build(), Inline, time, log);
+
+            presenter.Prewarm();
+            presenter.Prewarm();
+            Application.DoEvents();
+
+            Assert.AreEqual(1, made, "The factory runs once, however many times the warm-up is asked for.");
+            Assert.IsFalse(presenter.IsShown, "Nothing is shown.");
+            Assert.IsFalse(card!.Visible);
+            Assert.AreNotEqual(card.Handle, Phase5.TestWindows.GetActiveWindow(), "Nothing is activated.");
+
+            presenter.RequestShow(Gauge, Gauge.Location);
+            Application.DoEvents();
+
+            Assert.AreEqual(1, made, "The first open reuses the card built ahead.");
+            Assert.IsTrue(presenter.IsShown);
+        });
+    }
+
     // Records every call the presenter makes into "TrayContext"; nothing here touches a real coordinator,
     // settings store or device.
     private sealed class FakeCallbacks

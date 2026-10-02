@@ -37,6 +37,11 @@ internal static partial class NativeMethods
     // https://learn.microsoft.com/en-us/windows/win32/winauto/event-constants
     internal const uint EVENT_OBJECT_SHOW = 0x8002;
     internal const uint EVENT_OBJECT_HIDE = 0x8003;
+
+    // "An object has changed location, shape, or size." hwnd is the window, idObject OBJID_WINDOW and idChild
+    // CHILDID_SELF for the window itself.
+    // https://learn.microsoft.com/en-us/windows/win32/winauto/event-constants
+    internal const uint EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
     internal const int OBJID_WINDOW = 0;
     internal const int CHILDID_SELF = 0;
 

@@ -199,6 +199,22 @@ internal sealed class SecondaryGaugeSet : IDisposable
         }
     }
 
+    public void NotifyChanged()
+    {
+        foreach (SecondaryGauge gauge in _gauges.Values.ToList())
+        {
+            gauge.NotifyChanged();
+        }
+    }
+
+    public void SetBaselinePollInterval(int milliseconds)
+    {
+        foreach (SecondaryGauge gauge in _gauges.Values.ToList())
+        {
+            gauge.SetBaselinePollInterval(milliseconds);
+        }
+    }
+
     public void Poke(bool resetBackoff)
     {
         foreach (SecondaryGauge gauge in _gauges.Values.ToList())

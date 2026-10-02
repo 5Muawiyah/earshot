@@ -156,11 +156,12 @@ internal sealed record TrayStartOptions(
     // through it.
     public Func<ITaskbarReader> TaskbarReaderFactory { get; init; } = static () => new UiaTaskbarReader();
 
-    // TaskbarWatcher's own baseline poll interval (ShownPollIntervalMs, 1 s, by default): the value its
-    // backoff reset returns to as well as the value it starts at. A test that needs to tell a poke's own
+    // TaskbarWatcher's own baseline poll interval: the value its backoff reset returns to as well as the value it
+    // starts at. Null (production) is the safety poll (SafetyPollIntervalMs) while the taskbar-change events are
+    // installed, else the fast one (ShownPollIntervalMs, 1 s). A test that needs to tell a poke's own
     // read apart from a scheduled one, deterministically, sets this far longer than anything the test
     // itself runs for, rather than racing a real timing window against a scheduled read.
-    public int TaskbarWatcherPollIntervalMs { get; init; } = TaskbarWatcher.ShownPollIntervalMs;
+    public int? TaskbarWatcherPollIntervalMs { get; init; }
 
     // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
     // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a

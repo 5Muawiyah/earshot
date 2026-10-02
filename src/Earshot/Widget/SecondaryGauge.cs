@@ -150,6 +150,10 @@ internal sealed class SecondaryGauge : IDisposable
 
     public void ResetBackoff() => _watcher.ResetBackoff();
 
+    public void NotifyChanged() => _watcher.NotifyChanged();
+
+    public void SetBaselinePollInterval(int milliseconds) => _watcher.SetBaselinePollInterval(milliseconds);
+
     public void Dispose()
     {
         if (Disposed)

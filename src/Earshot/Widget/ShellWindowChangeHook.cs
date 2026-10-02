@@ -27,6 +27,19 @@ internal interface IShellWindowChangeSource : IDisposable
 
     // Raised on the thread that called Install, once per top-level window shown or hidden.
     event EventHandler<ShellWindowChangedEventArgs>? ShellWindowChanged;
+
+    // Raised on the thread that called Install when a taskbar window (the main one or a secondary one) moved or
+    // changed size: the cue to read the taskbar now rather than at the next safety poll. A source with no such event
+    // (the default) never raises it.
+    event EventHandler? TaskbarLocationChanged
+    {
+        add { }
+        remove { }
+    }
+
+    // Whether the location event is installed. While it is not, the poll alone finds a moved taskbar, so the tray keeps
+    // the fast poll.
+    bool TaskbarLocationEventsActive => false;
 }
 
 // One SetWinEventHook for EVENT_OBJECT_SHOW and EVENT_OBJECT_HIDE, out of context, limited to Explorer's process:
@@ -44,6 +57,7 @@ internal sealed class ShellWindowChangeHook : IShellWindowChangeSource
 {
     private const string Step = "set-win-event-hook:shell-window";
     private const string ShellTrayWndClass = "Shell_TrayWnd";
+    private const string SecondaryTrayWndClass = "Shell_SecondaryTrayWnd";
 
     // The callback is a static function (an UnmanagedCallersOnly method needs no delegate kept alive) and
     // finds its instance through the hook handle Windows passes back.
@@ -57,6 +71,7 @@ internal sealed class ShellWindowChangeHook : IShellWindowChangeSource
     private readonly Func<uint> _processId;
     private readonly uint _flags;
     private nint _handle;
+    private nint _locationHandle;
     private uint _installThread;
     private int _disposed;
 
@@ -72,6 +87,10 @@ internal sealed class ShellWindowChangeHook : IShellWindowChangeSource
     }
 
     public event EventHandler<ShellWindowChangedEventArgs>? ShellWindowChanged;
+
+    public event EventHandler? TaskbarLocationChanged;
+
+    public bool TaskbarLocationEventsActive => _locationHandle != 0;
 
     public unsafe StepOutcome Install()
     {
@@ -100,6 +119,22 @@ internal sealed class ShellWindowChangeHook : IShellWindowChangeSource
 
         _handle = handle;
         Hooks[handle] = this;
+
+        // A second hook, for the one event only: the taskbar windows moving or changing size (it sliding in and out when
+        // it hides itself, a change of edge or size). Its failure is reported as the outcome, since it is the one the
+        // fast poll depends on, but leaves the flyout hook above in place.
+        nint locationHandle = NativeMethods.SetWinEventHook(
+            NativeMethods.EVENT_OBJECT_LOCATIONCHANGE, NativeMethods.EVENT_OBJECT_LOCATIONCHANGE, 0, callback, process, 0, _flags);
+        uint locationError = unchecked((uint)Marshal.GetLastPInvokeError());
+        if (locationHandle == 0)
+        {
+            return StepOutcomes.FromWin32(
+                "set-win-event-hook:taskbar-location", locationError,
+                locationError == 0 ? "SetWinEventHook returned no hook and no error code." : null, ok: false);
+        }
+
+        _locationHandle = locationHandle;
+        Hooks[locationHandle] = this;
         return outcome;
     }
 
@@ -131,13 +166,19 @@ internal sealed class ShellWindowChangeHook : IShellWindowChangeSource
 
     private void Unhook()
     {
-        if (_handle == 0)
+        UnhookOne(ref _locationHandle, "unhook-win-event:taskbar-location");
+        UnhookOne(ref _handle, "unhook-win-event:shell-window");
+    }
+
+    private void UnhookOne(ref nint slot, string step)
+    {
+        if (slot == 0)
         {
             return;
         }
 
-        nint handle = _handle;
-        _handle = 0;
+        nint handle = slot;
+        slot = 0;
         _ = Hooks.TryRemove(handle, out _);
         if (NativeMethods.GetCurrentThreadId() != _installThread)
         {
@@ -146,7 +187,7 @@ internal sealed class ShellWindowChangeHook : IShellWindowChangeSource
 
         if (!NativeMethods.UnhookWinEvent(handle))
         {
-            StepOutcome outcome = StepOutcomes.FromWin32("unhook-win-event:shell-window", unchecked((uint)Marshal.GetLastPInvokeError()));
+            StepOutcome outcome = StepOutcomes.FromWin32(step, unchecked((uint)Marshal.GetLastPInvokeError()));
             _log.Warn("Shell window hook: UnhookWinEvent failed: " + outcome.CodeName + " (" + outcome.Code + ") " + outcome.Detail);
         }
     }
@@ -175,6 +216,18 @@ internal sealed class ShellWindowChangeHook : IShellWindowChangeSource
 
     private void OnEvent(uint eventType, nint hwnd, int idObject, int idChild)
     {
+        if (eventType == NativeMethods.EVENT_OBJECT_LOCATIONCHANGE)
+        {
+            // Only the taskbar windows themselves: every other window of Explorer moving is not a reason to read.
+            if (idObject == NativeMethods.OBJID_WINDOW && idChild == NativeMethods.CHILDID_SELF && hwnd != 0 &&
+                GaugeWindowIdentityReader.Read(hwnd, 0)?.ClassName is ShellTrayWndClass or SecondaryTrayWndClass)
+            {
+                TaskbarLocationChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            return;
+        }
+
         if ((eventType != NativeMethods.EVENT_OBJECT_SHOW && eventType != NativeMethods.EVENT_OBJECT_HIDE) ||
             idObject != NativeMethods.OBJID_WINDOW || idChild != NativeMethods.CHILDID_SELF || hwnd == 0)
         {

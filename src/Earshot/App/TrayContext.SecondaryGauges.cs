@@ -55,7 +55,7 @@ internal sealed partial class TrayContext
             () => _gaugeCoverProbeFactory?.Invoke() ?? new WindowCoverProbe(),
             _registry.UiPost,
             () => _foregroundWindowProbe(_displaySource.Read().Displays),
-            _taskbarWatcherPollIntervalMs,
+            EffectivePollIntervalMs(),
             votes);
         var set = new SecondaryGaugeSet(parts, _displaySource, _secondaryTaskbarSource);
         set.CardRequested += (_, gauge) => OpenWidgetCardFor(gauge);

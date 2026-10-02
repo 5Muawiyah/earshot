@@ -13,6 +13,18 @@ internal sealed class TaskbarWatcher : IDisposable
     // hidden by the taskbar itself (covered, no free space, no taskbar) is not implemented in this build:
     // PollIntervalMs never varies with GaugeState, only with read speed.
     public const int ShownPollIntervalMs = 1000;
+
+    // Design choice: 10 s, the safety net while the taskbar-change events (ShellWindowChangeHook's location hook and
+    // the foreground and shell-window hooks) are installed. The events say when to read; this poll only finds what
+    // they miss (an icon added with no window shown or hidden, a covering window no hook reported). A tray whose
+    // location hook failed to install keeps ShownPollIntervalMs.
+    public const int SafetyPollIntervalMs = 10_000;
+
+    // Design choice: the quiet time a burst of change events is gathered over before one read. A taskbar sliding in or
+    // out raises many location events in a row; each would otherwise be a read. The read happens this long after the
+    // first event of a burst, and a later event starts the next burst, so reads from events are at most 1000 / this
+    // per second however many events arrive.
+    public const int EventCoalesceMs = 250;
     private const int SlowReadWindowSize = 20;
     private const double SlowReadThresholdMs = 20.0;
 
@@ -31,9 +43,13 @@ internal sealed class TaskbarWatcher : IDisposable
     private bool _intervalDoubled;
     private bool _started;
     private bool _disposed;
-    private readonly int _baselinePollIntervalMs;
+    private volatile int _baselinePollIntervalMs;
     private volatile int _pollIntervalMs;
     private volatile bool _backoffResetRequested;
+
+    // Turns a burst of NotifyChanged calls into one poke. It holds no timer while no burst is open, so an idle watcher has
+    // nothing but its wait.
+    private readonly BurstCoalescer _changes;
 
     // Guards _poke and _stop against a call to Set() racing their disposal. Loop's own finally block is the
     // only place either handle is ever disposed (see Dispose's comment), but a caller of Poke() or
@@ -68,6 +84,7 @@ internal sealed class TaskbarWatcher : IDisposable
         _time = time;
         _baselinePollIntervalMs = Math.Max(1, baselinePollIntervalMs);
         _pollIntervalMs = _baselinePollIntervalMs;
+        _changes = new BurstCoalescer(time, TimeSpan.FromMilliseconds(EventCoalesceMs), Poke);
 
         _thread = new Thread(Loop) { IsBackground = true, Name = "Earshot taskbar watcher" };
         _thread.SetApartmentState(ApartmentState.MTA);
@@ -104,6 +121,19 @@ internal sealed class TaskbarWatcher : IDisposable
                 _poke.Set();
             }
         }
+    }
+
+    // A taskbar-change event arrived (a window of the taskbar moved or resized, a window was shown or hidden, the foreground
+    // changed). Safe from any thread. Coalesces: the first event of a burst opens EventCoalesceMs, every event inside it
+    // is part of the same burst, and one Poke follows when it ends, so the read sees where the burst left the taskbar.
+    public void NotifyChanged() => _changes.Notify();
+
+    // Moves the poll interval every wait uses and every backoff reset returns to, and reads once at the new rate: the tray
+    // calls this when the change events turn out to be installed (SafetyPollIntervalMs) or lost (ShownPollIntervalMs).
+    public void SetBaselinePollInterval(int milliseconds)
+    {
+        _baselinePollIntervalMs = Math.Max(1, milliseconds);
+        ResetBackoff();
     }
 
     // Resets the slow-read back-off (the poll interval and the measurement window that doubled it) to the
@@ -147,6 +177,7 @@ internal sealed class TaskbarWatcher : IDisposable
         }
 
         _disposed = true;
+        _changes.Dispose();
         _stop.Set();
         if (_started)
         {
