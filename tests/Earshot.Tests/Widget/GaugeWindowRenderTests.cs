@@ -161,13 +161,10 @@ public sealed class GaugeWindowRenderTests
             StringAssert.StartsWith(gauge.AccessibleDescription, "AirPods");
             gauge.Render(snapshot, Now + TimeSpan.FromMinutes(63), GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
 
-            StringAssert.StartsWith(gauge.AccessibleDescription, "AirPods", "An hour old, it is still the last reading, not 'no recent reading'.");
-            StringAssert.Contains(gauge.AccessibleDescription, "Last read");
-            Assert.AreNotEqual("No recent reading", gauge.AccessibleDescription);
+            Assert.AreEqual("AirPods 60%, L 70%   R 60%, Last read 1 h ago", gauge.AccessibleDescription, "An hour old, it is still the last reading, not 'no recent reading'.");
 
             gauge.Render(snapshot, Now + TimeSpan.FromDays(3), GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
-            StringAssert.StartsWith(gauge.AccessibleDescription, "AirPods", "Days old, the same: shown at any age.");
-            StringAssert.Contains(gauge.AccessibleDescription, "Last read");
+            Assert.AreEqual("AirPods 60%, L 70%   R 60%, Last read 3 d ago", gauge.AccessibleDescription, "Days old, the same: shown at any age.");
         });
     }
 }

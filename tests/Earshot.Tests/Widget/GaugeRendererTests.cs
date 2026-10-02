@@ -385,7 +385,12 @@ public sealed class GaugeRendererTests
         Assert.IsNotEmpty(Painted(bitmap, layout.ChargingSlot, 100), "The left bud is charging, a proved flag.");
 
         using Bitmap stale = GaugeRenderer.Render(snapshot, Now + TimeSpan.FromMinutes(2), 96, 48, Color.Black, hover: false, FontFamily, accent: Accent);
+        // A last reading is drawn in tertiary over the track (the ring at 8 degrees is on the arc, which is a round cap's width in).
+        GaugePalette palette = Palette(true);
         Assert.IsFalse(IsFill(RingPixel(stale, layout, 8), Accent), "A reading two minutes old is a last reading: its arc is not the accent.");
+        Color arc = RingPixel(stale, layout, 8);
+        Color expectedArc = DesignPixels.Over(palette.Tertiary, palette.Track);
+        Assert.IsLessThanOrEqualTo(3, DesignPixels.Distance(expectedArc, arc), "Its arc is the tertiary ink over the track: expected " + expectedArc + ", drawn " + arc);
         Assert.IsNotEmpty(Painted(stale, layout.NumberSlot, 20), "But it is still drawn.");
     }
 
