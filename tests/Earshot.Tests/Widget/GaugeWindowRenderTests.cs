@@ -109,7 +109,8 @@ public sealed class GaugeWindowRenderTests
             Assert.IsTrue(gauge.ShowAt(Bounds).Ok);
 
             gauge.Render(Reading(), Now, GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
-            Assert.AreEqual("AirPods, L 70%   R 60%, Read 2 min ago", gauge.AccessibleDescription);
+            // The figure of the lower bud, both buds, and the age of a reading that is no longer live (over 30 s old): "Last read".
+            Assert.AreEqual("AirPods 60%, L 70%   R 60%, Last read 2 min ago", gauge.AccessibleDescription);
 
             gauge.Render(Reading() with { Where = AirPodsWhere.Elsewhere }, Now, GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
             Assert.AreEqual("AirPods, on iPhone", gauge.AccessibleDescription);
@@ -141,9 +142,11 @@ public sealed class GaugeWindowRenderTests
         });
     }
 
-    // Time passing changes what the gauge says with no snapshot change at all: a reading turns an hour old.
+    // Time passing changes what the gauge says with no snapshot change at all: a reading turns stale and its age grows. It does
+    // not leave the gauge at an hour or at any age: the owner's decision of 2 October 2026 keeps the last reading shown until a
+    // newer one arrives (this replaces the one-hour rule).
     [TestMethod]
-    public void AReadingThatTurnsAnHourOldIsDrawnAsNoReadingOnTheNextRender()
+    public void AReadingThatTurnsAnHourOldOrDaysOldIsStillDrawnAsTheLastReadingOnTheNextRender()
     {
         Earshot.Tests.Phase5.CardDesktop.Run(() =>
         {
@@ -158,7 +161,13 @@ public sealed class GaugeWindowRenderTests
             StringAssert.StartsWith(gauge.AccessibleDescription, "AirPods");
             gauge.Render(snapshot, Now + TimeSpan.FromMinutes(63), GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
 
-            Assert.AreEqual("No recent reading", gauge.AccessibleDescription);
+            StringAssert.StartsWith(gauge.AccessibleDescription, "AirPods", "An hour old, it is still the last reading, not 'no recent reading'.");
+            StringAssert.Contains(gauge.AccessibleDescription, "Last read");
+            Assert.AreNotEqual("No recent reading", gauge.AccessibleDescription);
+
+            gauge.Render(snapshot, Now + TimeSpan.FromDays(3), GaugeDisplaySettings.Default, 96, Bounds, Color.Black, "Segoe UI");
+            StringAssert.StartsWith(gauge.AccessibleDescription, "AirPods", "Days old, the same: shown at any age.");
+            StringAssert.Contains(gauge.AccessibleDescription, "Last read");
         });
     }
 }
