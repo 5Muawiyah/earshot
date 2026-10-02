@@ -458,4 +458,37 @@ public sealed class VBlankFrameClockRealJudgeTests
         Assert.IsNotNull(VBlankFrameClockRealTests.Judge(Run(paced: 0, unpaced: 5), mustBePaced: false, displayKnownOn: display.KnownOn), "It still asks the clock to say why.");
         Assert.IsNotNull(VBlankFrameClockRealTests.Judge(Run(paced: 0, unpaced: 5, warned: true), mustBePaced: false, displayKnownOn: display.KnownOn), "And to give the raw code of a failure.");
     }
+
+    [TestMethod]
+    public void TheSessionInfoLayoutIsReadRightWhateverTheLockState()
+    {
+        // One execution of the real call, held against facts about this process that do not depend on whether the session is locked: the
+        // session id is the one Windows gives this process, the connect state is one of the documented states, and the station name is
+        // a station name. A read at the wrong offset gets the session id from the padding and the state from the id.
+        SessionInfo info = SessionLock.ReadInfo();
+        Assert.AreEqual(string.Empty, info.Step, "The call worked (code " + info.Code + ").");
+        Assert.AreEqual(1u, info.Level, "WTSINFOEXW says its data is level 1.");
+        Assert.AreEqual((uint)System.Diagnostics.Process.GetCurrentProcess().SessionId, info.SessionId, "SessionId is this process's session.");
+        Assert.IsTrue(info.SessionState is >= 0 and <= 9, "SessionState is a WTS_CONNECTSTATE_CLASS (WTSActive 0 to WTSInit 9), not " + info.SessionState);
+        Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(info.WinStationName, "^[A-Za-z0-9#_-]{1,32}$"), "WinStationName reads as a station name, not '" + info.WinStationName + "'.");
+        if (info.SessionId == SessionLock.ActiveConsoleSessionId())
+        {
+            Assert.AreEqual("Console", info.WinStationName, "The console session's station is Console.");
+        }
+
+        Assert.IsGreaterThanOrEqualTo((uint)System.Runtime.InteropServices.Marshal.SizeOf<SessionLock.WtsInfoEx>(), info.BytesReturned, "Windows returned the whole structure.");
+        Console.WriteLine("Real session info: level " + info.Level + ", session " + info.SessionId + ", state " + info.SessionState + ", flags 0x"
+            + info.SessionFlags.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ", station '" + info.WinStationName + "', " + info.BytesReturned + " bytes");
+    }
+
+    [TestMethod]
+    public void TheDeclaredLayoutPutsTheUnionAtEightAndSessionFlagsAtSixteen()
+    {
+        // The level 1 structure holds 8-byte LARGE_INTEGER members, so the union after the DWORD Level is pushed to offset 8.
+        int data = (int)System.Runtime.InteropServices.Marshal.OffsetOf<SessionLock.WtsInfoEx>("Data");
+        int sessionFlags = (int)System.Runtime.InteropServices.Marshal.OffsetOf<SessionLock.WtsInfoExLevel1>("SessionFlags");
+        Assert.AreEqual(8, data);
+        Assert.AreEqual(16, data + sessionFlags);
+        Assert.AreEqual(232, System.Runtime.InteropServices.Marshal.SizeOf<SessionLock.WtsInfoEx>(), "The block Windows returns for this call is 232 bytes.");
+    }
 }

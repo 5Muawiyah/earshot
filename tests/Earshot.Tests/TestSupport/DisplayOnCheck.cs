@@ -135,22 +135,61 @@ internal readonly record struct SessionLockReading(bool? Locked, uint Flags, uin
     internal static SessionLockReading NotRead(string reason) => new(null, 0, 0, "not read: " + reason);
 }
 
+// What WTSSessionInfoEx gave for the current session: the fields the check relies on, as read. Step names the call that failed and Code
+// is its raw Win32 error (both empty/0 when it worked); BytesReturned is the size Windows reported.
+internal sealed record SessionInfo(uint Level, uint SessionId, int SessionState, uint SessionFlags, string WinStationName, uint BytesReturned, uint Code, string Step);
+
 // Whether this session is locked, read only: WTSQuerySessionInformation with WTSSessionInfoEx for the current session returns a WTSINFOEXW
-// (a DWORD Level, then the level 1 data: SessionId, SessionState, SessionFlags, so SessionFlags is at offset 12), freed with WTSFreeMemory.
+// (a DWORD Level, then the WTSINFOEX_LEVEL_W union, whose one member is the level 1 structure), freed with WTSFreeMemory. The structures
+// are declared below as the SDK header declares them and read with PtrToStructure, so the layout is the marshaller's and not a hand count:
+// the level 1 structure holds 8-byte LARGE_INTEGER members, so the union, and with it SessionId, starts at offset 8 and not 4, and
+// SessionFlags is at 16.
+// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
+// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfoexw
+// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfoex_level1_w
 // SessionFlags is WTS_SESSIONSTATE_LOCK 0, WTS_SESSIONSTATE_UNLOCK 1 or WTS_SESSIONSTATE_UNKNOWN 0xFFFFFFFF; on Windows 7 and Server 2008 R2
 // alone Microsoft documents the first two as reversed, and this reads them as documented for every later Windows, which is all the
-// project's target framework runs on.
-// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
-// https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfoex_level1_w
-// A locked console has a display-off timeout of its own (GUID_VIDEO_CONSOLE_LOCK_TIMEOUT in winnt.h), so a locked PC says nothing
-// about the timeout read above.
+// project's target framework runs on. A locked console has a display-off timeout of its own (GUID_VIDEO_CONSOLE_LOCK_TIMEOUT in
+// winnt.h), so a locked PC says nothing about the timeout read above.
 internal static class SessionLock
 {
     private const uint CurrentSession = 0xFFFFFFFF;
     private const int SessionInfoEx = 25;
-    private const int LevelOffset = 0;
-    private const int SessionFlagsOffset = 12;
     private const uint SessionStateUnknown = 0xFFFFFFFF;
+
+    // WINSTATIONNAME_LENGTH 32, USERNAME_LENGTH 20 and DOMAIN_LENGTH 17 in wtsapi32.h, each plus the terminating null.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct WtsInfoExLevel1
+    {
+        public uint SessionId;
+        public int SessionState;
+        public int SessionFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 33)]
+        public string WinStationName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 21)]
+        public string UserName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 18)]
+        public string DomainName;
+        public long LogonTime;
+        public long ConnectTime;
+        public long DisconnectTime;
+        public long LastInputTime;
+        public long CurrentTime;
+        public uint IncomingBytes;
+        public uint OutgoingBytes;
+        public uint IncomingFrames;
+        public uint OutgoingFrames;
+        public uint IncomingCompressedBytes;
+        public uint OutgoingCompressedBytes;
+    }
+
+    // WTSINFOEX_LEVEL_W is a union with the one member, so Data is the level 1 structure.
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct WtsInfoEx
+    {
+        public uint Level;
+        public WtsInfoExLevel1 Data;
+    }
 
     [DllImport("wtsapi32.dll", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -161,39 +200,56 @@ internal static class SessionLock
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     private static extern void WTSFreeMemory(nint memory);
 
-    internal static SessionLockReading Read()
+    [DllImport("kernel32.dll")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint WTSGetActiveConsoleSessionId();
+
+    // The session attached to the physical console now (0xFFFFFFFF when there is none).
+    internal static uint ActiveConsoleSessionId() => WTSGetActiveConsoleSessionId();
+
+    internal static SessionInfo ReadInfo()
     {
         if (!WTSQuerySessionInformationW(0, CurrentSession, SessionInfoEx, out nint buffer, out uint bytes))
         {
-            return new SessionLockReading(null, 0, (uint)Marshal.GetLastWin32Error(), "WTSQuerySessionInformation");
+            return new SessionInfo(0, 0, 0, 0, "", 0, (uint)Marshal.GetLastWin32Error(), "WTSQuerySessionInformation");
         }
 
         try
         {
-            if (bytes < SessionFlagsOffset + sizeof(uint))
+            if (bytes < Marshal.SizeOf<WtsInfoEx>())
             {
-                return new SessionLockReading(null, 0, bytes, "WTSQuerySessionInformation returned too few bytes (the count is the code)");
+                return new SessionInfo(0, 0, 0, 0, "", bytes, bytes, "WTSQuerySessionInformation returned fewer bytes than WTSINFOEXW (the count is the code)");
             }
 
-            int level = Marshal.ReadInt32(buffer, LevelOffset);
-            if (level != 1)
-            {
-                return new SessionLockReading(null, 0, (uint)level, "WTSINFOEXW level (the code is the level, 1 expected)");
-            }
-
-            uint flags = unchecked((uint)Marshal.ReadInt32(buffer, SessionFlagsOffset));
-            return flags switch
-            {
-                0 => new SessionLockReading(true, flags, 0, ""),
-                1 => new SessionLockReading(false, flags, 0, ""),
-                SessionStateUnknown => new SessionLockReading(null, flags, 0, "SessionFlags is WTS_SESSIONSTATE_UNKNOWN"),
-                _ => new SessionLockReading(null, flags, 0, "SessionFlags is not a documented value"),
-            };
+            WtsInfoEx info = Marshal.PtrToStructure<WtsInfoEx>(buffer);
+            return new SessionInfo(info.Level, info.Data.SessionId, info.Data.SessionState, unchecked((uint)info.Data.SessionFlags), info.Data.WinStationName ?? "", bytes, 0, "");
         }
         finally
         {
             WTSFreeMemory(buffer);
         }
+    }
+
+    internal static SessionLockReading Read()
+    {
+        SessionInfo info = ReadInfo();
+        if (info.Step.Length > 0)
+        {
+            return new SessionLockReading(null, 0, info.Code, info.Step);
+        }
+
+        if (info.Level != 1)
+        {
+            return new SessionLockReading(null, 0, info.Level, "WTSINFOEXW level (the code is the level, 1 expected)");
+        }
+
+        return info.SessionFlags switch
+        {
+            0 => new SessionLockReading(true, info.SessionFlags, 0, ""),
+            1 => new SessionLockReading(false, info.SessionFlags, 0, ""),
+            SessionStateUnknown => new SessionLockReading(null, info.SessionFlags, 0, "SessionFlags is WTS_SESSIONSTATE_UNKNOWN"),
+            _ => new SessionLockReading(null, info.SessionFlags, 0, "SessionFlags is not a documented value"),
+        };
     }
 }
 
