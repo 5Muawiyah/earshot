@@ -54,29 +54,41 @@ public sealed class VBlankFrameClockRealTests
             Assert.IsEmpty(wrongThread, "Every frame is delivered on the UI thread.");
             Assert.IsGreaterThanOrEqualTo(5, stamps.Count, "Frames arrive: " + stamps.Count + " in " + timer.Elapsed + ". The log held: " + string.Join(" | ", log.Entries.Select(e => e.Message)));
 
-            bool unpaced = log.Has(LogLevel.Warn, "Motion:");
-            if (unpaced)
+            // Each frame is one of two things. Paced: stamped with the time its blank returned, which is before it arrived and not long
+            // before. Unpaced (no output to wait on, or a wait that failed): stamped an hour ahead of its arrival so a motion ends in one.
+            // A machine can give either, or paced frames and then a failure (a display going away), so each frame is classified on its own.
+            int pacedFrames = 0;
+            int unpacedFrames = 0;
+            TimeSpan? lastPaced = null;
+            for (int i = 0; i < stamps.Count; i++)
             {
-                // No output to wait on here: the raw HRESULT is in the log, and each frame is stamped an hour ahead so a motion ends in one.
-                Assert.IsTrue(log.Has(LogLevel.Warn, "HRESULT 0x"), "The failure is logged with its raw code.");
-                for (int i = 0; i < stamps.Count; i++)
+                TimeSpan ahead = stamps[i] - arrivals[i];
+                if (ahead > TimeSpan.FromMinutes(59))
                 {
-                    Assert.IsGreaterThan(TimeSpan.FromMinutes(59), stamps[i] - arrivals[i], "An unpaced frame is stamped an hour ahead.");
+                    unpacedFrames++;
+                    continue;
                 }
+
+                pacedFrames++;
+                Assert.IsLessThanOrEqualTo(TimeSpan.Zero, ahead, "A paced frame is stamped no later than it arrives.");
+                Assert.IsLessThan(TimeSpan.FromSeconds(1), -ahead, "And not long before.");
+                if (lastPaced is { } previous)
+                {
+                    Assert.IsGreaterThan(previous, stamps[i], "The paced stamps move forward, one blank at a time.");
+                }
+
+                lastPaced = stamps[i];
             }
-            else
+
+            bool warned = log.Has(LogLevel.Warn, "Motion:");
+            if (unpacedFrames > 0)
             {
-                // Paced by the display: each frame is stamped with the time its blank returned, which is before it arrived and not long
-                // before, and the stamps only go forward.
-                for (int i = 0; i < stamps.Count; i++)
-                {
-                    Assert.IsLessThanOrEqualTo(arrivals[i], stamps[i], "A frame is stamped no later than it arrives.");
-                    Assert.IsLessThan(TimeSpan.FromSeconds(1), arrivals[i] - stamps[i], "And not long before.");
-                    if (i > 0)
-                    {
-                        Assert.IsGreaterThan(stamps[i - 1], stamps[i], "The stamps move forward, one blank at a time.");
-                    }
-                }
+                Assert.IsTrue(warned, "An unpaced frame comes with the clock saying why in the log (" + pacedFrames + " paced, " + unpacedFrames + " not).");
+            }
+
+            if (warned)
+            {
+                Assert.IsTrue(log.Has(LogLevel.Warn, "HRESULT 0x"), "The failure is logged with its raw code.");
             }
 
             // At rest nothing is posted: a frame in flight when the last subscriber left may still arrive, and then no more.

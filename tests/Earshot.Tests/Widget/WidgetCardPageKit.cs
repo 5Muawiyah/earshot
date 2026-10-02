@@ -386,6 +386,16 @@ internal static class CardKit
         Click(card, new Rectangle(place.X, place.Y - card.SettingsScrollOffset, place.Width, place.Height));
     }
 
+    // Presses a rectangle given in the settings page's own positions (a picture of the gauge order, which is not a row's part) the way a
+    // person does on a card shorter than the page: the page is scrolled until the rectangle is at the top of the body, and the press lands
+    // where it is drawn then. Pressing it at its place on the page alone lands elsewhere once the page has scrolled, which a small screen
+    // makes it do.
+    public static void ClickOnPage(WidgetCard card, Rectangle onPage)
+    {
+        card.ScrollSettingsToForTest(onPage.Top - card.CurrentSettingsLayout!.Frame.Body.Y);
+        Click(card, new Rectangle(onPage.X, onPage.Y - card.SettingsScrollOffset, onPage.Width, onPage.Height));
+    }
+
     // The update page's model with the page's own rows (Check automatically, What's new and, with an install, Repair).
     public static WidgetCardModel UpdateModelWithRows(UpdateViewModel view, bool autoCheck = false, bool showRepair = true, string? version = "1.1.0") =>
         new(Snapshot(), false, false, true, true, "iPhone", DateTimeOffset.UtcNow, WidgetCardView.Update,

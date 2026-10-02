@@ -12,6 +12,10 @@ namespace Earshot.Tests.Widget;
 public sealed class GaugeOrderPickerTests
 {
     private const int WM_KEYDOWN = 0x0100;
+
+    // The work area of a 1024 by 768 screen with a taskbar, the smallest the tests run on (a hosted runner's): the settings page does
+    // not fit above the taskbar there, so the card scrolls, and a press has to be made where the row is drawn after the scroll.
+    private static readonly Rectangle RunnerWorkArea = new(0, 0, 1024, 728);
     private static readonly int[] Dpis = [96, 120, 144];
 
     // The order row is an expander (CardKit.Row is its header, with the icon, the label and the gauge as it is now) and, open, the grid
@@ -200,8 +204,10 @@ public sealed class GaugeOrderPickerTests
             var log = new CapturingLog();
             WidgetCard? card = null;
             var presenter = new WidgetCardPresenter(
-                () => card = new WidgetCard(log), CardKit.Callbacks(), CardKit.Inline, new Streaming.TestTimeProvider(), log, host);
-            presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
+                () => card = new WidgetCard(log), CardKit.Callbacks(), CardKit.Inline, new Streaming.TestTimeProvider(), log, host,
+                workAreaFor: _ => RunnerWorkArea);
+            Rectangle gauge = new(RunnerWorkArea.Right - 200, RunnerWorkArea.Bottom, 74, 40);
+            presenter.RequestShow(gauge, gauge.Location);
             Application.DoEvents();
             CardKit.Click(card!, card!.CurrentMainLayout.Gear);
             Assert.AreEqual(WidgetCardView.Settings, presenter.ViewForTest, "The gear opened the settings page.");
@@ -220,7 +226,7 @@ public sealed class GaugeOrderPickerTests
             OpenOrder(page.Card);
             Rectangle tile = OrderRow(page.Card).Tiles[4];
 
-            CardKit.Click(page.Card, tile);
+            CardKit.ClickOnPage(page.Card, tile);
 
             CardKit.AssertCalls(page.Host, "order:BoltRingNumber");
             Assert.AreEqual(GaugeOrder.BoltRingNumber, page.Host.Values.GaugeOrder);
