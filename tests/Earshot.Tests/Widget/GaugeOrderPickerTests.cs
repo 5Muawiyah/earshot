@@ -14,7 +14,17 @@ public sealed class GaugeOrderPickerTests
     private const int WM_KEYDOWN = 0x0100;
     private static readonly int[] Dpis = [96, 120, 144];
 
-    private static SettingsItem OrderRow(WidgetCard card) => CardKit.Row(card, SettingsRowId.GaugeOrder);
+    // The order row is an expander (CardKit.Row is its header, with the icon, the label and the gauge as it is now) and, open, the grid
+    // of six pictures as a second item of the same row on the same surface.
+    private static SettingsItem OrderRow(WidgetCard card) =>
+        card.CurrentSettingsLayout!.Items.Single(i => i.Kind == SettingsItemKind.Row && i.Row == SettingsRowId.GaugeOrder && i.Tiles.Count == 6);
+
+    // Opens the order expander on a shown page the way a person does: a press on its header.
+    private static void OpenOrder(WidgetCard card)
+    {
+        CardKit.ClickPart(card, SettingsRowId.GaugeOrder, SettingsPart.Expand);
+        Assert.IsTrue(card.CurrentSettingsLayout!.Items.Any(i => i.Row == SettingsRowId.GaugeOrder && i.Tiles.Count == 6), "The press opened the pictures.");
+    }
 
     [TestMethod]
     public void ThePicturesAreAGridOfThreeAcrossAndTwoDownFillingTheRowsWidth()
@@ -28,16 +38,23 @@ public sealed class GaugeOrderPickerTests
                 SettingsItem row = OrderRow(card);
                 IReadOnlyList<Rectangle> tiles = row.Tiles;
                 Assert.AreEqual(6, tiles.Count);
+                // The design (round 3, Settings rows): the pictures are a 3 by 2 grid of tiles 52 high, a gap of 8 and a padding of 12 inside the
+                // surface, which is itself 12 in from each side of the 360 wide card.
                 int gap = CardPlacement.Scale(8, dpi);
-                int side = CardPlacement.Scale(16, dpi);
-                int content = CardPlacement.Scale(360, dpi) - (2 * side);
-                Assert.AreEqual(side, tiles[0].Left, "The grid starts at the side padding (dpi " + dpi + ").");
-                Assert.AreEqual(side + content, tiles[2].Right + ((content - (2 * gap)) % 3), "And ends at the other side (dpi " + dpi + ").");
+                int surfaceLeft = CardPlacement.Scale(12, dpi);
+                int pad = CardPlacement.Scale(12, dpi);
+                int side = surfaceLeft + pad;
+                int surfaceWidth = CardPlacement.Scale(360, dpi) - (2 * surfaceLeft);
+                Assert.AreEqual(surfaceLeft, row.Bounds.Left, "The surface is 12 in from the card's side (dpi " + dpi + ").");
+                Assert.AreEqual(surfaceWidth, row.Bounds.Width, "And as wide as the card allows.");
+                Assert.AreEqual(side, tiles[0].Left, "The grid starts at the surface's padding (dpi " + dpi + ").");
+                Assert.AreEqual(surfaceLeft + surfaceWidth - pad, tiles[2].Right, "And ends at the other padding: the spare pixels of the division go to the first columns (dpi " + dpi + ").");
                 for (int i = 0; i < 6; i++)
                 {
                     Assert.AreEqual(CardPlacement.Scale(52, dpi), tiles[i].Height, "Tile height at " + dpi + " dpi.");
-                    Assert.AreEqual(tiles[0].Width, tiles[i].Width);
+                    Assert.IsLessThanOrEqualTo(1, Math.Abs(tiles[0].Width - tiles[i].Width), "The columns differ by one pixel at most.");
                     Assert.AreEqual(tiles[i % 3].X, tiles[i].X, "Columns line up.");
+                    Assert.AreEqual(tiles[i % 3].Width, tiles[i].Width, "A column is as wide in both rows.");
                     Assert.AreEqual(tiles[(i / 3) * 3].Y, tiles[i].Y, "Rows line up.");
                 }
 
@@ -45,11 +62,14 @@ public sealed class GaugeOrderPickerTests
                 Assert.AreEqual(gap, tiles[3].Top - tiles[0].Bottom, "Gap between rows.");
                 if (dpi == 96)
                 {
-                    Assert.AreEqual(new Size(104, 52), tiles[0].Size, "104 by 52 at 100%.");
+                    Assert.AreEqual(new Size(99, 52), tiles[0].Size, "(336 - 2 x 12 - 2 x 8) / 3 is 98 and two over: 99 at 100%.");
                 }
 
                 Assert.IsTrue(row.Bounds.Contains(tiles[0]) && row.Bounds.Contains(tiles[5]), "Every picture is inside its row.");
-                Assert.IsTrue(row.Bounds.Contains(row.IconRect), "And so is the icon.");
+                SettingsItem header = CardKit.Row(card, SettingsRowId.GaugeOrder);
+                Assert.IsTrue(header.Bounds.Contains(header.IconRect), "The icon is inside the header above them.");
+                Assert.AreEqual(header.Bounds.Bottom, row.Bounds.Top, "The pictures sit right under the header, on the same surface.");
+                Assert.AreEqual(1, card.CurrentSettingsLayout!.Surfaces.Count(r => r.Contains(header.Bounds) && r.Contains(row.Bounds)), "One surface holds both.");
                 Assert.IsGreaterThanOrEqualTo(card.CurrentSettingsLayout!.Frame.Body.Top, tiles[0].Top, "Below the header, not under it.");
             }
         });
@@ -65,8 +85,9 @@ public sealed class GaugeOrderPickerTests
                 using WidgetCard card = CardKit.NewCard(dark: false);
                 CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { GaugeOrder = chosen }), 96, order: true);
                 SettingsTarget[] stops = card.CurrentSettingsLayout!.Targets.Where(t => t.Row == SettingsRowId.GaugeOrder).ToArray();
-                Assert.AreEqual(1, stops.Length, "One stop for six pictures.");
-                Assert.AreEqual(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, (int)chosen), stops[0], "At the chosen picture.");
+                Assert.AreEqual(2, stops.Length, "The expander is a stop, and the six pictures are one more.");
+                Assert.AreEqual(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Expand), stops[0], "The header first.");
+                Assert.AreEqual(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, (int)chosen), stops[1], "Then one stop for six pictures, at the chosen one.");
             }
         });
     }
@@ -196,6 +217,7 @@ public sealed class GaugeOrderPickerTests
         Phase5.CardDesktop.Run(() =>
         {
             using Opened page = Opened.Open(new FakeCardHost());
+            OpenOrder(page.Card);
             Rectangle tile = OrderRow(page.Card).Tiles[4];
 
             CardKit.Click(page.Card, tile);
@@ -203,7 +225,7 @@ public sealed class GaugeOrderPickerTests
             CardKit.AssertCalls(page.Host, "order:BoltRingNumber");
             Assert.AreEqual(GaugeOrder.BoltRingNumber, page.Host.Values.GaugeOrder);
             Assert.AreEqual(
-                new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, 4), page.Card.CurrentSettingsLayout!.Targets.Single(t => t.Row == SettingsRowId.GaugeOrder),
+                new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Tile, 4), page.Card.CurrentSettingsLayout!.Targets.Single(t => t.Row == SettingsRowId.GaugeOrder && t.Part == SettingsPart.Tile),
                 "The page is drawn again from the saved choice.");
         });
     }
@@ -215,10 +237,11 @@ public sealed class GaugeOrderPickerTests
         {
             using Opened page = Opened.Open(new FakeCardHost());
             WidgetCard card = page.Card;
+            OpenOrder(card);
 
-            // Tab to the pictures: the back button, then each row in turn until the order row.
+            // Tab to the pictures: the back button, then each row in turn, the order's header, and then its pictures.
             int guard = 0;
-            while (card.SettingsFocusTarget.Row != SettingsRowId.GaugeOrder && guard++ < 20)
+            while (card.SettingsFocusTarget.Part != SettingsPart.Tile && guard++ < 20)
             {
                 Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
             }
@@ -253,8 +276,9 @@ public sealed class GaugeOrderPickerTests
         Phase5.CardDesktop.Run(() =>
         {
             using Opened page = Opened.Open(new FakeCardHost());
+            OpenOrder(page.Card);
             int guard = 0;
-            while (page.Card.SettingsFocusTarget.Row != SettingsRowId.GaugeOrder && guard++ < 20)
+            while (page.Card.SettingsFocusTarget.Part != SettingsPart.Tile && guard++ < 20)
             {
                 Phase5.TestWindows.Send(page.Card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
             }
