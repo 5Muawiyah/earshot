@@ -17,9 +17,34 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class VBlankFrameClockRealTests
 {
+    public TestContext? TestContext { get; set; }
+
+    // Whether DXGI lists an output for the primary display here, asked of the real outputs on a thread configured as the clock's is.
+    private static bool DxgiListsAnOutput()
+    {
+        bool has = false;
+        var outputs = new DxgiVBlankOutputs();
+        var probe = new Thread(() =>
+        {
+            int listed = outputs.ListOutputs();
+            has = listed >= 0 && outputs.Has(outputs.MonitorFor(0));
+            outputs.Release();
+        });
+        outputs.ConfigureThread(probe);
+        probe.Start();
+        probe.Join();
+        return has;
+    }
+
     [TestMethod]
     public void TheRealClockDeliversFramesToTheUiThreadOrLogsWhyItCannotAndStillDoes()
     {
+        // A local session with a display must be paced by it; only a machine with no output to wait on (a hosted runner, a remote
+        // session) may answer with the unpaced fallback. Either way the outcome is recorded below.
+        bool hostedRunner = Environment.GetEnvironmentVariable("GITHUB_ACTIONS") is not null || Environment.GetEnvironmentVariable("CI") is not null;
+        bool outputListed = DxgiListsAnOutput();
+        bool mustBePaced = !hostedRunner && outputListed;
+
         StaThread.Run(() =>
         {
             var ui = new WindowsFormsSynchronizationContext();
@@ -81,6 +106,17 @@ public sealed class VBlankFrameClockRealTests
             }
 
             bool warned = log.Has(LogLevel.Warn, "Motion:");
+            string outcome = "Real display clock: " + (pacedFrames == stamps.Count ? "paced by the display" : unpacedFrames == stamps.Count ? "unpaced (no output to wait on)" : "mixed")
+                + ", " + pacedFrames + " paced and " + unpacedFrames + " unpaced of " + stamps.Count + " frames in " + timer.Elapsed.TotalMilliseconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
+                + " ms; DXGI lists an output: " + outputListed + "; hosted runner: " + hostedRunner + "; log: "
+                + (log.Entries.Count == 0 ? "empty" : string.Join(" | ", log.Entries.Select(e => e.Message)));
+            RecordOutcome(outcome);
+            if (mustBePaced)
+            {
+                Assert.AreEqual(stamps.Count, pacedFrames, "A local session with a DXGI output is paced by it. " + outcome);
+                Assert.IsFalse(warned, "And logs nothing. " + outcome);
+            }
+
             if (unpacedFrames > 0)
             {
                 Assert.IsTrue(warned, "An unpaced frame comes with the clock saying why in the log (" + pacedFrames + " paced, " + unpacedFrames + " not).");
@@ -98,5 +134,19 @@ public sealed class VBlankFrameClockRealTests
             Application.DoEvents();
             Assert.AreEqual(atRest, stamps.Count, "No frames after the subscription ended.");
         });
+    }
+
+    // The outcome goes to the test output and, where the gate gives a data folder (check.ps1 does, inside its log folder), to a file
+    // there, so the gate's logs record whether display pacing ran on the machine.
+    private void RecordOutcome(string outcome)
+    {
+        Console.WriteLine(outcome);
+        TestContext?.WriteLine(outcome);
+        string? root = Environment.GetEnvironmentVariable("EARSHOT_DATA_ROOT");
+        if (!string.IsNullOrEmpty(root))
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(Path.Combine(root, "real-vblank-clock-outcome.txt"), outcome + Environment.NewLine);
+        }
     }
 }
