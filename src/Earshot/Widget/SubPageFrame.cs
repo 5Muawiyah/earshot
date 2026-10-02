@@ -180,7 +180,7 @@ internal static partial class CardPaint
         using Font font = FittingFont(g, text, bounds, type, pixelSize, bold, format);
         using var brush = new SolidBrush(colour);
         g.DrawString(text, font, brush, bounds, format);
-        NoteDrawn(text, bounds, font, format, pixelSize);
+        NoteDrawn(text, bounds, font, format, type.DrawnPixels(pixelSize));
     }
 
     // The font at the asked size, or the largest smaller one (down to 55% of it) with which the whole text fits the rectangle.
@@ -229,7 +229,7 @@ internal static partial class CardPaint
         using var brush = new SolidBrush(colour);
         using StringFormat format = WrappedFormat();
         g.DrawString(text, font, brush, bounds, format);
-        NoteDrawn(text, bounds, font, format, pixelSize);
+        NoteDrawn(text, bounds, font, format, type.DrawnPixels(pixelSize));
     }
 
     // How many lines text takes when wrapped to width, at the given size, measured as Wrapped draws it; at least 1.

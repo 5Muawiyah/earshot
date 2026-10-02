@@ -1153,7 +1153,7 @@ internal sealed partial class WidgetCard : Form
         using var brush = new SolidBrush(Colours.TextSecondary);
         using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         g.DrawString(text, font, brush, bounds, format);
-        CardPaint.NoteDrawn(text, bounds, font, format, (int)Math.Round(font.Size));
+        CardPaint.NoteDrawn(text, bounds, font, format, _type.SizeOf(TypeRole.Caption));
     }
 
     // The mark is a filled shape in the primary text colour, never the accent: the earbud in a square of the mark's height.

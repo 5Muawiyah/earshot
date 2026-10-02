@@ -22,9 +22,12 @@ internal sealed class CardType(int dpi, double textScale)
     public Font Font(int pixelSize, bool bold)
     {
         OpticalSize optical = TypeRamp.OpticalFor(pixelSize * 96.0 / Dpi);
-        int px = Math.Max(1, (int)Math.Round(Math.Max(1, pixelSize) * TextScale, MidpointRounding.AwayFromZero));
-        return TypeRamp.FontOfSize(optical, bold, px);
+        return TypeRamp.FontOfSize(optical, bold, DrawnPixels(pixelSize));
     }
+
+    // The pixel size Font(pixelSize, ...) draws at: the size asked for at the display scale, with the text size applied.
+    public int DrawnPixels(int pixelSize) =>
+        Math.Max(1, (int)Math.Round(Math.Max(1, pixelSize) * TextScale, MidpointRounding.AwayFromZero));
 
     // The font for a named style.
     public Font Role(TypeRole role) => TypeRamp.Font(role, Dpi, TextScale);
