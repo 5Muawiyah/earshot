@@ -221,4 +221,64 @@ public sealed class DiagnosticsRedactorTests
         Assert.IsEmpty(DiagnosticsText.ReadLogLines(temp.File("nothing.log"), out string? none));
         Assert.IsNull(none);
     }
+
+    // A name from an earlier choice is not in the known list (only the device in use now is), so the lines the tray wrote
+    // when it chose or pinned a device are taken apart by their shape: the name and the search string go.
+    [TestMethod]
+    public void NamesFromAnOldDeviceChoiceNeverReachTheText()
+    {
+        const string Old = "Sam's Beats Studio (2)";
+        const string OldMatch = "Studio Buds";
+        string[] log =
+        [
+            "2026-10-02T09:15:30.200Z INFO Device chosen: " + Old + " (" + AddressColon + ", container " + Container + "), match \"" + OldMatch + "\".",
+            "2026-10-02T09:15:30.300Z WARN Device not changed to " + Old + " (" + AddressColon + "): the boot block did not take it (Refused).",
+            "2026-10-02T09:15:30.400Z INFO Pinned " + Old + ": container " + Container + ", address " + AddressDigits + ".",
+            Harmless[0],
+        ];
+
+        string text = DiagnosticsText.Build("1.4.0", "Windows", log, NullFrameLogSource.Instance, knownNames: [DeviceName], userName: User);
+
+        foreach (string secret in new[] { "Sam", "Beats", "Studio", Old, OldMatch })
+        {
+            Assert.IsFalse(text.Contains(secret, StringComparison.OrdinalIgnoreCase), "\"" + secret + "\" reached the copied text:\n" + text);
+        }
+
+        StringAssert.Contains(text, "Device chosen: <name> (<address>, container <id>), match \"<name>\".");
+        StringAssert.Contains(text, "Device not changed to <name> (<address>): the boot block did not take it (Refused).");
+        StringAssert.Contains(text, "Pinned <name>: container <id>, address <address>.");
+        StringAssert.Contains(text, Harmless[0]);
+        Assert.AreEqual(text, DiagnosticsRedactor.Redact(text, [DeviceName], User), "Idempotent.");
+    }
+
+    [TestMethod]
+    public void AGuidNextToAnUnderscoreIsStillTaken()
+    {
+        string result = DiagnosticsRedactor.Redact("ID_" + Container + " and _" + Container + " and {" + Container + "}", null, User);
+
+        Assert.IsFalse(result.Contains("6f1c2a3e", StringComparison.OrdinalIgnoreCase), result);
+        Assert.IsFalse(result.Contains("0123456789ab", StringComparison.OrdinalIgnoreCase), result);
+    }
+
+    [TestMethod]
+    public void ASidNextToAnUnderscoreIsStillTaken()
+    {
+        string result = DiagnosticsRedactor.Redact("S-1-5-21-1-2-3-1001_x and _" + Sid + " and " + Sid + "_", null, User);
+
+        Assert.IsFalse(result.Contains("1001", StringComparison.Ordinal), result);
+        Assert.IsFalse(result.Contains("1004336348", StringComparison.Ordinal), result);
+        Assert.IsFalse(result.Contains("S-1", StringComparison.OrdinalIgnoreCase), result);
+    }
+
+    [TestMethod]
+    [DataRow(@"saved to D:\Users\Pat Smith\Documents\x.txt now", "saved to <path> now")]
+    [DataRow(@"saved to E:\Users\pat\x.txt now", "saved to <path> now")]
+    [DataRow(@"saved to \\fileserver\Users\Pat Smith\Documents\x.txt now", "saved to <path> now")]
+    [DataRow(@"saved to C:\Documents and Settings\Pat Smith\Desktop\x.txt now", "saved to <path> now")]
+    [DataRow(@"saved to \\?\F:\Users\Pat Smith\AppData\x now", "saved to <path> now")]
+    [DataRow(@"home is C:\Users\pat and more", "home is <path> and more")]
+    public void AProfilePathOnAnyDriveOrShareIsTakenWholeWhateverTheNameIs(string text, string expected)
+    {
+        Assert.AreEqual(expected, DiagnosticsRedactor.Redact(text, null, User), text);
+    }
 }

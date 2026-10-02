@@ -15,6 +15,9 @@ public sealed class GaugeContentTests
     private static PartReading Bud(int percent, bool? charging = null, TimeSpan? age = null) =>
         new(percent, charging, null) { ReadAt = Now - (age ?? TimeSpan.FromMinutes(2)) };
 
+    // Read three seconds ago: live. Low battery is said only for a live figure.
+    private static PartReading LiveBud(int percent, bool? charging = null) => Bud(percent, charging, TimeSpan.FromSeconds(3));
+
     private static WidgetSnapshot Snapshot(AirPodsWhere where, PartReading? left = null, PartReading? right = null, PartReading? headset = null) =>
         WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
@@ -184,7 +187,7 @@ public sealed class GaugeContentTests
     [TestMethod]
     public void TheReadLineIsTheOldestBudsAndNeverYoungerThanTheReading()
     {
-        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromSeconds(20)), Bud(60, age: TimeSpan.FromSeconds(200))), Now, Settings);
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromSeconds(40)), Bud(60, age: TimeSpan.FromSeconds(200))), Now, Settings);
 
         StringAssert.EndsWith(c.Tooltip, "Last read 3 min ago");
         Assert.AreEqual("Read 1 min ago", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(119)));
@@ -230,9 +233,9 @@ public sealed class GaugeContentTests
     [TestMethod]
     public void TheLowBatteryLevelIsInclusiveAndFollowsTheSetting()
     {
-        GaugeContent at20 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(20), Bud(50)), Now, Settings);
-        GaugeContent at30 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(30), Bud(50)), Now, Settings);
-        GaugeContent at30WithHigherLevel = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(30), Bud(50)), Now, Settings with { LowBatteryThresholdPercent = 30 });
+        GaugeContent at20 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(20), LiveBud(50)), Now, Settings);
+        GaugeContent at30 = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(30), LiveBud(50)), Now, Settings);
+        GaugeContent at30WithHigherLevel = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(30), LiveBud(50)), Now, Settings with { LowBatteryThresholdPercent = 30 });
 
         Assert.IsTrue(at20.Low);
         Assert.IsFalse(at30.Low);
@@ -243,7 +246,7 @@ public sealed class GaugeContentTests
     [TestMethod]
     public void LowBatteryOutranksChargingInTheFirstLine()
     {
-        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(10, charging: true), Bud(20)), Now, Settings);
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(10, charging: true), LiveBud(20)), Now, Settings);
 
         StringAssert.StartsWith(c.Tooltip, "Low battery\r\nL 10%   R 20%");
         Assert.IsTrue(c.Charging, "The bolt still shows while it is charging.");
@@ -252,7 +255,7 @@ public sealed class GaugeContentTests
     [TestMethod]
     public void ZeroAndOneHundredPercentAreShownAsRead()
     {
-        GaugeContent empty = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(0), Bud(10)), Now, Settings);
+        GaugeContent empty = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(0), LiveBud(10)), Now, Settings);
         GaugeContent full = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(100), Bud(100)), Now, Settings);
 
         Assert.AreEqual(0, empty.Percent);

@@ -36,6 +36,11 @@ public sealed record WidgetSnapshot(
     // clock that is put back holds it where it was rather than letting it fall.
     public DateTimeOffset? EstimateClock { get; init; }
 
+    // The highest estimate shown for each saved reading, shared by every snapshot the service builds (and so by every
+    // surface that draws from one): BatteryFreshness raises it as it works out an estimate and never shows less than it
+    // holds for the same reading. Null for a snapshot built by hand, which then works each estimate out afresh.
+    internal EstimateHighWater? HighWater { get; init; }
+
     public static WidgetSnapshot Empty(WidgetWatcherState watcher) => new(
         AirPodsWhere.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown,
         BatteryReadAt: null, EarReadAt: null, LidOpen: null, watcher, WatcherErrorCode: null, WatcherErrorName: null,

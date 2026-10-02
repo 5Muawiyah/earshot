@@ -122,6 +122,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private DateTimeOffset? _lastSavedAt;
     private DateTimeOffset? _estimateClock;
 
+    // The highest estimate shown for each part's saved reading (read from the store at construction with the readings),
+    // the version of it that was last written, and the order books are taken to be written in (LastReadingStore drops one
+    // that arrives after a later one). All three are touched holding _gate.
+    private readonly EstimateHighWater _highWater;
+    private int _savedMarksVersion;
+    private long _bookSequence;
+
     // The pinned device the paired model was last read for, so a settings change that leaves it alone reads nothing.
     private (Guid Container, string Address)? _pairedModelFor;
 
@@ -195,6 +202,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _lastReadingStore = lastReadings;
         _book = lastReadings?.Load() ?? LastReadingBook.Empty;
         _savedBook = _book;
+        _highWater = new EstimateHighWater(_book.Marks);
+        _savedMarksVersion = _highWater.Version;
     }
 
     public event EventHandler? Changed;
@@ -377,10 +386,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
 
-            // A read time not yet written is written now, so the next start shows the reading as old as it is.
-            if (_lastReadingStore is not null && !ReferenceEquals(_book, _savedBook))
+            // A read time not yet written is written now, so the next start shows the reading as old as it is, and so is an
+            // estimate shown since the last write, so a restart shows no less.
+            if (_lastReadingStore is not null && (!ReferenceEquals(_book, _savedBook) || _highWater.Version != _savedMarksVersion))
             {
-                bookToSave = _book;
+                bookToSave = TakeForSaveLocked(_book);
                 _savedBook = _book;
             }
         }
@@ -1365,7 +1375,15 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         _savedBook = book;
         _lastSavedAt = at;
-        return book;
+        return TakeForSaveLocked(book);
+    }
+
+    // The book as it is written: the estimates shown for its readings, and the next number in the order of writes. Must be
+    // called holding _gate, so the order of the numbers is the order the books were taken in whichever thread writes first.
+    private LastReadingBook TakeForSaveLocked(LastReadingBook book)
+    {
+        _savedMarksVersion = _highWater.Version;
+        return book with { Marks = _highWater.MarksFor(book), Sequence = ++_bookSequence };
     }
 
     // Whatever the linked set held is dropped: after a link that is another set, or a new paired model, nothing
@@ -1725,6 +1743,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool changed;
         bool caseClosed;
         DateTimeOffset now;
+        LastReadingBook? marksToSave = null;
         lock (_gate)
         {
             if (_closed)
@@ -1737,6 +1756,20 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             changed = SnapshotChangedIgnoringCounters(_lastPublished, snapshot);
             _lastPublished = snapshot;
             caseClosed = TakeCaseClosedLocked();
+
+            // An estimate a surface has shown since the last write is written, at most as often as a read time alone is.
+            if (_lastReadingStore is not null && _highWater.Version != _savedMarksVersion &&
+                (_lastSavedAt is not DateTimeOffset last || (now - last).Duration() >= LastReadingStore.ReadTimeWriteInterval))
+            {
+                marksToSave = TakeForSaveLocked(_book);
+                _savedBook = _book;
+                _lastSavedAt = now;
+            }
+        }
+
+        if (marksToSave is not null)
+        {
+            _lastReadingStore!.Save(marksToSave);
         }
 
         if (changed)
@@ -1828,6 +1861,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             LastReadings = _book,
             PairedModel = _selector.PairedModel,
             EstimateClock = _estimateClock,
+            HighWater = _highWater,
         };
     }
 

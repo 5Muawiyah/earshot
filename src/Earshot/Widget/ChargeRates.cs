@@ -49,7 +49,8 @@ internal static class ChargeRates
 // steps up of the same part, both seen while it says it is charging, with no reading in between that is lower or not
 // charging (either ends the charge as far as can be told):
 //   - the first step (the start) counts only when the reading before it was heard at most StartEdgeGap earlier, so its
-//     time is known to within that. A start read late would shorten the span and make the rate too fast.
+//     time is known to within that, and its time is taken as that earlier reading's, the earliest the step can have
+//     happened. A start read late then lengthens the span and makes the rate slower, never faster.
 //   - the last step (the end) may follow a gap (the lid shut and opened again): a step read late lengthens the span and
 //     makes the rate slower, never faster, and so does a bud that left the case and came back in between.
 //   - the end is below 100%: a part reads 100% for as long as it stays full, so the time it got there is not known.
@@ -101,7 +102,7 @@ internal sealed class ChargeRateLearner
         bool startKnown = at - run.LastAt <= StartEdgeGap;
         if (run.StartAt is not DateTimeOffset startAt || run.StartPercent is not int startPercent || at - startAt > MaxSpan)
         {
-            _runs[i] = new Run(percent, at, startKnown ? percent : null, startKnown ? at : null);
+            _runs[i] = new Run(percent, at, startKnown ? percent : null, startKnown ? run.LastAt : null);
             return null;
         }
 

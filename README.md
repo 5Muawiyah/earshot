@@ -187,7 +187,8 @@ What to know before you trust a number:
   (test 19 is pending).
 
 The card and settings follow Windows 11: text size, accent colour, light and
-dark theme, reduced motion and keyboard focus. There is no case-open card.
+dark theme, reduced motion and keyboard focus. A card also opens when your case
+opens near the PC. That is on by default.
 
 See [docs/overview.md](docs/overview.md#the-airpods-widget) and
 [docs/architecture.md](docs/architecture.md#the-airpods-widget).

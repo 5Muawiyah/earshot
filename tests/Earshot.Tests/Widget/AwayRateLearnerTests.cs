@@ -40,8 +40,8 @@ public sealed class AwayRateLearnerTests
         Assert.HasCount(1, rates, "The step at 15 is only 10 minutes after the start; the step at 25 completes a sample.");
         Assert.AreEqual(ChargePart.Case, rates[0].Part);
         Assert.AreEqual(Model, rates[0].Model);
-        Assert.AreEqual(60.0, rates[0].PercentPerHour, 1e-9, "20 points from the step at 5 to the step at 25: 60 an hour.");
-        Assert.AreEqual(TimeSpan.FromMinutes(20), rates[0].Span);
+        Assert.AreEqual(20 / (20.5 / 60), rates[0].PercentPerHour, 1e-9, "20 points from the step at 5 to the step at 25, measured from the reading before the step (4.5).");
+        Assert.AreEqual(TimeSpan.FromMinutes(20.5), rates[0].Span);
     }
 
     [TestMethod]
@@ -54,11 +54,11 @@ public sealed class AwayRateLearnerTests
 
         Assert.AreEqual(ChargePart.Bud, left.Single().Part);
         Assert.AreEqual(ChargePart.Bud, right.Single().Part);
-        Assert.AreEqual(30.0, right.Single().PercentPerHour, 1e-9);
+        Assert.AreEqual(10 / (20.5 / 60), right.Single().PercentPerHour, 1e-9);
 
         LastReadingBook book = LastReadingBook.Empty.WithRate(left.Single()).WithRate(right.Single());
         Assert.HasCount(1, book.Rates, "One rate per model and part: the later sample replaces the earlier.");
-        Assert.AreEqual(30.0, ChargeRates.For(book, Model, ChargePart.Bud));
+        Assert.AreEqual(right.Single().PercentPerHour, ChargeRates.For(book, Model, ChargePart.Bud));
     }
 
     [TestMethod]
@@ -72,7 +72,7 @@ public sealed class AwayRateLearnerTests
         List<LearnedRate> rates = Feed(learner, ChargeComponent.Case, 10.5, 50, m => m < 25 ? 50 : m < 35 ? 60 : m < 45 ? 70 : 80);
 
         Assert.HasCount(1, rates, "From the step at 25 to the one at 35 is too short; to the one at 45 is a sample.");
-        Assert.AreEqual(60.0, rates[0].PercentPerHour, 1e-9, "Measured from the step at 25, seen as it happened, never from the one read late at 10.");
+        Assert.AreEqual(20 / (20.5 / 60), rates[0].PercentPerHour, 1e-9, "Measured from the step at 25, seen as it happened, never from the one read late at 10.");
     }
 
     [TestMethod]
@@ -105,5 +105,23 @@ public sealed class AwayRateLearnerTests
         learner.Reset();
 
         Assert.IsNull(learner.Observe(ChargeComponent.Case, Model, 70, true, At(30)), "After a reset the next step is not measured from the old one.");
+    }
+
+    // The start step is heard up to StartEdgeGap after the reading before it, so it happened somewhere in that gap. The span
+    // runs from the reading before it, the earliest the step can have happened: a late start then makes the rate slower,
+    // never faster.
+    [TestMethod]
+    public void ALateHeardStartStepMakesTheRateSlowerNeverFaster()
+    {
+        var learner = new ChargeRateLearner();
+        Assert.IsNull(learner.Observe(ChargeComponent.Case, Model, 40, true, At(5)));
+
+        // The step to 50 is read 90 seconds after the last reading of 40: within the gap, so it counts as a start.
+        Assert.IsNull(learner.Observe(ChargeComponent.Case, Model, 50, true, At(6.5)));
+        LearnedRate? rate = learner.Observe(ChargeComponent.Case, Model, 60, true, At(30));
+
+        Assert.IsNotNull(rate);
+        Assert.AreEqual(TimeSpan.FromMinutes(25), rate.Span, "From the reading before the step (minute 5), not from when it was read (6.5).");
+        Assert.AreEqual(24.0, rate.PercentPerHour, 1e-9, "10 points over 25 minutes; measured from minute 6.5 it would read 25.5.");
     }
 }

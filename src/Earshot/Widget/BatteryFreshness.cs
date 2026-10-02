@@ -36,9 +36,12 @@ internal sealed record GaugeFigure(
 }
 
 // What is kept of the owner's pair beyond this run's own readings: the saved last readings and learned rates, the paired
-// model they are shown for, and the latest time the estimate has been worked out at (an estimate is never worked out for
-// an earlier time than that, so a clock that is put back never makes it fall).
-internal sealed record SavedBattery(LastReadingBook Book, ushort? Model, DateTimeOffset? EstimateClock, bool UseAppleBudSeed = ChargeRates.UseAppleBudSeed);
+// model they are shown for, the latest time the estimate has been worked out at (an estimate is never worked out for an
+// earlier time than that, so a clock that is put back never makes it fall), and the highest estimate shown for each
+// reading (EstimateHighWater: with none given, an estimate is worked out afresh each time).
+internal sealed record SavedBattery(
+    LastReadingBook Book, ushort? Model, DateTimeOffset? EstimateClock, bool UseAppleBudSeed = ChargeRates.UseAppleBudSeed,
+    EstimateHighWater? HighWater = null);
 
 // What every surface shows of the battery, worked out once: the card, the gauge and the low battery alert all
 // read this, so "what is shown" has one definition. The owner's pair is shown wherever it is: a fresh reading of the
@@ -110,7 +113,7 @@ internal static class BatteryFreshness
         return Shown(
             snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset,
             onThisPc: snapshot.Where == AirPodsWhere.ThisPc, linked: snapshot.Selection == BroadcastSelectionState.Linked, now,
-            new SavedBattery(snapshot.LastReadings, snapshot.PairedModel, snapshot.EstimateClock));
+            new SavedBattery(snapshot.LastReadings, snapshot.PairedModel, snapshot.EstimateClock, HighWater: snapshot.HighWater));
     }
 
     // left, right, caseReading: this run's readings of the broadcast. linked: the broadcast's set is the one linked to the
@@ -183,19 +186,35 @@ internal static class BatteryFreshness
             ? ChargeRates.For(saved.Book, model, ChargeRates.PartOf(component), saved.UseAppleBudSeed)
             : null;
         DateTimeOffset estimateAt = saved?.EstimateClock is DateTimeOffset latest && latest > now ? latest : now;
-        return ChargeEstimator.Estimate(percent, charging == true, readAt, rate, estimateAt) is int grown
+        int? estimate = ChargeEstimator.Estimate(percent, charging == true, readAt, rate, estimateAt);
+
+        // An estimate that has been shown for this reading is not shown lower, whatever the clock has done since.
+        if (charging == true && percent < 100 && saved?.HighWater is { } highWater)
+        {
+            estimate = highWater.Observe(component, readAt, percent, estimate);
+        }
+
+        return estimate is int grown
             ? new ShownPart(grown, charging, ReadingKind.Estimated, readAt) { ReadPercent = percent }
             : new ShownPart(percent, charging, ReadingKind.Last, readAt);
     }
 
     // A live broadcast bud first, then Windows' figure while it is current, then the buds' last readings or estimates at
     // any age. The broadcast number is the lower of the buds that have a value: an unknown bud is skipped, and with no bud
-    // value there is no number. Of two buds at the same value the live one, then the read one, is the number's.
+    // value there is no number. Of two buds at the same value the live one, then the read one, is the number's. While any
+    // bud is live the number is the lower of the live buds only: another bud's old reading or estimate says nothing about
+    // now, and must not lower (or stand beside) a figure that is being heard.
     private static GaugeFigure? GaugeFor(ShownPart left, ShownPart right, int? windows, DateTimeOffset? windowsAt, bool freshBud)
     {
         if (!freshBud && windows is int figure && windowsAt is DateTimeOffset readAt)
         {
             return new GaugeFigure(Math.Clamp(figure, 0, 100), BatterySource.Windows, null, null, false, readAt);
+        }
+
+        if (freshBud)
+        {
+            left = left.Fresh ? left : ShownPart.None;
+            right = right.Fresh ? right : ShownPart.None;
         }
 
         if (!left.HasValue && !right.HasValue)

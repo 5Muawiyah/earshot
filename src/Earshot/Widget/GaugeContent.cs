@@ -38,7 +38,8 @@ internal readonly record struct GaugeDisplaySettings(int LowBatteryThresholdPerc
 //
 // The number is the one BatteryFreshness.Shown gives: on this PC the lower bud (live, or else its last reading or the
 // estimate grown from it, at any age), or Windows' own figure while that is current and no bud has a live broadcast value;
-// away, the case's. A value that is not live is drawn in tertiary ink (Tertiary), an estimate with "≈" before it
+// away, the case's. While any bud is live the number is the lower of the live buds only, and "Low battery" is said only
+// for a live figure. A value that is not live is drawn in tertiary ink (Tertiary), an estimate with "≈" before it
 // (Estimated), and the tooltip says "Last read" or "Estimated" with the age of the reading. Nothing here invents, rounds or
 // interpolates a figure (ChargeEstimator is the one place an estimate is made), and a charging flag that is not true is
 // not shown.
@@ -77,7 +78,7 @@ internal sealed record GaugeContent(
                     GaugeMode.CaseAway, casePercent, false, box.Charging == true, WidgetCopy.GaugeNotOnThisPc + CaseLines(box, now))
                 {
                     CaseMark = true,
-                    Tertiary = true,
+                    Tertiary = box.Kind != ReadingKind.Live,
                     Estimated = box.Estimated,
                 };
             }
@@ -87,7 +88,9 @@ internal sealed record GaugeContent(
 
         if (shown.Gauge is { } figure)
         {
-            bool low = figure.Percent <= settings.LowBatteryThresholdPercent;
+            // Low is a claim about now: only a live figure gives it. A last reading or an estimate that is at or under the
+            // level is drawn as it is, in tertiary ink with its age, and never as "Low battery".
+            bool low = figure.Kind == ReadingKind.Live && figure.Percent <= settings.LowBatteryThresholdPercent;
             string head = low ? WidgetCopy.GaugeLowBattery : figure.Charging ? WidgetCopy.GaugeCharging : WidgetCopy.GaugeAirPods;
             string detail = figure.Source == BatterySource.Windows
                 ? WidgetCopy.WindowsReads(figure.Percent)

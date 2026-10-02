@@ -371,7 +371,10 @@ for more than ten seconds (the case shut, or the buds out of range), any same-mo
 pair that opens its case at -70 dBm or stronger is linked at once, with no margin to
 clear: the 8 dB margin is asked only while an anchor of the linked set has been heard
 inside the ten second window. These need a stranger of the same model
-(and, once one is held, the same colour) to be close and, for the first two, to match. This is an
+(and, once one is held, the same colour) to be close and, for the first two, to match. A pair
+that is linked this way is read like the owner's: what it says is saved as the last readings,
+replacing the owner's, and is shown and estimated from, until the owner opens their own case next
+to the PC again and the link moves back (a pair that does not take the link is never saved). This is an
 owner decision, not an oversight: the owner accepted that risk rather than ask for
 a set-up step to rule it out. There is no consistency check against another
 device.
@@ -405,8 +408,14 @@ restart therefore leaves the last readings on show.
 100, then stops. Buds charge only in the case, so a bud that was not charging, and a
 case that was not itself charging, keep their value. A clock behind the read time
 gives no rise, and the service hands in the latest time it has worked anything out
-at, so a clock put back never makes an estimate fall. A newer live reading replaces
-the estimate. Rates are per model and part (`ChargeRates`): one rate for both buds of
+at. An estimate is also never shown lower than one already shown for the same
+reading (`EstimateHighWater`, keyed by the reading's read time and value, raised by
+`BatteryFreshness.Shown` for every surface and written into `last-reading.json`), so a
+clock put back, or a restart with the clock set back, never makes an estimate fall.
+A newer live reading replaces the estimate, even with a lower value: it is a reading.
+Each book written carries a sequence number taken under the service's lock, and the
+store drops one that arrives after a later one. A file that could not be read (locked,
+corrupt, cut short) is not written over until it can be read or is removed. Rates are per model and part (`ChargeRates`): one rate for both buds of
 a model and one for the case, learned from the owner's own live readings by
 `ChargeRateLearner` (two steps up of one part, both while charging, the first seen
 within two minutes of the reading before it, the last below 100%, 15 minutes to

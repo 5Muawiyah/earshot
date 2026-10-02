@@ -14,12 +14,27 @@ internal sealed record SavedReading(int Percent, bool Charging, DateTimeOffset R
 // is for, percentage points an hour, when it was measured and over how long.
 internal sealed record LearnedRate(ushort Model, ChargePart Part, double PercentPerHour, DateTimeOffset MeasuredAt, TimeSpan Span);
 
+// The highest estimate shown so far for one saved reading of a part: the reading it grew from (its read time and value)
+// and the value shown. An estimate never falls (see EstimateHighWater), so it is kept with the readings: a restart, with
+// the clock set back, then shows no less. A newer reading of the part is another reading, and the mark for the old one is
+// of no use.
+internal sealed record EstimateMark(ChargeComponent Component, DateTimeOffset ReadAt, int ReadPercent, int Percent);
+
 // What is kept of the linked pair across restarts: the last fresh reading of each part and the learned rates. Immutable:
 // every change gives a new book, and a reading that changes nothing gives the same one back, so a reference compare
 // says whether anything changed. Pure: no clock and no file here (LastReadingStore reads and writes it).
 internal sealed record LastReadingBook(SavedReading? Left, SavedReading? Right, SavedReading? Case, IReadOnlyList<LearnedRate> Rates)
 {
     public static LastReadingBook Empty { get; } = new(null, null, null, Array.Empty<LearnedRate>());
+
+    // The estimates already shown, one at most for each part (EstimateMark). Not part of the readings: it is set when the
+    // book is taken to be written, and not looked at when two books are compared for a change.
+    public IReadOnlyList<EstimateMark> Marks { get; init; } = Array.Empty<EstimateMark>();
+
+    // The order the service took this book to be written in. A write that arrives after a later one was written is dropped
+    // (LastReadingStore), so a slow thread cannot put an older book over a newer. Zero is a book that was not taken for
+    // writing in order, which is always written.
+    public long Sequence { get; init; }
 
     public SavedReading? Of(ChargeComponent component) => component switch
     {

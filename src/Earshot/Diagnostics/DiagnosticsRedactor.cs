@@ -44,7 +44,7 @@ public static partial class DiagnosticsRedactor
 
     // An enumerator prefix, optionally behind "\\?\" or "//?/", then the rest of the id up to a space or quote.
     // MMDEVAPI and HDAUDIO are the audio endpoint and codec enumerators the log can print.
-    [GeneratedRegex(@"(?:\\\\\?\\|//\?/)?\b(?:BTHENUM|BTHLE|BTHHFENUM|BTH|SWD|USB|HDAUDIO|MMDEVAPI)[\\#]" + PathChars + "+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?:\\\\\?\\|//\?/)?(?<![0-9A-Za-z])(?:BTHENUM|BTHLE|BTHHFENUM|BTH|SWD|USB|HDAUDIO|MMDEVAPI)[\\#]" + PathChars + "+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex InstancePath();
 
     // "{GUID}#..." as a device interface path ends in.
@@ -55,18 +55,22 @@ public static partial class DiagnosticsRedactor
     [GeneratedRegex(@"\{\d\.\d\.\d\.[0-9a-fA-F]{8}\}\.\{" + GuidPattern + @"\}", RegexOptions.CultureInvariant)]
     private static partial Regex EndpointId();
 
-    [GeneratedRegex(@"\bS-1-\d+(?:-\d+){1,14}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // Bounded by "not a letter or digit" rather than \b, which sees "_" as part of a word and so skipped "ID_S-1-5-...".
+    [GeneratedRegex(@"(?<![0-9A-Za-z])S-1-\d+(?:-\d+){1,14}(?![0-9A-Za-z])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Sid();
 
-    // A drive, "Users", a profile folder, and whatever follows it. The profile folder is one name without a
-    // separator; a user name with a space is caught by the listed name, tried first (see UserPath).
-    [GeneratedRegex(@"(?:\\\\\?\\|//\?/)?[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s""'<>|:*?]+(?:[\\/]+[^\s""'<>|:*?]*)?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    // A drive (any letter) or a share (\\server), "Users" or the older "Documents and Settings", a profile folder, and
+    // whatever follows it. The profile folder is the whole segment up to the next separator, spaces included, when a
+    // separator follows; with none (the name ends the text) it is the run up to a space, so the rest of a sentence is
+    // not taken with it. A name with a space and no separator after it is caught by the listed name (see UserPath).
+    [GeneratedRegex(@"(?:\\\\\?\\|//\?/)?(?:[A-Za-z]:|\\\\[^\\/\s""'<>|:*?]+)[\\/]+(?:Users|Documents and Settings)[\\/]+(?:[^\\/""'<>|:*?\r\n]+(?=[\\/])|[^\\/\s""'<>|:*?]+)(?:[\\/]+[^\s""'<>|:*?]*)?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ProfilePath();
 
     [GeneratedRegex(@"%USERPROFILE%(?:[\\/]+[^\s""'<>|:*?]*)?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ProfileVariable();
 
-    [GeneratedRegex(@"\{?\b" + GuidPattern + @"\b\}?", RegexOptions.CultureInvariant)]
+    // Bounded by "not a letter or digit" rather than \b, which sees "_" as part of a word and so skipped "ID_<guid>".
+    [GeneratedRegex(@"\{?(?<![0-9A-Za-z])" + GuidPattern + @"(?![0-9A-Za-z])\}?", RegexOptions.CultureInvariant)]
     private static partial Regex GuidText();
 
     // A GUID written without hyphens (the "N" format).
@@ -78,6 +82,24 @@ public static partial class DiagnosticsRedactor
 
     [GeneratedRegex(@"(?<![0-9A-Za-z])(?:0[xX])?[0-9A-Fa-f]{12}(?![0-9A-Za-z])", RegexOptions.CultureInvariant)]
     private static partial Regex AddressDigits();
+
+    // The lines the tray writes when a device is chosen or pinned carry the device's name, and the search string the owner
+    // typed, which are not in the known names once the owner has chosen another device (only the one in use now is). They
+    // are taken out by where they sit in the line, whatever they say. The shapes are those of TrayContext's three lines:
+    //   Device chosen: <name> (<address>, container <id>), match "<text>".
+    //   Device not changed to <name> (<address>): the boot block did not take it ...
+    //   Pinned <name>: container <id>, address <address>.
+    [GeneratedRegex(@"(Device chosen: ).+?( \([^()\r\n]*, container )", RegexOptions.CultureInvariant)]
+    private static partial Regex ChosenName();
+
+    [GeneratedRegex(@"(, match "")[^\r\n]*("")", RegexOptions.CultureInvariant)]
+    private static partial Regex ChosenMatch();
+
+    [GeneratedRegex(@"(Device not changed to ).+?( \([^()\r\n]*\): the boot block)", RegexOptions.CultureInvariant)]
+    private static partial Regex NotChangedName();
+
+    [GeneratedRegex(@"(Pinned ).+?(: container \S+, address )", RegexOptions.CultureInvariant)]
+    private static partial Regex PinnedName();
 
     // Removes everything listed above from text. knownNames are extra strings to remove wherever they appear, as a
     // whole word and ignoring case: the paired device's name, window titles. The signed-in user name
@@ -95,6 +117,12 @@ public static partial class DiagnosticsRedactor
         }
 
         string result = text;
+
+        // The device names in the choose and pin lines first, before their addresses and ids are turned into tags.
+        result = ChosenName().Replace(result, "$1" + NameTag + "$2");
+        result = ChosenMatch().Replace(result, "$1" + NameTag + "$2");
+        result = NotChangedName().Replace(result, "$1" + NameTag + "$2");
+        result = PinnedName().Replace(result, "$1" + NameTag + "$2");
 
         // Paths with the profile folder first, so a user name that has a space in it is removed whole.
         result = UserPath(userName).Replace(result, PathTag);

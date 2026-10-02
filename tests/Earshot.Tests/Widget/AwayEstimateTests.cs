@@ -22,10 +22,12 @@ public sealed class AwayEstimateTests
     private static LearnedRate Rate(ChargePart part, double perHour, ushort model = Model) =>
         new(model, part, perHour, ReadAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30));
 
-    private static ShownBattery Shown(LastReadingBook book, DateTimeOffset now, DateTimeOffset? estimateClock = null, bool seed = false, bool onThisPc = false) =>
+    private static ShownBattery Shown(
+        LastReadingBook book, DateTimeOffset now, DateTimeOffset? estimateClock = null, bool seed = false, bool onThisPc = false,
+        EstimateHighWater? highWater = null) =>
         BatteryFreshness.Shown(
             PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, onThisPc, linked: false, now,
-            new SavedBattery(book, Model, estimateClock, seed));
+            new SavedBattery(book, Model, estimateClock, seed, highWater));
 
     [TestMethod]
     public void AChargingPartRisesFromItsReadingAtItsRate()
@@ -116,25 +118,30 @@ public sealed class AwayEstimateTests
         Assert.AreEqual(45.0, ChargeRates.For(learned, ChargeRates.AppleBudSeedModel, ChargePart.Bud, useAppleBudSeed: true));
     }
 
-    // A clock behind the read time gives no rise, and an estimate already shown is never shown lower when the clock is
-    // put back: the service hands in the latest time it has worked anything out at.
+    // A clock behind the read time gives no rise: the value is the reading itself, unless a higher estimate was already
+    // shown for it (the second half of this test and EstimateHighWater), and then never lower than that.
     [TestMethod]
     public void AClockThatGoesBackwardsGivesNoRiseAndNoFall()
     {
         LastReadingBook book = Book(box: Saved(40, charging: true), rates: Rate(ChargePart.Case, 30));
 
         ShownPart behind = Shown(book, ReadAt - TimeSpan.FromHours(1)).Case;
-        Assert.AreEqual(ReadingKind.Last, behind.Kind, "Behind the read time: no rise.");
-        Assert.AreEqual(40, behind.Percent, "...and no fall.");
+        Assert.AreEqual(ReadingKind.Last, behind.Kind, "Behind the read time, with nothing shown before: no rise.");
+        Assert.AreEqual(40, behind.Percent, "...so the value is the reading.");
 
+        var shownBefore = new EstimateHighWater();
         DateTimeOffset later = ReadAt + TimeSpan.FromHours(1);
-        Assert.AreEqual(70, Shown(book, later, estimateClock: later).Case.Percent);
+        Assert.AreEqual(70, Shown(book, later, highWater: shownBefore).Case.Percent);
 
-        ShownPart putBack = Shown(book, ReadAt + TimeSpan.FromMinutes(20), estimateClock: later).Case;
+        ShownPart putBack = Shown(book, ReadAt + TimeSpan.FromMinutes(20), highWater: shownBefore).Case;
         Assert.AreEqual(70, putBack.Percent, "Put back by 40 minutes: the estimate holds where it was.");
+        Assert.AreEqual(ReadingKind.Estimated, putBack.Kind);
 
-        ShownPart putBackBehindTheRead = Shown(book, ReadAt - TimeSpan.FromDays(1), estimateClock: later).Case;
-        Assert.AreEqual(70, putBackBehindTheRead.Percent, "Put back behind the reading itself: still no fall.");
+        ShownPart putBackBehindTheRead = Shown(book, ReadAt - TimeSpan.FromDays(1), highWater: shownBefore).Case;
+        Assert.AreEqual(70, putBackBehindTheRead.Percent, "Put back behind the reading itself: still no fall from what was shown.");
+
+        // The latest time worked out at (the service's clock that does not go back) holds the estimate too.
+        Assert.AreEqual(70, Shown(book, ReadAt + TimeSpan.FromMinutes(20), estimateClock: later).Case.Percent);
     }
 
     [TestMethod]
@@ -188,5 +195,38 @@ public sealed class AwayEstimateTests
 
         Assert.AreEqual(ReadingKind.Live, box.Kind);
         Assert.AreEqual(55, box.Percent);
+    }
+
+    // What a surface has drawn is not taken back: the render at one o'clock shows 70, the clock is then put back to twenty
+    // past (before any new snapshot is built), and the render there shows at least 70 for the same reading. Only a newer
+    // reading replaces it.
+    [TestMethod]
+    public void AnEstimateThatWasShownIsNeverShownLowerForTheSameReadingWhateverTheClockDoes()
+    {
+        LastReadingBook book = Book(box: Saved(40, charging: true), rates: Rate(ChargePart.Case, 30));
+        WidgetSnapshot snapshot = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
+        {
+            LastReadings = book,
+            PairedModel = Model,
+            HighWater = new EstimateHighWater(),
+        };
+
+        Assert.AreEqual(70, BatteryFreshness.Shown(snapshot, ReadAt + TimeSpan.FromHours(1)).Case.Percent);
+
+        ShownPart putBack = BatteryFreshness.Shown(snapshot, ReadAt + TimeSpan.FromMinutes(20)).Case;
+        Assert.AreEqual(ReadingKind.Estimated, putBack.Kind);
+        Assert.AreEqual(70, putBack.Percent, "Put back by 40 minutes: still the 70 that was shown.");
+        Assert.AreEqual(40, putBack.ReadPercent);
+
+        ShownPart behindTheRead = BatteryFreshness.Shown(snapshot, ReadAt - TimeSpan.FromHours(1)).Case;
+        Assert.AreEqual(70, behindTheRead.Percent, "Put back behind the reading itself: no rise, but no fall from what was shown.");
+
+        ShownPart later = BatteryFreshness.Shown(snapshot, ReadAt + TimeSpan.FromHours(2)).Case;
+        Assert.AreEqual(100, later.Percent, "And it still rises when the clock does.");
+
+        // A newer reading of the part is a different reading: it replaces the mark (here a lower one: it is a reading).
+        LastReadingBook newer = Book(box: Saved(45, charging: true, at: ReadAt + TimeSpan.FromHours(2)), rates: Rate(ChargePart.Case, 30));
+        WidgetSnapshot after = snapshot with { LastReadings = newer };
+        Assert.AreEqual(45, BatteryFreshness.Shown(after, ReadAt + TimeSpan.FromHours(2) + TimeSpan.FromMinutes(1)).Case.Percent);
     }
 }

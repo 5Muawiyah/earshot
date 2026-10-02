@@ -149,4 +149,87 @@ public sealed class AwayGaugeTests
         Assert.AreEqual("Estimated, read 2 h ago", WidgetCopy.PartTip(estimate, now));
         Assert.AreEqual("3 d", WidgetCopy.AgeAmount(TimeSpan.FromDays(3)));
     }
+
+    // When any bud is live the number is the lower of the live buds: a bud's old reading is not a figure about now, and a
+    // live bud's must not be hidden under it.
+    [TestMethod]
+    public void OnThisPcALiveBudIsNeverOutvotedByAnOlderLowerReadingOfTheOther()
+    {
+        DateTimeOffset now = ReadAt + TimeSpan.FromHours(1);
+        WidgetSnapshot snapshot = Snapshot(AirPodsWhere.ThisPc, Book(null, Saved(15, false), null)) with
+        {
+            Selection = BroadcastSelectionState.Linked,
+            Left = new PartReading(80, false, null) { ReadAt = now - TimeSpan.FromSeconds(3) },
+        };
+
+        GaugeContent c = GaugeContent.From(snapshot, now, new GaugeDisplaySettings(20, "iPhone"));
+
+        Assert.AreEqual(80, c.Percent, "The live bud's figure, not the other bud's reading from an hour ago.");
+        Assert.IsFalse(c.Tertiary);
+        Assert.IsFalse(c.Low);
+        StringAssert.StartsWith(c.Tooltip, "AirPods\r\n");
+        Assert.IsFalse(c.Tooltip.Contains("Low battery", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void OnThisPcTheNumberIsTheLowerOfTheLiveBudsWhenBothAreLive()
+    {
+        DateTimeOffset now = ReadAt + TimeSpan.FromHours(1);
+        WidgetSnapshot snapshot = Snapshot(AirPodsWhere.ThisPc, LastReadingBook.Empty) with
+        {
+            Selection = BroadcastSelectionState.Linked,
+            Left = new PartReading(80, false, null) { ReadAt = now - TimeSpan.FromSeconds(3) },
+            Right = new PartReading(60, false, null) { ReadAt = now - TimeSpan.FromSeconds(3) },
+        };
+
+        Assert.AreEqual(60, GaugeContent.From(snapshot, now, Settings).Percent);
+    }
+
+    // A low battery head says what the battery is now: a last reading or an estimate never gives it.
+    [TestMethod]
+    public void ALowBatteryHeadIsNeverGivenByAFigureThatIsNotLive()
+    {
+        WidgetSnapshot last = Snapshot(AirPodsWhere.ThisPc, Book(Saved(10, false), Saved(12, false), null));
+
+        GaugeContent c = GaugeContent.From(last, ReadAt + TimeSpan.FromHours(2), new GaugeDisplaySettings(20, "iPhone"));
+
+        Assert.AreEqual(10, c.Percent, "The number is still the last reading, in tertiary ink.");
+        Assert.IsFalse(c.Low);
+        Assert.IsFalse(c.Tooltip.StartsWith("Low battery", StringComparison.Ordinal), c.Tooltip);
+
+        WidgetSnapshot estimated = Snapshot(AirPodsWhere.ThisPc, Book(Saved(5, true), null, null, Rate(ChargePart.Bud, 6)));
+        GaugeContent e = GaugeContent.From(estimated, ReadAt + TimeSpan.FromHours(1), new GaugeDisplaySettings(20, "iPhone"));
+        Assert.AreEqual(11, e.Percent);
+        Assert.IsFalse(e.Low);
+        Assert.IsFalse(e.Tooltip.StartsWith("Low battery", StringComparison.Ordinal), e.Tooltip);
+
+        DateTimeOffset now = ReadAt + TimeSpan.FromMinutes(1);
+        WidgetSnapshot live = Snapshot(AirPodsWhere.ThisPc, LastReadingBook.Empty) with
+        {
+            Selection = BroadcastSelectionState.Linked,
+            Left = new PartReading(10, false, null) { ReadAt = now - TimeSpan.FromSeconds(3) },
+        };
+        GaugeContent l = GaugeContent.From(live, now, new GaugeDisplaySettings(20, "iPhone"));
+        Assert.IsTrue(l.Low, "A live reading at or under the level is low.");
+        StringAssert.StartsWith(l.Tooltip, "Low battery");
+    }
+
+    // A case that is being heard now is live: its number is not drawn in the tertiary ink of a last reading.
+    [TestMethod]
+    public void AwayALiveCaseIsNotDrawnInTertiaryInk()
+    {
+        DateTimeOffset now = ReadAt + TimeSpan.FromMinutes(1);
+        WidgetSnapshot snapshot = Snapshot(AirPodsWhere.NotInUse, LastReadingBook.Empty) with
+        {
+            Selection = BroadcastSelectionState.Linked,
+            Case = new PartReading(70, false, null) { ReadAt = now - TimeSpan.FromSeconds(3) },
+        };
+
+        GaugeContent c = GaugeContent.From(snapshot, now, Settings);
+
+        Assert.AreEqual(GaugeMode.CaseAway, c.Mode);
+        Assert.AreEqual(70, c.Percent);
+        Assert.IsFalse(c.Tertiary, "A live value is drawn as current.");
+        Assert.IsFalse(c.Estimated);
+    }
 }

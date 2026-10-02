@@ -59,21 +59,24 @@ public sealed class BatteryFreshnessTests
     }
 
     // Replaces "the gauge drops a bud per bud after an hour": the gauge number is the lower of the buds that have a value,
-    // at any age, and a bud that is not live makes it a last reading.
+    // at any age, and with no bud live it is a last reading. While any bud is live it is the lower of the live buds only.
     [TestMethod]
     public void TheGaugeKeepsAnOldBudAsALastReading()
     {
         PartReading headset = PartReading.Unknown;
 
-        ShownBattery both = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(10)), Part(80, Seconds(1)), PartReading.Unknown, headset, true, true, Now);
+        ShownBattery both = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(10)), Part(80, TimeSpan.FromMinutes(5)), PartReading.Unknown, headset, true, true, Now);
         Assert.AreEqual(40, both.Gauge?.Percent);
         Assert.AreEqual(ReadingKind.Last, both.Gauge?.Kind);
+        Assert.AreEqual(40, both.Gauge?.Left);
+        Assert.AreEqual(80, both.Gauge?.Right);
 
         ShownBattery oneStale = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(61)), Part(80, Seconds(1)), PartReading.Unknown, headset, true, true, Now);
-        Assert.AreEqual(40, oneStale.Gauge?.Percent, "The old low bud still pulls the number down, as a last reading.");
-        Assert.AreEqual(ReadingKind.Last, oneStale.Gauge?.Kind);
-        Assert.AreEqual(40, oneStale.Gauge?.Left);
+        Assert.AreEqual(80, oneStale.Gauge?.Percent, "The live bud is the number: an old bud's reading does not pull it down.");
+        Assert.AreEqual(ReadingKind.Live, oneStale.Gauge?.Kind);
+        Assert.IsNull(oneStale.Gauge?.Left, "...nor stand beside it.");
         Assert.AreEqual(80, oneStale.Gauge?.Right);
+        Assert.AreEqual(40, oneStale.Left.Percent, "The card still shows the old bud, as a last reading.");
 
         ShownBattery bothLive = BatteryFreshness.Shown(Part(40, Seconds(2)), Part(80, Seconds(1)), PartReading.Unknown, headset, true, true, Now);
         Assert.AreEqual(ReadingKind.Live, bothLive.Gauge?.Kind);
@@ -106,18 +109,22 @@ public sealed class BatteryFreshnessTests
         Assert.IsTrue(shown.Gauge?.Charging);
 
         ShownBattery oldBud = BatteryFreshness.Shown(
-            Part(40, TimeSpan.FromHours(2), charging: true), Part(80, Seconds(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
+            Part(40, TimeSpan.FromHours(2), charging: true), Part(80, TimeSpan.FromHours(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
         Assert.IsTrue(oldBud.Gauge?.Charging, "An old bud the gauge is drawn from was charging when read.");
 
+        ShownBattery liveOnly = BatteryFreshness.Shown(
+            Part(40, TimeSpan.FromHours(2), charging: true), Part(80, Seconds(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
+        Assert.IsFalse(liveOnly.Gauge?.Charging, "A live figure does not take the bolt from an old bud it is not drawn from.");
+
         ShownBattery neither = BatteryFreshness.Shown(
-            Part(40, TimeSpan.FromHours(2), charging: false), Part(80, Seconds(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
+            Part(40, TimeSpan.FromHours(2), charging: false), Part(80, TimeSpan.FromHours(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
         Assert.IsFalse(neither.Gauge?.Charging);
     }
 
     [TestMethod]
     public void TheGaugeReadTimeIsTheOldestOfTheBudsItIsDrawnFrom()
     {
-        ShownBattery shown = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(10)), Part(80, Seconds(1)), PartReading.Unknown, PartReading.Unknown, true, true, Now);
+        ShownBattery shown = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(10)), Part(80, TimeSpan.FromMinutes(5)), PartReading.Unknown, PartReading.Unknown, true, true, Now);
 
         Assert.AreEqual(Now - TimeSpan.FromMinutes(10), shown.Gauge?.ReadAt);
     }

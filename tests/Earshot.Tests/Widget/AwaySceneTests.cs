@@ -214,9 +214,9 @@ public sealed class AwaySceneTests : IDisposable
 
         ShownPart grown = BatteryFreshness.Shown(service.Current, Now).Case;
         Assert.AreEqual(ReadingKind.Estimated, grown.Kind);
-        Assert.AreEqual(91, grown.Percent, "70, read as the lid shut, plus 60 an hour for 21 minutes.");
+        Assert.AreEqual(90, grown.Percent, "70, read as the lid shut, plus just under 60 an hour for 21 minutes: the learned rate counts from the reading before the start step, a second earlier, so it errs slow.");
         Assert.AreEqual(70, grown.ReadPercent);
-        Assert.AreEqual("≈91% · 21 min", WidgetCopy.PartLine(grown, Now));
+        Assert.AreEqual("≈90% · 21 min", WidgetCopy.PartLine(grown, Now));
         Assert.IsGreaterThan(shut - TimeSpan.FromMinutes(2), grown.ReadAt!.Value);
 
         // The lid opens again: the case reads 80% and has stopped charging. That replaces the estimate at once.
@@ -254,7 +254,7 @@ public sealed class AwaySceneTests : IDisposable
         Assert.IsFalse(text.Contains("AirPods", StringComparison.OrdinalIgnoreCase), "No name.");
 
         // Every member is one the file's shape allows, and none of them can hold an address or a name.
-        string[] allowed = ["SchemaVersion", "Left", "Right", "Case", "Rates", "Percent", "Charging", "ReadAt", "Model", "Part", "PercentPerHour", "MeasuredAt", "SpanMinutes"];
+        string[] allowed = ["SchemaVersion", "Left", "Right", "Case", "Rates", "Percent", "Charging", "ReadAt", "Model", "Part", "PercentPerHour", "MeasuredAt", "SpanMinutes", "Marks", "ReadPercent"];
         using var json = System.Text.Json.JsonDocument.Parse(text);
         var names = new List<string>();
         void Walk(System.Text.Json.JsonElement e)
@@ -300,5 +300,150 @@ public sealed class AwaySceneTests : IDisposable
         DateTimeOffset lastHeard = service.Current.LastReadings.Left!.ReadAt;
         service.Close();
         Assert.AreEqual(lastHeard, new LastReadingStore(StoreFile, _log).Load().Left!.ReadAt, "Close writes the last read time.");
+    }
+
+    // The estimate's high-water mark is kept with the last readings: shown at one o'clock, the app closed, the clock put
+    // back and the app started again, the estimate is not lower than it was.
+    [TestMethod]
+    public void AnEstimateShownBeforeARestartIsNotLowerAfterItWhateverTheClockIsSetTo()
+    {
+        DateTimeOffset readAt = Now;
+        new LastReadingStore(StoreFile, _log).Save(new LastReadingBook(
+            null, null, new SavedReading(40, true, readAt, BroadcastFixtures.PairedModel),
+            [new LearnedRate(BroadcastFixtures.PairedModel, ChargePart.Case, 30, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]));
+
+        using (WidgetStatusService first = NewService())
+        {
+            Tick(60 * 60);
+            ShownPart shown = BatteryFreshness.Shown(first.Current, Now).Case;
+            Assert.AreEqual(ReadingKind.Estimated, shown.Kind);
+            Assert.AreEqual(70, shown.Percent, "40 and 30 an hour for an hour.");
+            first.Close();
+        }
+
+        // The clock is set back to twenty minutes after the reading, and the app starts again.
+        Tick(-40 * 60);
+        using (WidgetStatusService second = NewService())
+        {
+            ShownPart after = BatteryFreshness.Shown(second.Current, Now).Case;
+            Assert.AreEqual(ReadingKind.Estimated, after.Kind, "Still an estimate, marked as one.");
+            Assert.AreEqual(70, after.Percent, "Not the 50 that twenty minutes of growth gives.");
+            Assert.AreEqual(40, after.ReadPercent);
+            second.Close();
+        }
+
+        // And to an hour before the reading.
+        Tick(-80 * 60);
+        using WidgetStatusService third = NewService();
+        ShownPart behind = BatteryFreshness.Shown(third.Current, Now).Case;
+        Assert.AreEqual(70, behind.Percent, "Behind the reading itself, still not lower than it was shown.");
+        Assert.AreEqual(ReadingKind.Estimated, behind.Kind);
+
+        // Time then passes beyond where the estimate was: it rises again from the same reading.
+        Tick(3 * 60 * 60);
+        Assert.AreEqual(100, BatteryFreshness.Shown(third.Current, Now).Case.Percent);
+    }
+
+    // One bud's message of a same-model stranger's pair: 70% in each bud, 60% in the case, the lid open.
+    private void StrangerCaseOpen(double seconds, sbyte rssi, double every = 0.25)
+    {
+        int steps = (int)Math.Round(seconds / every);
+        for (int i = 0; i <= steps; i++)
+        {
+            bool one = i % 2 == 0;
+            Raise(one ? StrangerBud : StrangerOtherBud, BroadcastFixtures.Bud(one, caseNibble: 0x6, pairHigh: 0x7, pairLow: 0x7), rssi);
+            Tick(every);
+        }
+    }
+
+    // A stranger's pair of the same model that does not take the link (it is not 8 dB nearer than the owner's, heard a
+    // moment ago) is never saved, however long it keeps its case open.
+    [TestMethod]
+    public void AStrangerThatDoesNotTakeTheLinkNeverReplacesTheSavedReadings()
+    {
+        using WidgetStatusService service = NewService();
+        OwnerCaseOpen(3, budLevel: 0x6, caseLevel: 0x8);
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+
+        StrangerCaseOpen(8, rssi: -60);
+
+        LastReadingBook saved = new LastReadingStore(StoreFile, _log).Load();
+        Assert.AreEqual(60, saved.Left?.Percent, "The owner's buds.");
+        Assert.AreEqual(80, saved.Case?.Percent, "The owner's case.");
+        Assert.AreEqual(60, service.Current.LastReadings.Left?.Percent);
+    }
+
+    // The owner's accepted same-model risk (docs/architecture.md, "The accepted risk"): a stranger's pair of the same model
+    // that opens its case 8 dB nearer than the linked pair's takes the link by the rule, and what it reads replaces the
+    // saved readings. This documents the behaviour; the link rule is unchanged.
+    [TestMethod]
+    public void AStrangerThatTakesTheLinkByTheRuleReplacesTheSavedReadings()
+    {
+        using WidgetStatusService service = NewService();
+        OwnerCaseOpen(3, budLevel: 0x6, caseLevel: 0x8);
+
+        StrangerCaseOpen(6, rssi: -45);
+
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        LastReadingBook saved = new LastReadingStore(StoreFile, _log).Load();
+        Assert.AreEqual(70, saved.Left?.Percent, "The stranger's buds now stand where the owner's were.");
+        Assert.AreEqual(60, saved.Case?.Percent, "...and its case.");
+    }
+
+    // The other way in, also accepted: once the linked pair has been silent for more than ten seconds a same-model pair that
+    // opens its case near is linked with no margin to clear.
+    [TestMethod]
+    public void AStrangerThatOpensItsCaseAfterTheOwnersPairWentSilentReplacesTheSavedReadings()
+    {
+        using WidgetStatusService service = NewService();
+        OwnerCaseOpen(3, budLevel: 0x6, caseLevel: 0x8);
+        Tick(12);
+
+        StrangerCaseOpen(6, rssi: -65);
+
+        LastReadingBook saved = new LastReadingStore(StoreFile, _log).Load();
+        Assert.AreEqual(70, saved.Left?.Percent);
+        Assert.AreEqual(60, saved.Case?.Percent);
+    }
+
+    private sealed class RecordingStore : ILastReadingStore
+    {
+        public List<LastReadingBook> Saved { get; } = [];
+
+        public LastReadingBook Load() => LastReadingBook.Empty;
+
+        public void Save(LastReadingBook book)
+        {
+            lock (Saved)
+            {
+                Saved.Add(book);
+            }
+        }
+    }
+
+    // Each book the service takes to be written carries the next number in order, taken under its lock, so the store can
+    // drop one that arrives after a later one (LastReadingStoreTests has the store's half).
+    [TestMethod]
+    public void EveryBookTakenToBeWrittenCarriesTheNextSequenceNumber()
+    {
+        var recording = new RecordingStore();
+        _source = new FakeAdvertisementSource();
+        using var service = new WidgetStatusService(
+            () => _source, _settings, _monitor, () => null, _log, action => action(), _clock, _paired, null,
+            ProximityDecodeTable.Documented, runInBackground: work => work(), lastReadings: recording);
+        service.Start();
+
+        OwnerCaseOpen(3, budLevel: 0x6, caseLevel: 0x8);
+        OwnerCaseOpen(3, budLevel: 0x7, caseLevel: 0x8);
+        OwnerCaseOpen(3, budLevel: 0x8, caseLevel: 0x9);
+        service.Close();
+
+        Assert.IsGreaterThanOrEqualTo(4, recording.Saved.Count, "Three changes of value and the close.");
+        long previous = 0;
+        foreach (LastReadingBook book in recording.Saved)
+        {
+            Assert.IsGreaterThan(previous, book.Sequence, "Strictly increasing, from 1.");
+            previous = book.Sequence;
+        }
     }
 }

@@ -287,4 +287,42 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
 
         Assert.AreEqual(0, _notifier.Calls.Count, "A disposed service must not react to further changes.");
     }
+
+    // A last reading and an estimate are not what the battery is now, so neither feeds the latch: no notification, however
+    // low, on this PC.
+    [TestMethod]
+    public void AnEstimatedPartAtTenPercentAndALastReadingAtTenPercentDoNotNotify()
+    {
+        using LowBatteryAlertService service = NewService();
+        DateTimeOffset readAt = _clock.GetUtcNow() - TimeSpan.FromHours(1);
+        const ushort Model = BroadcastFixtures.PairedModel;
+
+        // Left was 5% and charging an hour ago, at 5 points an hour: it is shown as an estimate of 10%.
+        var estimated = new LastReadingBook(
+            new SavedReading(5, true, readAt, Model), null, null,
+            [new LearnedRate(Model, ChargePart.Bud, 5, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]);
+        WidgetSnapshot estimate = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
+        {
+            Where = AirPodsWhere.ThisPc,
+            LastReadings = estimated,
+            PairedModel = Model,
+            HighWater = new EstimateHighWater(),
+        };
+        ShownPart shown = BatteryFreshness.Shown(estimate, _clock.GetUtcNow()).Left;
+        Assert.AreEqual(ReadingKind.Estimated, shown.Kind);
+        Assert.AreEqual(10, shown.Percent);
+
+        _status.Raise(estimate);
+        Assert.AreEqual(0, _notifier.Calls.Count, "An estimate of 10% is not a low reading.");
+        Assert.AreEqual(LatchState.Armed, service.LeftLatchStateForTest);
+
+        var last = new LastReadingBook(new SavedReading(10, false, readAt, Model), null, new SavedReading(10, false, readAt, Model), []);
+        WidgetSnapshot lastReading = estimate with { LastReadings = last };
+        Assert.AreEqual(ReadingKind.Last, BatteryFreshness.Shown(lastReading, _clock.GetUtcNow()).Left.Kind);
+
+        _status.Raise(lastReading);
+        Assert.AreEqual(0, _notifier.Calls.Count, "Nor is a last reading of 10%.");
+        Assert.AreEqual(LatchState.Armed, service.LeftLatchStateForTest);
+        Assert.AreEqual(LatchState.Armed, service.CaseLatchStateForTest);
+    }
 }
