@@ -49,7 +49,12 @@ internal static class ServicePlan
 {
     public const string ServiceName = "EarshotHandBack";
     public const string DisplayName = "Earshot hand-back";
-    public const string Description = "Hands the AirPods back when this computer shuts down, if the Earshot tray icon did not.";
+
+    // What the Services list shows under the name. It says what the service does and when: it blocks the pinned AirPods when Windows
+    // shuts down (GateActions.RunPreshutdown), only when Block at boot and Hand back are both on, and it is the part that works when
+    // the tray is not running. It does nothing else, and nothing while the computer is in use.
+    public const string Description =
+        "Blocks the AirPods on this PC when Windows shuts down, so they can go back to your phone, even if Earshot is not running. Does nothing while the PC is in use.";
 
     // The literal argument after the image path. Dispatch selects the service run mode from it.
     public const string RunModeArgument = "service";
@@ -105,6 +110,7 @@ internal static class ServiceCheck
         Compare(problems, "image path", read.ImagePath, expected.ImagePath);
         Compare(problems, "account", read.Account, expected.Account);
         Compare(problems, "display name", read.DisplayName, expected.DisplayName);
+        Compare(problems, "description", read.Description, expected.Description);
 
         // Everything the plan leaves unset, read back: a registration with a failure command, a restart, a trigger, a
         // delayed start, a service security identifier or a cut-down token is not the one this plan describes.

@@ -924,6 +924,44 @@ public sealed class InstallActionsTests
         Assert.AreEqual(AdvApi32.SERVICE_RUNNING, h.Service.State);
     }
 
+    // The owner's Task Manager showed the service by its raw name. A registration from an earlier install, with the raw name as its
+    // display name and an old description, is brought to the plan by the same install an update or a repair runs, and read back.
+    [TestMethod]
+    public void AnEarlierRegistrationWithTheRawNameAndAnOldDescriptionIsGivenTheDisplayNameAndDescriptionOfThePlan()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        ServiceSpec earlier = ServicePlan.Spec(@"C:\Old\Earshot") with { DisplayName = ServicePlan.ServiceName };
+        h.Service!.Install(AdvApi32.SERVICE_RUNNING, earlier, description: "Hands the AirPods back when this computer shuts down, if the Earshot tray icon did not.");
+        ServiceQuery before = h.Service.Query(ServicePlan.ServiceName);
+        Assert.AreEqual("EarshotHandBack", before.DisplayName, "Sanity: it starts under the raw name.");
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreEqual(GateExitCode.Success, result.Outcome, Fail(result));
+        Assert.AreEqual("Earshot hand-back", h.Service.Reconfigured.Single().DisplayName);
+        Assert.AreEqual(ServicePlan.Description, h.Service.Description, "The description is set on the existing service too, not only on a new one.");
+        ServiceQuery after = h.Service.Query(ServicePlan.ServiceName);
+        Assert.AreEqual("Earshot hand-back", after.DisplayName);
+        Assert.AreEqual(ServicePlan.Description, after.Description);
+        Assert.IsEmpty(ServiceCheck.Verify(after, ServicePlan.Spec(h.Install)), "And the read-back finds nothing to say.");
+    }
+
+    // A description that could not be set is a step that failed with its raw code, never one passed over.
+    [TestMethod]
+    public void ADescriptionThatCannotBeSetOnAnExistingServiceFailsInstallWithItsRawCode()
+    {
+        using var h = new Harness { Service = new FakeServiceControl() };
+        h.Service!.Install(AdvApi32.SERVICE_STOPPED, ServicePlan.Spec(@"C:\Old\Earshot"));
+        h.Service.Fail("description", 5);
+
+        InstallResult result = h.RunInstall();
+
+        Assert.AreNotEqual(GateExitCode.Success, result.Outcome);
+        StepOutcome step = result.Steps.Single(s => s.Step == ServiceSteps.Description);
+        Assert.IsFalse(step.Ok);
+        Assert.AreEqual(5, step.Code, "The raw Win32 code is on the step.");
+    }
+
     [TestMethod]
     public void AStoppedEarlierServiceIsNotStoppedAgain()
     {

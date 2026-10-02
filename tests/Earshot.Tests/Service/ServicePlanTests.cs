@@ -29,6 +29,7 @@ public sealed class ServicePlanTests
             TriggerCount = 0,
             RequiredPrivileges = [],
             ServiceSidType = ServicePlan.ServiceSidTypeNone,
+            Description = spec.Description,
         };
     }
 
@@ -38,7 +39,10 @@ public sealed class ServicePlanTests
         ServiceSpec spec = ServicePlan.Spec(Install);
 
         Assert.AreEqual("EarshotHandBack", spec.Name);
-        Assert.AreEqual("Earshot hand-back", spec.DisplayName);
+        Assert.AreEqual("Earshot hand-back", spec.DisplayName, "What the Services list and Task Manager show: not the raw name.");
+        Assert.AreEqual(
+            "Blocks the AirPods on this PC when Windows shuts down, so they can go back to your phone, even if Earshot is not running. Does nothing while the PC is in use.",
+            spec.Description, "A plain sentence that says what the service does and starts with what it does.");
         Assert.AreEqual("\"C:\\Program Files\\Earshot\\Earshot.exe\" service", spec.ImagePath);
         Assert.AreEqual(0x10u, spec.ServiceType, "Its own process, never interactive.");
         Assert.AreEqual(0x2u, spec.StartType, "Automatic, so it is running when the shut down starts.");
@@ -133,7 +137,8 @@ public sealed class ServicePlanTests
         (ServiceQuery Read, string Names)[] cases =
         [
             (Registered() with { FailureActionCount = 1 }, "failure action"),
-            (Registered() with { FailureCommand = @"C:\Tempun.exe" }, "command when it fails"),
+            (Registered() with { FailureCommand = @"C:\Temp
+un.exe" }, "command when it fails"),
             (Registered() with { DelayedAutoStart = true }, "delayed start"),
             (Registered() with { TriggerCount = 2 }, "trigger count"),
             (Registered() with { ServiceSidType = 1 }, "service security identifier type"),
@@ -158,6 +163,26 @@ public sealed class ServicePlanTests
         StringAssert.Contains(problems[0], "S-1-5-11");
     }
 
+    // A registration from an earlier install keeps the raw name as its display name and whatever description it had, until install
+    // brings it to the plan: the read-back says so for each, so an update or a repair that did not reach them is not passed.
+    [TestMethod]
+    public void ADisplayNameOrDescriptionThatIsNotThePlansFailsTheReadBack()
+    {
+        ServiceSpec spec = ServicePlan.Spec(Install);
+
+        IReadOnlyList<string> raw = ServiceCheck.Verify(Registered(display: "EarshotHandBack"), spec);
+        Assert.HasCount(1, raw);
+        StringAssert.Contains(raw[0], "display name");
+
+        IReadOnlyList<string> old = ServiceCheck.Verify(Registered() with { Description = "Hands the AirPods back when this computer shuts down, if the Earshot tray icon did not." }, spec);
+        Assert.HasCount(1, old);
+        StringAssert.Contains(old[0], "description");
+
+        IReadOnlyList<string> none = ServiceCheck.Verify(Registered() with { Description = "" }, spec);
+        Assert.HasCount(1, none);
+        StringAssert.Contains(none[0], "description");
+    }
+
     [TestMethod]
     public void AValueThatCouldNotBeReadFailsTheReadBackRatherThanPassing()
     {
@@ -166,12 +191,12 @@ public sealed class ServicePlanTests
         {
             StartType = null, ImagePath = null, Account = null, DisplayName = null, PreshutdownTimeoutMs = null, Sddl = null,
             ServiceType = null, ErrorControl = null, FailureActionCount = null, DelayedAutoStart = null, TriggerCount = null,
-            RequiredPrivileges = null, ServiceSidType = null,
+            RequiredPrivileges = null, ServiceSidType = null, Description = null,
         };
 
         IReadOnlyList<string> problems = ServiceCheck.Verify(read, spec);
 
-        Assert.HasCount(13, problems);
+        Assert.HasCount(14, problems);
         Assert.IsTrue(problems.All(p => p.Contains("could not be read", StringComparison.Ordinal)), string.Join(" | ", problems));
     }
 }

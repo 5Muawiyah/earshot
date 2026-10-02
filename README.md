@@ -125,7 +125,7 @@ Startup on is not covered.
   After an update, Earshot starts again on its own.
   [docs/architecture.md](docs/architecture.md#updates) has each route.
 - **A small background service for the hand-back.** If the Earshot icon has
-  been closed or has crashed, `EarshotHandBack` blocks the AirPods at shut down
+  been closed or has crashed, `EarshotHandBack` (listed as "Earshot hand-back" in the Services list) blocks the AirPods at shut down
   when they are not already blocked. It acts only when Block at boot and Hand
   back are both on, never disconnects the AirPods, and takes no requests from
   any program. It does not cover a shut down with Fast Startup on, and whether

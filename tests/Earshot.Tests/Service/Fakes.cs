@@ -74,8 +74,10 @@ internal sealed class FakeServiceControl : IServiceControl
     public string? Sddl { get; private set; }
 
     // The state a service that is there already has before install touches it.
-    public void Install(uint state, ServiceSpec spec)
+    public void Install(uint state, ServiceSpec spec, string? description = null)
     {
+        // An earlier install set its own description, which is the plan's unless the test says what it was.
+        Description = description ?? spec.Description;
         Exists = true;
         State = state;
         Created = spec;
@@ -120,6 +122,7 @@ internal sealed class FakeServiceControl : IServiceControl
             TriggerCount = TriggerCount,
             RequiredPrivileges = RequiredPrivileges,
             ServiceSidType = ServiceSidType,
+            Description = Description ?? string.Empty,
         };
     }
 
@@ -140,6 +143,7 @@ internal sealed class FakeServiceControl : IServiceControl
         Created = spec;
         Preshutdown = null;
         Sddl = null;
+        Description = null;
         return ServiceSteps.FromWin32(ServiceSteps.Create, 0, spec.Name);
     }
 

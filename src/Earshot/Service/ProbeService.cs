@@ -48,6 +48,7 @@ internal static partial class Program
                 w.WriteString("imagePath", read.ImagePath);
                 w.WriteString("account", read.Account);
                 w.WriteString("displayName", read.DisplayName);
+                w.WriteString("description", read.Description);
                 WriteNumber(w, "preshutdownMs", read.PreshutdownTimeoutMs);
                 w.WriteString("sddl", read.Sddl);
                 w.WriteStartArray("problems");

@@ -313,6 +313,8 @@ public sealed class ProbeTests
         Assert.AreEqual(2, root.GetProperty("startType").GetInt32());
         Assert.AreEqual(10_000, root.GetProperty("preshutdownMs").GetInt32());
         Assert.AreEqual("LocalSystem", root.GetProperty("account").GetString());
+        Assert.AreEqual("Earshot hand-back", root.GetProperty("displayName").GetString());
+        Assert.AreEqual(Earshot.Service.ServicePlan.Description, root.GetProperty("description").GetString());
         Assert.AreEqual(Earshot.Service.ServicePlan.Sddl, root.GetProperty("sddl").GetString());
         Assert.AreEqual(0, root.GetProperty("problems").GetArrayLength());
         Assert.AreEqual("\"C:\\Program Files\\Earshot\\Earshot.exe\" service", root.GetProperty("imagePath").GetString());
