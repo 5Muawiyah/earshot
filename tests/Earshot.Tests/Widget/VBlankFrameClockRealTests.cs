@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
@@ -48,9 +47,10 @@ public sealed class VBlankFrameClockRealTests
         // runner, not a remote (terminal server) session, and has a screen.
         bool localSession = !hostedRunner && !SystemInformation.TerminalServerSession && Screen.AllScreens.Length > 0;
         bool mustBePaced = localSession;
-        // Whether the display is on, decided without the clock under test: read-only, from the time since the last keyboard or mouse
-        // input in this session. Input within the last minute means someone is at the machine and its display is on (the shortest
-        // display-off timeout Windows offers is one minute). Read again after the run, so input stopping during it does not count.
+        // Whether the display is on, decided without the clock under test and read-only: the active power scheme's display-off timeout
+        // against the time since the last keyboard or mouse input in this session (DisplayState). Input more recent than the timeout
+        // means the display has not been turned off by it. Input is read again after the run, so input stopping during it does not count.
+        DisplayOffTimeoutReading timeout = localSession ? DisplayOffTimeout.Read() : default;
         TimeSpan? idleBefore = localSession ? InputIdle.Read() : null;
 
         StaThread.Run(() =>
@@ -127,12 +127,9 @@ public sealed class VBlankFrameClockRealTests
             }
 
             TimeSpan? idleAfter = localSession ? InputIdle.Read() : null;
-            bool displayKnownOn = localSession && idleBefore is { } before && idleAfter is { } after && before < InputIdle.DisplayOnWithin && after < InputIdle.DisplayOnWithin;
-            string displayCheck = idleBefore is null || idleAfter is null
-                ? "unknown (no input time for this session)"
-                : "last input " + idleBefore.Value.TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " s before the run and "
-                    + idleAfter.Value.TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " s at its end ("
-                    + (displayKnownOn ? "on" : "not within " + InputIdle.DisplayOnWithin.TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " s, so unknown") + ")";
+            DisplayVerdict display = DisplayState.Decide(localSession, timeout, idleBefore, idleAfter);
+            bool displayKnownOn = display.KnownOn;
+            string displayCheck = display.Reason;
             var seen = new Seen(
                 pacedFrames, unpacedFrames, tooClose, stamps.Count,
                 Warned: log.Has(LogLevel.Warn, "Motion:"),
@@ -147,7 +144,8 @@ public sealed class VBlankFrameClockRealTests
                 + " ms) and " + unpacedFrames + " unpaced of "
                 + stamps.Count + " frames in " + timer.Elapsed.TotalMilliseconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)
                 + " ms; DXGI lists an output: " + outputListed + "; local session: " + localSession + "; hosted runner: " + hostedRunner
-                + "; display check: " + displayCheck + "; branch: " + (displayKnownOn ? "display known on, so the clock must be paced with an empty log" : "display not known on, so the clock's own account is accepted")
+                + "; power read: timeout " + (timeout.Timeout is { } t ? t.TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " s " + timeout.Source : "unreadable") + ", Win32 code " + timeout.Code + (timeout.Step.Length > 0 ? " from " + timeout.Step : "")
+                + "; display check: " + displayCheck + "; branch: " + (displayKnownOn ? "display known on (" + display.Branch + "), so the clock must be paced with an empty log" : "display not known on (" + display.Branch + "), so the clock's own account is accepted")
                 + "; log: " + held;
             RecordOutcome(outcome);
 
@@ -185,7 +183,7 @@ public sealed class VBlankFrameClockRealTests
         {
             // Not the clock's account but the display's: paced, every frame, with nothing logged.
             return seen.Unpaced > 0 || seen.TooClose > 0 || !seen.LogEmpty
-                ? "The display is on (input within the last minute), so the clock must be paced by it with an empty log, whatever it claims: "
+                ? "The display is known to be on (input within its display-off timeout), so the clock must be paced by it with an empty log, whatever it claims: "
                     + seen.Unpaced + " unpaced, " + seen.TooClose + " too close, log empty: " + seen.LogEmpty + ", clock said off: " + seen.ClockSaidOff + "."
                 : null;
         }
@@ -230,39 +228,6 @@ public sealed class VBlankFrameClockRealTests
             Directory.CreateDirectory(root);
             File.WriteAllText(Path.Combine(root, "real-vblank-clock-outcome.txt"), outcome + Environment.NewLine);
         }
-    }
-}
-
-// Time since the last keyboard or mouse input in this session, read only. GetLastInputInfo counts input for the whole session, so
-// it needs no window and works from a test thread. https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getlastinputinfo
-internal static class InputIdle
-{
-    // Input this recent means the display is on: the shortest display-off timeout Windows offers is one minute.
-    internal static readonly TimeSpan DisplayOnWithin = TimeSpan.FromSeconds(60);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct LastInputInfo
-    {
-        public uint Size;
-        public uint Time;
-    }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetLastInputInfo(ref LastInputInfo info);
-
-    // Null when Windows gives no input time. The input time and the tick count are both milliseconds since boot, wrapping at 2^32.
-    internal static TimeSpan? Read()
-    {
-        var info = new LastInputInfo { Size = (uint)Marshal.SizeOf<LastInputInfo>() };
-        if (!GetLastInputInfo(ref info))
-        {
-            return null;
-        }
-
-        uint sinceMs = unchecked((uint)Environment.TickCount - info.Time);
-        return TimeSpan.FromMilliseconds(sinceMs);
     }
 }
 
@@ -332,5 +297,80 @@ public sealed class VBlankFrameClockRealJudgeTests
         Assert.IsNotNull(idle, "GetLastInputInfo gives an input time here.");
         Assert.IsGreaterThanOrEqualTo(TimeSpan.Zero, idle.Value);
         Assert.IsLessThanOrEqualTo(TimeSpan.FromMilliseconds(Environment.TickCount64) + TimeSpan.FromSeconds(1), idle.Value);
+    }
+
+    private static DisplayOffTimeoutReading Timeout(double? seconds) =>
+        seconds is { } value
+            ? new DisplayOffTimeoutReading(TimeSpan.FromSeconds(value), 0, "", "AC")
+            : new DisplayOffTimeoutReading(null, 5, "PowerReadACValueIndex", "AC");
+
+    private static TimeSpan Seconds(double value) => TimeSpan.FromSeconds(value);
+
+    [TestMethod]
+    public void ANeverTimeoutMeansTheDisplayIsAlwaysKnownOn()
+    {
+        // Zero is "never turn off", so even a long idle leaves the display on (and input need not be readable).
+        Assert.IsTrue(DisplayState.Decide(true, Timeout(0), Seconds(100000), Seconds(100010)).KnownOn);
+        Assert.IsTrue(DisplayState.Decide(true, Timeout(0), null, null).KnownOn);
+    }
+
+    [TestMethod]
+    public void IdleUnderTheTimeoutMeansTheDisplayIsKnownOn()
+    {
+        // The reviewer's case: the owner idle 220 s, this PC's display-off timeout 3600 s. The display is on.
+        DisplayVerdict verdict = DisplayState.Decide(true, Timeout(3600), Seconds(220), Seconds(230));
+        Assert.IsTrue(verdict.KnownOn, verdict.Reason);
+        Assert.IsTrue(DisplayState.Decide(true, Timeout(3600), Seconds(3594), Seconds(3594.5)).KnownOn, "Just inside the margin.");
+    }
+
+    [TestMethod]
+    public void IdleOverTheTimeoutLeavesTheDisplayUnknown()
+    {
+        Assert.IsFalse(DisplayState.Decide(true, Timeout(300), Seconds(400), Seconds(410)).KnownOn, "The timeout has run out.");
+        Assert.IsFalse(DisplayState.Decide(true, Timeout(300), Seconds(200), Seconds(301)).KnownOn, "It ran out during the run.");
+        Assert.IsFalse(DisplayState.Decide(true, Timeout(300), Seconds(296), Seconds(297)).KnownOn, "Inside the margin of running out.");
+    }
+
+    [TestMethod]
+    public void AnUnreadableTimeoutLeavesTheDisplayUnknownAndSaysWhy()
+    {
+        DisplayVerdict verdict = DisplayState.Decide(true, Timeout(null), Seconds(1), Seconds(2));
+        Assert.IsFalse(verdict.KnownOn, "Even with input a second ago, nothing says what the timeout is.");
+        StringAssert.Contains(verdict.Reason, "PowerReadACValueIndex", "The call that failed is named.");
+        StringAssert.Contains(verdict.Reason, "5", "With its raw code.");
+    }
+
+    [TestMethod]
+    public void UnreadableInputTimeLeavesTheDisplayUnknownUnlessTheTimeoutIsNever()
+    {
+        Assert.IsFalse(DisplayState.Decide(true, Timeout(3600), null, Seconds(1)).KnownOn);
+        Assert.IsFalse(DisplayState.Decide(true, Timeout(3600), Seconds(1), null).KnownOn);
+    }
+
+    [TestMethod]
+    public void ARemoteOrHostedSessionIsNeverKnownOn()
+    {
+        Assert.IsFalse(DisplayState.Decide(false, Timeout(0), Seconds(1), Seconds(1)).KnownOn);
+    }
+
+    [TestMethod]
+    public void TheDisplayOffTimeoutIsReadFromTheRealPowerScheme()
+    {
+        // One execution of the real calls: the active scheme, the power source and the setting. A machine where they fail is a legitimate
+        // answer too, but then the raw code and the failing call must be in the reading.
+        DisplayOffTimeoutReading reading = DisplayOffTimeout.Read();
+        Console.WriteLine("Real display-off timeout: " + (reading.Timeout is { } t ? t.TotalSeconds.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + " s" : "unreadable")
+            + ", " + reading.Source + ", step '" + reading.Step + "', code " + reading.Code);
+        if (reading.Timeout is null)
+        {
+            Assert.AreNotEqual(string.Empty, reading.Step, "An unreadable timeout names the call that failed.");
+            Assert.AreNotEqual(0u, reading.Code, "And carries its raw code.");
+        }
+        else
+        {
+            Assert.AreEqual(0u, reading.Code);
+            Assert.IsTrue(reading.Source is "AC" or "DC");
+            Assert.IsGreaterThanOrEqualTo(TimeSpan.Zero, reading.Timeout.Value);
+        }
     }
 }
