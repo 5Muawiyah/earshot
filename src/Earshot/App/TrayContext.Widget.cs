@@ -1,5 +1,6 @@
 using Earshot.Composition;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Icons;
 using Earshot.Interop;
 using Earshot.Popup;
@@ -445,7 +446,18 @@ internal sealed partial class TrayContext
 
     // Every widget card is made here, so what all of them share is set in one place: the accent is the owner's
     // Windows accent colour, the same one the gauge's ring uses, and an open card repaints when it changes.
-    private WidgetCard CreateWidgetCard(bool notice) => CreateWidgetCard(_log, notice, AccentColourService.Shared(_log), LookService());
+    private WidgetCard CreateWidgetCard(bool notice)
+    {
+        WidgetCard card = CreateWidgetCard(_log, notice, AccentColourService.Shared(_log), LookService());
+
+        // The card's window calls go into the frame and UI stall log, when the tray has one (UiStallMonitor).
+        if (_frameLog is UiStallMonitor stallLog)
+        {
+            card.CallRecorder = stallLog.RecordCardCall;
+        }
+
+        return card;
+    }
 
     internal static WidgetCard CreateWidgetCard(ILog log, bool notice, IAccentColours accent, SystemLookService? look = null)
     {
@@ -542,7 +554,16 @@ internal sealed partial class TrayContext
 
         if (result.Layout is { } layout)
         {
+            // An open card keeps the scale it was shown at (WidgetCardPresenter.DisplayChanged is the only re-read), so a poll
+            // that reports the same scale again touches nothing; one that reports a different one is a display change that the
+            // WM_DISPLAYCHANGE read may have come ahead of.
+            bool scaleChanged = layout.Dpi != _widgetLayoutDpi;
             _widgetLayoutDpi = layout.Dpi;
+            if (scaleChanged)
+            {
+                _widgetCardPresenter?.DisplayChanged();
+                _caseOpenCardPresenter?.DisplayChanged();
+            }
         }
 
         controller.OnLayout(result);

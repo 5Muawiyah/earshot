@@ -137,6 +137,33 @@ public sealed class ProximityDecoderTests
         Assert.AreEqual(At, reading.Case.ReadAt);
     }
 
+    // Pins the field order of the furiousMAC proximity pairing notes (messages/proximity_pairing.md): prefix, model (2 bytes),
+    // status, pods battery, charging and case, lid open counter, colour, suffix. Every byte of the 9-byte value is distinct,
+    // so a shifted offset anywhere moves a field and fails here: the lid open counter is byte 6 of the value.
+    [TestMethod]
+    public void TheLidOpenCounterIsByteSixOfTheValueInTheFuriousMacFieldOrder()
+    {
+        byte[] value = new byte[ProximityParser.DocumentedLength];
+        value[0] = ProximityParser.DocumentedPrefix;
+        for (int i = 1; i < 9; i++)
+        {
+            value[i] = (byte)(i * 17); // eight different invented bytes
+        }
+
+        ProximityMessage m = ProximityParser.Parse(
+            ProximityParser.AppleCompanyId, [ProximityParser.ProximityType, (byte)value.Length, .. value]).Message!.Value;
+
+        Assert.AreEqual(value[1], m.ModelHigh);
+        Assert.AreEqual(value[2], m.ModelLow);
+        Assert.AreEqual(value[3], m.Status);
+        Assert.AreEqual(value[4], m.BatteryA, "Pods battery nibbles: byte 4.");
+        Assert.AreEqual(value[5], m.BatteryB, "Charging flags and the case level: byte 5.");
+        Assert.AreEqual(value[6], m.Lid, "Lid open counter: byte 6.");
+        Assert.AreEqual(value[7], m.Colour);
+        Assert.AreEqual(value[8], m.Reserved);
+        Assert.AreEqual(value[6], (byte)Decode(m).LidCounter!.Value);
+    }
+
     [TestMethod]
     public void InEarAndALidBitAreNotDecodedByTheDocumentedTableButTheLidOpenCounterIs()
     {

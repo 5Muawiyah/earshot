@@ -374,7 +374,9 @@ inside the ten second window. These need a stranger of the same model
 (and, once one is held, the same colour) to be close and, for the first two, to match. A pair
 that is linked this way is read like the owner's: what it says is saved as the last readings,
 replacing the owner's, and is shown and estimated from, until the owner opens their own case next
-to the PC again and the link moves back (a pair that does not take the link is never saved). This is an
+to the PC again and the link moves back (a pair that does not take the link is never saved). The case-open
+card follows the link: an open that links a pair by these rules, including one that moves the link to a
+pair 8 dB nearer, counts as an open and shows the card, and a set that does not take the link never does. This is an
 owner decision, not an oversight: the owner accepted that risk rather than ask for
 a set-up step to rule it out. There is no consistency check against another
 device.
@@ -652,8 +654,12 @@ Where line reading "Case open", and the Connect or Disconnect button, with a
 close button (the Cancel glyph) where the gear is. It closes when the case
 closes, after its own close time when one is chosen (5, 10, 30 or 60 seconds;
 the default is when the case closes), on its close button, on a click on it
-that misses its buttons, and after a press of Connect or Disconnect; one close
-closes every display's card. The close time replaces the dismiss time it used to
+that misses its buttons; a press of Connect or Disconnect leaves it open, its
+button turning to Disconnect or Connecting in place; one close closes every
+display's card. The passive watcher now runs for it even with the gauge hidden
+(listen-only, nothing is paged): `Enabled` is recomputed from the four consumers
+when the settings load, so an older file that saved it off still has the watcher
+running while the card is on. The close time replaces the dismiss time it used to
 read from `SPI_GETMESSAGEDURATION`, which is no longer read. It goes where the
 gauge is by default (the display Gauge display names; with All displays, the
 main display), or on all displays, or on a chosen set of displays, stored as

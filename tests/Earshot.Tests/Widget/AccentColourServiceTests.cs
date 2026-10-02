@@ -70,12 +70,45 @@ public sealed class AccentColourServiceTests
         int raised = 0;
         service.Changed += (_, _) => raised++;
 
+        source.Dark1 = Color.FromArgb(10, 20, 30);
         source.Raise();
 
         Assert.AreEqual(0, raised, "Nothing is raised on the Windows thread that reported the change.");
         Assert.HasCount(1, posted);
         posted.Dequeue()();
         Assert.AreEqual(1, raised);
+    }
+
+    // Cause 3 of the stutter: Windows raises ColorValuesChanged for more than the accent (a theme or personalisation write
+    // raises it with the shades as they were), and each one repainted every card in full. Changed is raised only when a shade
+    // really differs from the one last reported.
+    [TestMethod]
+    public void AColourEventWithTheSameShadesRaisesNothing()
+    {
+        (AccentColourService service, FakeColourSource source, Queue<Action> posted) = Build();
+        int raised = 0;
+        service.Changed += (_, _) => raised++;
+
+        for (int i = 0; i < 5; i++)
+        {
+            source.Raise();
+        }
+
+        while (posted.Count > 0)
+        {
+            posted.Dequeue()();
+        }
+
+        Assert.AreEqual(0, raised, "The shades never changed.");
+
+        source.Light2 = Color.FromArgb(1, 2, 3);
+        source.Raise();
+        posted.Dequeue()();
+        Assert.AreEqual(1, raised, "One shade changed.");
+
+        source.Raise();
+        posted.Dequeue()();
+        Assert.AreEqual(1, raised, "The next event, with the new shades unchanged, raises nothing more.");
     }
 
     [TestMethod]
@@ -85,6 +118,7 @@ public sealed class AccentColourServiceTests
         int raised = 0;
         service.Changed += (_, _) => raised++;
 
+        source.Light2 = Color.FromArgb(40, 50, 60);
         var thread = new Thread(source.Raise);
         thread.Start();
         thread.Join();
@@ -100,6 +134,7 @@ public sealed class AccentColourServiceTests
         (AccentColourService service, FakeColourSource source, Queue<Action> posted) = Build();
         int raised = 0;
         service.Changed += (_, _) => raised++;
+        source.Dark1 = Color.FromArgb(10, 20, 30);
         source.Raise();
 
         service.Dispose();

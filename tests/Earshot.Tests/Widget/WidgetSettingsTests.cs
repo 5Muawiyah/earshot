@@ -98,7 +98,8 @@ public sealed class WidgetSettingsTests : IDisposable
     {
         File.WriteAllText(
             SettingsPath,
-            "{ \"SchemaVersion\": 1, \"Widget\": { \"Enabled\": false, \"SomeFutureMember\": 42 } }");
+            "{ \"SchemaVersion\": 1, \"Widget\": { \"Enabled\": false, \"ShowOnTaskbar\": false, \"AutoPause\": false, \"LowBatteryAlert\": false, " +
+            "\"CaseOpenCardOn\": false, \"SomeFutureMember\": 42 } }");
 
         var store = new JsonSettingsStore(SettingsPath, _log);
 
@@ -343,7 +344,8 @@ public sealed class WidgetSettingsTests : IDisposable
     public void TheMemberNamesAreExactlyThese()
     {
         var store = new JsonSettingsStore(SettingsPath, _log);
-        store.Update(s => s.Widget = s.Widget with { Enabled = false });
+        // Every consumer off, so Enabled (recomputed from them at load) reads false again.
+        store.Update(s => s.Widget = s.Widget with { Enabled = false, ShowOnTaskbar = false, AutoPause = false, LowBatteryAlert = false, CaseOpenCardOn = false });
 
         string json = File.ReadAllText(SettingsPath);
         using JsonDocument document = JsonDocument.Parse(json);

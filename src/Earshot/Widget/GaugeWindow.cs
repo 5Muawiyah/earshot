@@ -88,10 +88,6 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     private sealed record RenderRequest(
         WidgetSnapshot Snapshot, DateTimeOffset Now, GaugeDisplaySettings Settings, int Dpi, Rectangle Bounds, Color Ink, string FontFamily);
 
-    // What the last push drew: a repaint that would draw exactly the same is not pushed again, so the poll
-    // (which asks once a second) never redraws for nothing.
-    private sealed record PushKey(GaugeContent Content, GaugePalette Palette, GaugeLayout Layout, bool Hover, string FontFamily, Point Location);
-
     private readonly IAccentColours _accent;
     private readonly Func<GaugeOrder> _order;
     private readonly ToolTip _tip = new() { ShowAlways = true };
@@ -100,7 +96,8 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     internal int PushCount { get; private set; }
 
     private RenderRequest? _lastRequest;
-    private PushKey? _lastPush;
+    private GaugePushKey? _lastPush;
+    private string? _lastTooltip;
     private bool _hover;
 
     // Renders content and pushes it through UpdateLayeredWindow at bounds' location. The gauge draws its own
@@ -122,20 +119,25 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         GaugePalette palette = GaugePalette.Create(light, _accent.AccentFor(light), SystemInformation.HighContrast, r.Ink);
         GaugeContent content = GaugeContent.From(r.Snapshot, r.Now, r.Settings);
         GaugeLayout layout = GaugeLayout.For(r.Dpi, _order());
-        var key = new PushKey(content, palette, layout, _hover, r.FontFamily, r.Bounds.Location);
-        if (key == _lastPush)
+        GaugePushKey key = GaugePushKey.Of(content, palette, layout, _hover, r.FontFamily, r.Bounds.Location);
+        if (key != _lastPush)
         {
-            return;
+            using Bitmap bitmap = GaugeRenderer.Render(content, palette, layout, _hover, r.FontFamily);
+            Push(bitmap, r.Bounds.Location);
+            PushCount++;
+            _lastPush = key;
         }
 
-        using Bitmap bitmap = GaugeRenderer.Render(content, palette, layout, _hover, r.FontFamily);
-        Push(bitmap, r.Bounds.Location);
-        PushCount++;
-        _lastPush = key;
-        AccessibleDescription = content.Tooltip.Replace("\r\n", ", ", StringComparison.Ordinal);
-        if (IsHandleCreated)
+        // The tooltip is not drawn into the bitmap, so it is kept current apart from the push: set only when its text changed
+        // (setting a ToolTip again to the same text still tells the tooltip window).
+        if (!string.Equals(content.Tooltip, _lastTooltip, StringComparison.Ordinal))
         {
-            _tip.SetToolTip(this, content.Tooltip);
+            AccessibleDescription = content.Tooltip.Replace("\r\n", ", ", StringComparison.Ordinal);
+            if (IsHandleCreated)
+            {
+                _tip.SetToolTip(this, content.Tooltip);
+                _lastTooltip = content.Tooltip;
+            }
         }
     }
 

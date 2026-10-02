@@ -83,6 +83,26 @@ public sealed class CaseOpenCardTests
         Assert.IsTrue(log.Has(LogLevel.Info, "not taking notifications"));
     }
 
+    // Windows could not list the displays: the one fallback card is still a card nobody clicked for, so a full-screen
+    // application (QUNS_BUSY, D3D full screen) refuses it, as it refuses a card on any display it is on.
+    [TestMethod]
+    public void WithNoDisplayListAFullScreenApplicationStillRefusesTheCard()
+    {
+        foreach (int state in new[] { Shell.QUNS_BUSY, Shell.QUNS_RUNNING_D3D_FULL_SCREEN })
+        {
+            var callbacks = new FakeCallbacks();
+            var environment = new Earshot.Tests.Phase5.FakeCardEnvironment { Notifications = new NotificationStateReading(0, state) };
+            var log = new CapturingLog();
+            using var presenter = new CaseOpenCardPresenter(
+                ThrowingFactory, callbacks.Build(), Gate(), environment, Inline, new Streaming.TestTimeProvider(), log, new FakeScene { List = [] });
+
+            presenter.RequestShow(new Rectangle(100, 900, 88, 48));
+
+            Assert.IsFalse(presenter.IsShown, "State " + state);
+            Assert.IsTrue(log.Has(LogLevel.Debug, "a full-screen application"), "Logged, state " + state);
+        }
+    }
+
     [TestMethod]
     public void AFailedNotificationStateReadRefusesTheCardAndFailsClosed()
     {
@@ -259,7 +279,7 @@ public sealed class CaseOpenCardTests
             Assert.IsFalse(presenter.IsShown);
             Assert.AreEqual(0, callbacks.ToggleCalls.Count, "A timeout dismiss must never connect.");
 
-            // Second life: shown again, dismissed by clicking Connect instead.
+            // Second life: shown again, Connect clicked.
             presenter.RequestShow(gaugeBounds: null);
             Application.DoEvents();
             Assert.IsTrue(presenter.IsShown);
@@ -268,7 +288,7 @@ public sealed class CaseOpenCardTests
             ClickAt(card!.Handle, new Point(button.X + (button.Width / 2), button.Y + (button.Height / 2)));
 
             Assert.AreEqual(1, callbacks.ToggleCalls.Count, "Exactly one toggle request, from the Connect button.");
-            Assert.IsFalse(presenter.IsShown, "Pressing Connect closes the card.");
+            Assert.IsTrue(presenter.IsShown, "Pressing Connect leaves the card open: it closes by its setting, its close button or the case closing.");
         });
     }
 
@@ -426,9 +446,9 @@ public sealed class CaseOpenCardTests
         new(new WindowIdentity("GameWindowClass", false), monitor, monitor, "Display");
 
     private static (CaseOpenCardPresenter Presenter, List<WidgetCard> Cards, Earshot.Tests.Phase5.FakeCardEnvironment Environment, FakeCallbacks Callbacks, CapturingLog Log)
-        Rig(CaseOpenCardGate gate, FakeScene scene, TimeProvider? time = null)
+        Rig(CaseOpenCardGate gate, FakeScene scene, TimeProvider? time = null, FakeCallbacks? callbacks = null)
     {
-        var callbacks = new FakeCallbacks();
+        callbacks ??= new FakeCallbacks();
         var environment = new Earshot.Tests.Phase5.FakeCardEnvironment();
         var log = new CapturingLog();
         var cards = new List<WidgetCard>();
@@ -705,6 +725,135 @@ public sealed class CaseOpenCardTests
                 Assert.IsTrue(cards.All(c => !c.Visible));
             }
         });
+    }
+
+    // Windows only (a real card on a private desktop). After Connect the card updates in place: its button turns to
+    // Disconnect, drawn from the new snapshot, with the card still on screen.
+    [TestMethod]
+    public void AfterConnectTheCardStaysOpenAndItsButtonTurnsToDisconnect()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var callbacks = new FakeCallbacks { Intent = new ToggleIntent(true, Guid.NewGuid(), "AirPods Pro 3") };
+            (CaseOpenCardPresenter presenter, _, _, _, _) = Rig(Gate(), new FakeScene(), callbacks: callbacks);
+            using (presenter)
+            {
+                presenter.RequestShow(gaugeBounds: null);
+                Application.DoEvents();
+                WidgetCard card = presenter.CardForTest(IdOne)!;
+                Assert.AreEqual(WidgetCopy.Connect, card.CurrentControls()[0].Name);
+
+                Rectangle button = card.CurrentMainLayout.Button;
+                ClickAt(card.Handle, new Point(button.X + (button.Width / 2), button.Y + (button.Height / 2)));
+                callbacks.Intent = new ToggleIntent(false, callbacks.Intent!.Container, "AirPods Pro 3");
+                presenter.Refresh();
+                Application.DoEvents();
+
+                Assert.IsTrue(presenter.IsShown, "Still open after Connect.");
+                Assert.AreEqual(WidgetCopy.Disconnect, card.CurrentControls()[0].Name, "Updated in place.");
+            }
+        });
+    }
+
+    // Windows only. A close timer that fired as the card was shown again must not close the newer open: its hide was queued
+    // for the earlier one. The queue here is manual so the stale callback runs after the second request.
+    [TestMethod]
+    public void AStaleCloseTimerHideDoesNotCloseANewerOpen()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var time = new Streaming.TestTimeProvider();
+            var queue = new Queue<Action>();
+            var callbacks = new FakeCallbacks();
+            var environment = new Earshot.Tests.Phase5.FakeCardEnvironment();
+            var log = new CapturingLog();
+            using var presenter = new CaseOpenCardPresenter(
+                () => new WidgetCard(log, notice: true), callbacks.Build(), Gate(closeSeconds: 5), environment, queue.Enqueue, time, log, new FakeScene());
+
+            presenter.RequestShow(gaugeBounds: null);
+            Drain(queue);
+            time.Advance(TimeSpan.FromSeconds(5)); // the timer fires: its hide is queued, not yet run
+            presenter.RequestShow(gaugeBounds: null); // the case opened again before the hide ran
+            Drain(queue);
+
+            Assert.IsTrue(presenter.IsShown, "The stale hide of the first open did nothing.");
+        });
+    }
+
+    [TestMethod]
+    public void ACaseClosedQueuedBeforeAReopenDoesNotCloseTheReopenedCard()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var queue = new Queue<Action>();
+            var callbacks = new FakeCallbacks();
+            var log = new CapturingLog();
+            using var presenter = new CaseOpenCardPresenter(
+                () => new WidgetCard(log, notice: true), callbacks.Build(), Gate(), new Earshot.Tests.Phase5.FakeCardEnvironment(), queue.Enqueue,
+                new Streaming.TestTimeProvider(), log, new FakeScene());
+
+            presenter.RequestShow(gaugeBounds: null);
+            Drain(queue);
+            presenter.CaseClosed();
+            presenter.RequestShow(gaugeBounds: null);
+            Drain(queue);
+
+            Assert.IsTrue(presenter.IsShown);
+        });
+    }
+
+    // Windows only. Recheck fails closed: a card on screen closes when the notification state cannot be read, and the
+    // fallback card (no display list) closes when a full-screen application is on.
+    [TestMethod]
+    public void AFailedStateReadAtTheRecheckClosesTheCards()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            (CaseOpenCardPresenter presenter, _, Earshot.Tests.Phase5.FakeCardEnvironment environment, _, _) = Rig(Gate(), new FakeScene());
+            using (presenter)
+            {
+                presenter.RequestShow(gaugeBounds: null);
+                Application.DoEvents();
+                Assert.IsTrue(presenter.IsShown);
+
+                environment.Notifications = new NotificationStateReading(unchecked((int)0x80004005), 0);
+                presenter.RecheckFullScreen();
+                Application.DoEvents();
+
+                Assert.IsFalse(presenter.IsShown);
+            }
+        });
+    }
+
+    [TestMethod]
+    public void TheFallbackCardClosesAtTheRecheckWhenAFullScreenApplicationIsOn()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            (CaseOpenCardPresenter presenter, _, Earshot.Tests.Phase5.FakeCardEnvironment environment, _, _) = Rig(Gate(), new FakeScene { List = [] });
+            using (presenter)
+            {
+                presenter.RequestShow(new Rectangle(100, 900, 88, 48));
+                Application.DoEvents();
+                Assert.IsTrue(presenter.IsShown);
+
+                environment.Notifications = new NotificationStateReading(0, Shell.QUNS_BUSY);
+                presenter.RecheckFullScreen();
+                Application.DoEvents();
+
+                Assert.IsFalse(presenter.IsShown);
+            }
+        });
+    }
+
+    private static void Drain(Queue<Action> queue)
+    {
+        while (queue.Count > 0)
+        {
+            queue.Dequeue()();
+        }
+
+        Application.DoEvents();
     }
 
     private static void Inline(Action action) => action();

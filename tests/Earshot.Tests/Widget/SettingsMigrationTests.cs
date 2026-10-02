@@ -61,7 +61,7 @@ public sealed class SettingsMigrationTests : IDisposable
         Assert.IsTrue(loaded.HandBackOnShutdownAndSleep);
         Assert.IsTrue(loaded.CheckForUpdatesAutomatically);
         Assert.IsFalse(loaded.PauseWhenAirPodsLeave);
-        Assert.IsFalse(loaded.Widget.Enabled);
+        Assert.IsTrue(loaded.Widget.Enabled, "Every older consumer is off, but the case-open card is on, so the watcher runs (see the next test).");
         Assert.IsFalse(loaded.Widget.ShowOnTaskbar);
         Assert.AreEqual("Tablet", loaded.Widget.OtherDeviceLabel);
         Assert.IsFalse(loaded.Widget.AutoPause);
@@ -116,6 +116,45 @@ public sealed class SettingsMigrationTests : IDisposable
             Assert.AreEqual(CaseOpenCardClose.UntilCaseCloses, loaded.CaseOpenCardCloseSeconds);
             Assert.IsEmpty(loaded.CaseOpenCardDisplays);
         }
+    }
+
+    // The owner's decision: the case-open card is on for an existing install and the passive watcher runs whenever Earshot
+    // runs. An old file with every consumer off saved Enabled=false; loading it must recompute Enabled from the consumers,
+    // or the card is on in the setting but inert (nothing feeds it) until some unrelated toggle rewrites Enabled.
+    [TestMethod]
+    public void AnOldFileWithEveryConsumerOffLoadsWithTheWatcherOnForTheCaseOpenCard()
+    {
+        new JsonSettingsStore(SettingsPath, _log).Update(s => s.Widget = s.Widget with { Enabled = true });
+        JsonNode root = JsonNode.Parse(File.ReadAllText(SettingsPath))!;
+        JsonObject widget = root["Widget"]!.AsObject();
+        widget["Enabled"] = false;
+        widget["ShowOnTaskbar"] = false;
+        widget["AutoPause"] = false;
+        widget["LowBatteryAlert"] = false;
+        widget.Remove("CaseOpenCardOn");
+        File.WriteAllText(SettingsPath, root.ToJsonString());
+
+        WidgetSettings loaded = new JsonSettingsStore(SettingsPath, _log).Current.Widget;
+
+        Assert.IsTrue(loaded.CaseOpenCardOn);
+        Assert.IsTrue(loaded.Enabled, "Enabled reflects CaseOpenCardOn at load.");
+    }
+
+    // With the card chosen off as well, nothing needs the watcher and Enabled stays false.
+    [TestMethod]
+    public void AFileWithEveryConsumerOffIncludingTheCaseOpenCardKeepsTheWatcherOff()
+    {
+        new JsonSettingsStore(SettingsPath, _log).Update(s => s.Widget = s.Widget with { Enabled = true });
+        JsonNode root = JsonNode.Parse(File.ReadAllText(SettingsPath))!;
+        JsonObject widget = root["Widget"]!.AsObject();
+        widget["Enabled"] = false;
+        widget["ShowOnTaskbar"] = false;
+        widget["AutoPause"] = false;
+        widget["LowBatteryAlert"] = false;
+        widget["CaseOpenCardOn"] = false;
+        File.WriteAllText(SettingsPath, root.ToJsonString());
+
+        Assert.IsFalse(new JsonSettingsStore(SettingsPath, _log).Current.Widget.Enabled);
     }
 
     // Once v1.4 has saved the owner's own choice, it stands: off stays off, and the close and display choices load as saved.

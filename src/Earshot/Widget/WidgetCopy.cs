@@ -189,19 +189,35 @@ internal static class WidgetCopy
         _ => NotSeenYet,
     };
 
-    // "Battery read <n> s|min|h ago", never "live".
+    // The card's full read line: "Battery read 4 min ago", "Battery not read yet" before any reading, and the empty text while
+    // the reading is fresh (see ReadAge). Never "live".
     public static string BatteryReadLine(DateTimeOffset? readAt, DateTimeOffset now) =>
-        readAt is null ? BatteryNotReadYet : "Battery read " + Age(readAt.Value, now);
+        readAt is null ? BatteryNotReadYet : IsFreshAge(readAt.Value, now) ? "" : "Battery read " + StaleAge(readAt.Value, now);
 
-    // The card's read line beside its clock icon: "2 min ago", and "Not read yet" before any reading. The full words are
-    // the line's tooltip.
+    // The card's read line beside its clock icon: "2 min ago", "Not read yet" before any reading, and the empty text while the
+    // reading is fresh. The full words are the line's tooltip.
+    //
+    // Fresh means within BatteryFreshness.FreshWindow, the age at which the card greys a value. A fresh value shows no age: the
+    // line is hidden but its place is kept (a design choice, the card's "fresh: read-time line hidden but reserved"). Every
+    // message moves the newest read time, which is the radio's own timestamp and so a varying latency behind the clock, so a
+    // line that counted seconds changed text at message cadence and the card twitched. A reading that is not fresh says its age
+    // at the level of minutes (StaleAgeAmount), which changes at most once a minute.
     public static string ReadAge(DateTimeOffset? readAt, DateTimeOffset now) =>
-        readAt is null ? NotReadYet : Age(readAt.Value, now);
+        readAt is null ? NotReadYet : IsFreshAge(readAt.Value, now) ? "" : StaleAge(readAt.Value, now);
 
     public const string NotReadYet = "Not read yet";
 
-    // "2 min ago": the amount in seconds, minutes, hours or days, rounded to the nearest whole, never negative.
-    private static string Age(DateTimeOffset at, DateTimeOffset now) => AgeAmount(now - at) + " ago";
+    // The same boundary BatteryFreshness.IsFresh uses (a reading from the future is fresh, never a negative age).
+    private static bool IsFreshAge(DateTimeOffset at, DateTimeOffset now) => now - at <= BatteryFreshness.FreshWindow;
+
+    // "2 min ago": for a reading that is not fresh, in minutes, hours or days, rounded to the nearest whole.
+    private static string StaleAge(DateTimeOffset at, DateTimeOffset now) => StaleAgeAmount(now - at) + " ago";
+
+    // "under 1 min", "2 min", "3 h", "2 d": how long ago, for a value that is not fresh. Never seconds, so the text a stale value
+    // draws does not change from one second to the next. Not fresh means more than FreshWindow (30 s), so the first step
+    // below a minute is the only one the seconds could have shown.
+    public static string StaleAgeAmount(TimeSpan age) =>
+        age < TimeSpan.FromMinutes(1) ? "under 1 min" : AgeAmount(age);
 
     // "40 s", "2 min", "3 h", "2 d": how long ago, without the "ago". Days from a day on, since a last reading may be kept
     // for as long as nothing newer is heard.
@@ -256,9 +272,9 @@ internal static class WidgetCopy
         _ => LastReadLine(age),
     };
 
-    public static string LastReadLine(TimeSpan age) => "Last read " + AgeAmount(age) + " ago";
+    public static string LastReadLine(TimeSpan age) => "Last read " + StaleAgeAmount(age) + " ago";
 
-    public static string EstimatedReadLine(TimeSpan age) => "Estimated, read " + AgeAmount(age) + " ago";
+    public static string EstimatedReadLine(TimeSpan age) => "Estimated, read " + StaleAgeAmount(age) + " ago";
 
     // A card column's percent line: "80%" while live, "80% · 2 h" for a last reading and "≈90% · 2 h" for an estimate, the
     // age being that of the reading shown or grown from. NoReading when the part has none.
@@ -270,7 +286,7 @@ internal static class WidgetCopy
         }
 
         string value = PercentText(percent, part.Estimated);
-        return part.Fresh || part.ReadAt is not DateTimeOffset at ? value : value + " · " + AgeAmount(now - at);
+        return part.Fresh || part.ReadAt is not DateTimeOffset at ? value : value + " · " + StaleAgeAmount(now - at);
     }
 
     // A card column's tooltip: what kind of value it is and how old, or null for a live value or none.

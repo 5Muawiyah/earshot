@@ -35,15 +35,19 @@ internal interface IAccentColours
 }
 
 // Reads the shade for the theme on demand, so a caller always gets the colour Windows has now, and turns
-// the colour source's own change event (raised on a Windows thread) into a UI thread Changed event.
-// Nothing is cached: the read is a call into the Windows palette, cheap next to a repaint, and a cache would
-// be one more thing to invalidate.
+// the colour source's own change event (raised on a Windows thread) into a UI thread Changed event, raised
+// only when one of the two shades really differs from the pair last reported: Windows raises
+// ColorValuesChanged for other personalisation writes too, with the accent as it was, and a repaint of every
+// card for each of those was a visible twitch. The shades are read on demand, never cached for callers; the
+// last reported pair is kept only to tell a change from a repeat.
 internal sealed class AccentColourService : IAccentColours, IDisposable
 {
     private readonly IUiColourSource _source;
     private readonly Action<Action> _uiPost;
     private readonly ILog _log;
     private int _disposed;
+    private Color _lastDark1;
+    private Color _lastLight2;
 
     public AccentColourService(IUiColourSource source, Action<Action> uiPost, ILog log)
     {
@@ -53,6 +57,8 @@ internal sealed class AccentColourService : IAccentColours, IDisposable
         _source = source;
         _uiPost = uiPost;
         _log = log;
+        _lastDark1 = _source.Shade(AccentShade.Dark1);
+        _lastLight2 = _source.Shade(AccentShade.Light2);
         _source.ColorValuesChanged += OnColorValuesChanged;
     }
 
@@ -104,11 +110,22 @@ internal sealed class AccentColourService : IAccentColours, IDisposable
 
         _uiPost(() =>
         {
-            if (Volatile.Read(ref _disposed) == 0)
+            if (Volatile.Read(ref _disposed) != 0)
             {
-                _log.Write(LogLevel.Debug, "The Windows accent colour changed.");
-                Changed?.Invoke(this, EventArgs.Empty);
+                return;
             }
+
+            Color dark1 = _source.Shade(AccentShade.Dark1);
+            Color light2 = _source.Shade(AccentShade.Light2);
+            if (dark1.ToArgb() == _lastDark1.ToArgb() && light2.ToArgb() == _lastLight2.ToArgb())
+            {
+                return;
+            }
+
+            _lastDark1 = dark1;
+            _lastLight2 = light2;
+            _log.Write(LogLevel.Debug, "The Windows accent colour changed.");
+            Changed?.Invoke(this, EventArgs.Empty);
         });
     }
 }

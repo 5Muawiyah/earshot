@@ -92,6 +92,11 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // One card per display it is on, by the display's Id ("" for the one card placed without a display list).
     private readonly Dictionary<string, (WidgetCard Card, DisplayInfo? Display)> _cards = new(StringComparer.OrdinalIgnoreCase);
     private ITimer? _closeTimer;
+    private readonly OpenGeneration _generation = new();
+
+    // The scale of the one card placed without a display list: the host's scale, which every taskbar poll rewrites, so it is fixed
+    // when the card is shown and read again only on a display change. A card on a display is drawn at that display's own scale.
+    private readonly CardDpiLatch _fallbackDpi = new();
     private int _announcements;
     private bool _disposed;
 
@@ -151,10 +156,27 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     // IWidgetStatus.CaseOpened: the linked pair's case opened. gaugeBounds is the main gauge's when it is shown; the scene
     // gives the others. A card already open takes the new open in place: drawn again, placed again, its close time started
     // over, and announced again, since it is a new open.
-    public void RequestShow(Rectangle? gaugeBounds) => _uiPost(() => ShowOnUiThread(gaugeBounds));
+    // Each request takes a generation here, on the calling thread, so a close or a close timer that was queued for an earlier
+    // open can tell it is stale (a CaseClosed posted before a reopen must not close the card the reopen shows).
+    public void RequestShow(Rectangle? gaugeBounds)
+    {
+        int generation = _generation.Next();
+        _uiPost(() => ShowOnUiThread(gaugeBounds, generation));
+    }
 
-    // IWidgetStatus.CaseClosed: the linked pair's case closed, so every card closes, whatever the close setting says.
-    public void CaseClosed() => _uiPost(() => HideOnUiThread("the case closed"));
+    // IWidgetStatus.CaseClosed: the linked pair's case closed, so every card closes, whatever the close setting says. Ignored
+    // when a newer open was asked for after this was called: that open is a case that is open now.
+    public void CaseClosed()
+    {
+        int generation = _generation.Current;
+        _uiPost(() =>
+        {
+            if (_generation.IsCurrent(generation))
+            {
+                HideOnUiThread("the case closed");
+            }
+        });
+    }
 
     // Forces the cards to hide: the gauge's own card opening, a settings change turning the card off, or the tray closing.
     public void Hide() => _uiPost(() => HideOnUiThread(null));
@@ -165,6 +187,10 @@ internal sealed class CaseOpenCardPresenter : IDisposable
 
     // The system's look changed: an open card takes the theme and the look again, in place.
     public void ReapplyLook() => _uiPost(ReapplyLookOnUiThread);
+
+    // The displays changed: an open card reads its scale again (the fallback card from the host, the others from their display)
+    // and keeps its bottom edge as it grows or shrinks. The only time the fallback card's scale is read after the show.
+    public void DisplayChanged() => _uiPost(DisplayChangedOnUiThread);
 
     // A full-screen application may have opened or the foreground moved: a card on a display a full-screen application is
     // now on closes, and the others stay.
@@ -190,7 +216,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
 
     // The gate, in this order: the setting, not closing, no card of ours already open, the notification state, then
     // hand-back or session end. Each refusal beyond "the setting is off" is logged.
-    private void ShowOnUiThread(Rectangle? gaugeBounds)
+    private void ShowOnUiThread(Rectangle? gaugeBounds, int generation)
     {
         if (_disposed || !_gate.Enabled())
         {
@@ -238,6 +264,13 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         {
             // Windows could not list the displays: one card, above the main gauge or near the tray, as before there was a
             // choice of displays, so an open is still shown.
+            if (!CaseOpenCardRules.FallbackMayShow(state))
+            {
+                // No display list means no display to leave out, so a full-screen application refuses the one card.
+                _log.Write(LogLevel.Debug, "Case-open card: not shown, a full-screen application is on and the displays could not be listed.");
+                return;
+            }
+
             keep.Add("");
             shown.Add(ShowFallback(model, gaugeBounds, _callbacks.CurrentGaugePosition));
         }
@@ -275,7 +308,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         }
 
         Announce(shown[0], model);
-        StartCloseTimer(options.CloseSeconds);
+        StartCloseTimer(options.CloseSeconds, generation);
     }
 
     private WidgetCard ShowOn(DisplayInfo display, WidgetCardModel model, IReadOnlyList<Rectangle> gauges, GaugePosition position)
@@ -306,7 +339,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     {
         WidgetCard card = EnsureCard("", null);
         bool open = card is { Visible: true, IsExiting: false };
-        int dpi = _callbacks.Dpi();
+        int dpi = _fallbackDpi.FixAtShow(null, _callbacks.Dpi);
         card.SetTheme(_callbacks.Ink(), _callbacks.HighContrast());
         card.Render(model, dpi);
 
@@ -378,20 +411,25 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         NotificationStateReading reading = _environment.QueryNotificationState();
         if (reading.HResult < 0)
         {
-            // Not knowing is not a reason to take down what is already shown; the next show reads it again.
-            return;
+            // Not knowing closes the card, as the show refuses on a failed read: fail closed.
+            _log.Warn("Case-open card closed, the notification state could not be read. " +
+                TrayReport.DescribeStep(StepOutcomes.FromHResult("sh-query-user-notification-state:case-open-card-recheck", reading.HResult)));
         }
 
         IReadOnlyList<DisplayInfo> displays = _scene.Displays();
-        ForegroundWindowReading? foreground = displays.Count > 1 && reading.State is Shell.QUNS_BUSY or Shell.QUNS_RUNNING_D3D_FULL_SCREEN
+        ForegroundWindowReading? foreground = reading.HResult >= 0 && displays.Count > 1 && reading.State is Shell.QUNS_BUSY or Shell.QUNS_RUNNING_D3D_FULL_SCREEN
             ? _scene.Foreground(displays)
             : null;
-        foreach ((string id, WidgetCard card, DisplayInfo? display) in open)
+        foreach ((_, WidgetCard card, DisplayInfo? display) in open)
         {
-            if (display is not null && CaseOpenCardFullScreen.Covers(reading.State, Math.Max(1, displays.Count), foreground, display))
+            if (CaseOpenCardRules.ClosesOnRecheck(reading.HResult, reading.State, displays.Count, foreground, display))
             {
-                _log.Write(LogLevel.Debug, "Case-open card: closed on " + DisplayNames.Short(display, displays.Count > 0 ? displays : new[] { display }) +
-                    ", a full-screen application is on it now.");
+                if (reading.HResult >= 0)
+                {
+                    _log.Write(LogLevel.Debug, "Case-open card: closed" + (display is null ? "" : " on " +
+                        DisplayNames.Short(display, displays.Count > 0 ? displays : new[] { display })) + ", a full-screen application is on it now.");
+                }
+
                 card.HideAnimated();
             }
         }
@@ -426,6 +464,17 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         }
     }
 
+    private void DisplayChangedOnUiThread()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _fallbackDpi.RereadOnDisplayChange(null, _callbacks.Dpi);
+        RefreshOnUiThread();
+    }
+
     private void RefreshOnUiThread()
     {
         foreach ((_, WidgetCard card, DisplayInfo? display) in OpenCards().ToList())
@@ -441,7 +490,7 @@ internal sealed class CaseOpenCardPresenter : IDisposable
     {
         Rectangle before = card.RestBounds;
         DisplayInfo? now = display is null ? null : _scene.Displays().FirstOrDefault(d => string.Equals(d.Id, display.Id, StringComparison.OrdinalIgnoreCase)) ?? display;
-        int dpi = now is { Dpi: > 0 } d ? d.Dpi : _callbacks.Dpi();
+        int dpi = now is { Dpi: > 0 } d ? d.Dpi : _fallbackDpi.Current(_callbacks.Dpi);
         card.Render(WidgetCardPresenter.BuildModel(_callbacks, _time), dpi);
 
         Size size = card.ClientSize;
@@ -522,7 +571,9 @@ internal sealed class CaseOpenCardPresenter : IDisposable
             _ => "it was clicked",
         });
 
-    private void StartCloseTimer(int closeSeconds)
+    // The timer's callback may already be queued when the card is shown again, so it carries the generation of the open it was
+    // started for and does nothing once a newer open was asked for.
+    private void StartCloseTimer(int closeSeconds, int generation)
     {
         StopCloseTimer();
         if (CaseOpenCardClose.After(closeSeconds) is not TimeSpan after)
@@ -531,7 +582,13 @@ internal sealed class CaseOpenCardPresenter : IDisposable
         }
 
         _closeTimer = _time.CreateTimer(
-            _ => _uiPost(() => HideOnUiThread("its close time of " + closeSeconds.ToString(CultureInfo.InvariantCulture) + " s passed")),
+            _ => _uiPost(() =>
+            {
+                if (_generation.IsCurrent(generation))
+                {
+                    HideOnUiThread("its close time of " + closeSeconds.ToString(CultureInfo.InvariantCulture) + " s passed");
+                }
+            }),
             null, after, Timeout.InfiniteTimeSpan);
     }
 

@@ -29,6 +29,28 @@ internal sealed partial class WidgetCard
     internal Func<nint, byte, bool> SetWindowAlpha = static (handle, alpha) =>
         NativeMethods.SetLayeredWindowAttributes(handle, 0, alpha, NativeMethods.LWA_ALPHA);
 
+    // The recording seam: every placement, DWM attribute call, alpha or motion window call, client size change and invalidation
+    // (with its rectangle) is reported here, so a test can prove that a card whose figures did not change makes none of them, and
+    // the stall log (UiStallMonitor) can show which of them happened near a hitch. Null in production unless the tray sets it.
+    internal Action<CardWindowCall>? CallRecorder;
+
+    private void Record(CardWindowCallKind kind, Rectangle area, string detail) => CallRecorder?.Invoke(new CardWindowCall(kind, area, detail));
+
+    // The motion's move and alpha calls, reported to the recorder after they are made.
+    private bool CallMove(nint handle, int x, int y)
+    {
+        bool ok = MoveWindow(handle, x, y);
+        Record(CardWindowCallKind.Move, new Rectangle(x, y, 0, 0), ok ? "move" : "move failed");
+        return ok;
+    }
+
+    private bool CallAlpha(nint handle, byte alpha)
+    {
+        bool ok = SetWindowAlpha(handle, alpha);
+        Record(CardWindowCallKind.Alpha, Rectangle.Empty, "alpha " + alpha + (ok ? "" : " failed"));
+        return ok;
+    }
+
     // Gives the card motion. Called before the card has a window handle: the layered style is chosen when the
     // handle is created.
     internal void AttachMotion(TimeProvider time, Action<Action> uiPost, Func<bool> animationsEnabled)
@@ -60,6 +82,7 @@ internal sealed partial class WidgetCard
     internal void PlaceAtRest(Rectangle bounds)
     {
         _rest = bounds;
+        Record(CardWindowCallKind.Place, bounds, Bounds == bounds ? "place at rest, same bounds" : "place at rest");
         Bounds = bounds;
         _animator?.Rebase(bounds);
     }
@@ -71,6 +94,7 @@ internal sealed partial class WidgetCard
         _rest = rest;
         _travel = travel;
         _exiting = false;
+        Record(CardWindowCallKind.Place, rest, "present");
         if (_animator is null || _motionBroken)
         {
             Bounds = rest;
@@ -133,7 +157,7 @@ internal sealed partial class WidgetCard
     private void PutAtRestAndOpaque()
     {
         RestoreOpacity();
-        if (!MoveWindow(Handle, _rest.X, _rest.Y))
+        if (!CallMove(Handle, _rest.X, _rest.Y))
         {
             RecordMotionProblem("set-window-pos:widget-card-rest", Marshal.GetLastPInvokeError(), "the card may be left off its place");
         }
@@ -148,7 +172,7 @@ internal sealed partial class WidgetCard
             return;
         }
 
-        if (SetWindowAlpha(Handle, 255))
+        if (CallAlpha(Handle, 255))
         {
             return;
         }
@@ -178,13 +202,13 @@ internal sealed partial class WidgetCard
             }
 
             nint handle = card.Handle;
-            if (!card.MoveWindow(handle, rest.X, rest.Y + offsetPx))
+            if (!card.CallMove(handle, rest.X, rest.Y + offsetPx))
             {
                 card.GiveUpMotion("set-window-pos:widget-card-motion", Marshal.GetLastPInvokeError());
                 return false;
             }
 
-            if (card._layered && !card.SetWindowAlpha(handle, alpha))
+            if (card._layered && !card.CallAlpha(handle, alpha))
             {
                 card.GiveUpMotion("set-layered-window-attributes:widget-card-motion", Marshal.GetLastPInvokeError());
                 return false;

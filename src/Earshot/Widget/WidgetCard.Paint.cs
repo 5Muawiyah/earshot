@@ -95,6 +95,7 @@ internal sealed partial class WidgetCard
     {
         if (ClientSize != size)
         {
+            Record(CardWindowCallKind.ClientSize, new Rectangle(Point.Empty, size), "client size");
             ClientSize = size;
         }
     }

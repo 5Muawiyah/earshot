@@ -59,11 +59,12 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     private readonly Func<WidgetCard> _createCard;
     private readonly WidgetCardPresenterCallbacks _callbacks;
 
-    // The scale a card opened from another display's gauge is drawn at, kept for as long as it is open; null for a card that follows
-    // the host's.
-    private int? _cardDpi;
+    // The scale the card is drawn at, fixed when it is shown (the display's own for a gauge on another display, else the host's)
+    // and read again only when the displays change (DisplayChanged). The host's scale is rewritten by every taskbar poll, and a
+    // card that asked for it at each redraw was resized and placed again whenever that value moved.
+    private readonly CardDpiLatch _dpiLatch = new();
 
-    private int CardDpi => _cardDpi ?? _callbacks.Dpi();
+    private int CardDpi => _dpiLatch.Current(_callbacks.Dpi);
     private readonly Action<Action> _uiPost;
     private readonly TimeProvider _time;
     private readonly ILog _log;
@@ -175,6 +176,10 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     // thread is safe too.
     public void Refresh() => _uiPost(RefreshOnUiThread);
 
+    // The displays changed (a monitor added or removed, a scale changed): the open card reads its scale again, and keeps its
+    // bottom edge as it grows or shrinks. The only time an open card's scale is read after the show.
+    public void DisplayChanged() => _uiPost(DisplayChangedOnUiThread);
+
     public void Dispose()
     {
         if (_disposed)
@@ -269,7 +274,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false, int? dpi = null)
     {
-        _cardDpi = dpi;
+        _dpiLatch.FixAtShow(dpi, _callbacks.Dpi);
         Rectangle anchor = gaugeBounds ?? new Rectangle(fallbackPoint, Size.Empty);
         _place = CardPlace.AtClick(gaugeBounds is { } gauge ? new Point(gauge.X + (gauge.Width / 2), gauge.Y) : fallbackPoint);
 
@@ -322,6 +327,17 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     // How many times a shown card was given the look again, for tests.
     internal int LookReappliesForTest => _lookReapplies;
+
+    private void DisplayChangedOnUiThread()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _dpiLatch.RereadOnDisplayChange(null, _callbacks.Dpi);
+        RenderKeepingBottom();
+    }
 
     private void RefreshOnUiThread()
     {

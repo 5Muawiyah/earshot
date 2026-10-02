@@ -448,7 +448,7 @@ internal sealed partial class TrayContext : ApplicationContext
 
         // The settings page lists the connected displays as they were when it was drawn, so a display that comes or goes
         // while the card is open redraws the page (and a choice made from the old list is refused, SetGaugeDisplay).
-        _window.DisplayChanged += (_, _) => _widgetCardPresenter?.Refresh();
+        _window.DisplayChanged += (_, _) => { _widgetCardPresenter?.DisplayChanged(); _caseOpenCardPresenter?.DisplayChanged(); };
 
         // AppBarRegistration's own notification callback (ABM_NEW's uCallbackMessage): ABN_STATECHANGE and
         // ABN_POSCHANGED poke the watcher for an immediate re-measure; ABN_FULLSCREENAPP hides the gauge at

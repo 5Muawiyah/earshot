@@ -534,12 +534,15 @@ The low battery alert's own on and off is a tick in the right-click menu.
 **The case-open card.** When you open your AirPods' case near the PC, a card
 with the left, right and case figures and the Connect or Disconnect button
 appears by itself, where the gauge is, without taking the focus. It never
-connects the AirPods by itself. It closes when you shut the case (about eight
+connects the AirPods by itself, and pressing its Connect button leaves it open,
+the button turning to Disconnect. It closes when you shut the case (about eight
 seconds after the case stops sending), or after 5, 10, 30 or 60 seconds if you
 choose one, or on its close button. The Case-open card row in the settings
 turns it off, and its expander holds the close time and the displays it shows
 on (where the gauge is, all displays, or the displays you tick). It is never
-shown over a full-screen application, and a screen reader says it once.
+shown over a full-screen application, and a screen reader says it once. It
+works with the gauge hidden too: Earshot listens for the case (listen-only,
+nothing is sent) whenever it runs and the card is on.
 
 **The low battery alert.** A Windows notification, or the card if a
 notification cannot be shown, the moment a shown value first reads at or below
@@ -633,7 +636,8 @@ held, that opens its case next to the PC more strongly than yours can be linked
 instead, and one whose levels equal your pair's last, heard within 30 seconds of
 yours going quiet, can be followed as if it were yours. The owner accepted that risk
 rather than add a set-up step to rule it out. Opening your own case next to the PC,
-at least 8 dB stronger than the other pair, takes the link back.
+at least 8 dB stronger than the other pair, takes the link back. The case-open
+card follows the link, so a pair that takes it that way also shows the card.
 
 ### What still needs a kernel driver
 

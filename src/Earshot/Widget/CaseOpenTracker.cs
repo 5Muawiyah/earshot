@@ -32,12 +32,19 @@ internal sealed class CaseOpenTracker
     // message).
     public static readonly TimeSpan CloseAfter = TimeSpan.FromSeconds(8);
 
-    // A counter change within this long of an open is the same open seen from the pair's other bud, not another: each bud
-    // sends the counter on its own address, about a message apart. The set-membership window (BroadcastRules.SameSetWithin),
-    // reused for the same reason; a design choice.
+    // A counter change within this long of an open is the same open seen from the pair's other bud, not another: the two buds
+    // may report one open about a message apart. The set-membership window (BroadcastRules.SameSetWithin), reused for the
+    // same reason; a design choice.
     public static readonly TimeSpan SameOpenWithin = BroadcastRules.SameSetWithin;
 
     private readonly Dictionary<uint, int> _counterBySender = new();
+
+    // The senders whose counter has not yet caught up with a reopen another sender showed first. One reopen moves every bud's
+    // counter, but one sender's gap between messages (6.14 s at the longest in the saved records) can be longer than
+    // SameOpenWithin, so the other bud's change can arrive after it. Its first change inside CloseAfter of that open is that
+    // reopen seen late, not another one; a design choice, with the cost that a second reopen inside CloseAfter that only the
+    // lagging bud reports is not counted.
+    private readonly HashSet<uint> _catchingUp = new();
     private DateTimeOffset? _lastCaseKnownAt;
     private DateTimeOffset? _openedAt;
 
@@ -69,13 +76,31 @@ internal sealed class CaseOpenTracker
         if (!IsOpen)
         {
             _openedAt = at;
+            _catchingUp.Clear();
             return CaseOpenStep.Opened;
         }
 
-        if (counterMoved && _openedAt is { } opened && at - opened > SameOpenWithin)
+        if (counterMoved && _openedAt is { } opened)
         {
-            _openedAt = at;
-            return CaseOpenStep.Opened;
+            if (_catchingUp.Remove(sender) && at - opened <= CloseAfter)
+            {
+                return CaseOpenStep.None;
+            }
+
+            if (at - opened > SameOpenWithin)
+            {
+                _openedAt = at;
+                _catchingUp.Clear();
+                foreach (uint other in _counterBySender.Keys)
+                {
+                    if (other != sender)
+                    {
+                        _catchingUp.Add(other);
+                    }
+                }
+
+                return CaseOpenStep.Opened;
+            }
         }
 
         return CaseOpenStep.None;
@@ -88,6 +113,7 @@ internal sealed class CaseOpenTracker
         {
             _openedAt = null;
             _counterBySender.Clear();
+            _catchingUp.Clear();
             return true;
         }
 
@@ -102,6 +128,7 @@ internal sealed class CaseOpenTracker
         _openedAt = null;
         _lastCaseKnownAt = null;
         _counterBySender.Clear();
+        _catchingUp.Clear();
         return wasOpen;
     }
 }

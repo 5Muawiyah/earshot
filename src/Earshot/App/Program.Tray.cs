@@ -3,6 +3,7 @@ using System.Globalization;
 using Earshot.App;
 using Earshot.Composition;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Infra;
 using Earshot.Interop;
 using Earshot.Tray;
@@ -355,7 +356,12 @@ internal static partial class Program
             try
             {
                 var settings = new JsonSettingsStore(paths.SettingsFile, log);
-                registry = CompositionRoot.Build(log, settings, action => ui.Post(static state => ((Action)state!)(), action), paths.IsSafeMode);
+
+                // The frame and UI stall log: every action posted to the UI thread is timed, and a wait or a run over two
+                // refresh intervals is kept (with the card's window calls) for Copy diagnostics.
+                (TimeSpan refreshInterval, string refreshSource) = RefreshInterval.Read();
+                var stallLog = new UiStallMonitor(TimeProvider.System, refreshInterval, refreshSource);
+                registry = CompositionRoot.Build(log, settings, action => ui.Post(static state => ((Action)state!)(), stallLog.Wrap(action)), paths.IsSafeMode);
                 coordinator = new BlockCoordinator(
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
@@ -388,6 +394,7 @@ internal static partial class Program
                     StartupRegistry: new CurrentUserStartupRegistry())
                 {
                     StartedAtLogon = startedAtLogon,
+                    FrameLog = stallLog,
                     DataRootRedirected = paths.IsRedirected,
                     InstalledExePath = paths.InstalledExe,
                     UpdateOutcome = paths.IsSafeMode || paths.IsRedirected

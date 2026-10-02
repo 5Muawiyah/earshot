@@ -89,10 +89,11 @@ public sealed class WidgetCardWordsTests
     {
         DateTimeOffset now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
         Assert.AreEqual("Not read yet", WidgetCopy.ReadAge(null, now));
-        Assert.AreEqual("30 s ago", WidgetCopy.ReadAge(now - TimeSpan.FromSeconds(30), now));
+        Assert.AreEqual("", WidgetCopy.ReadAge(now - TimeSpan.FromSeconds(30), now), "Fresh: no age is shown.");
+        Assert.AreEqual("under 1 min ago", WidgetCopy.ReadAge(now - TimeSpan.FromSeconds(31), now));
         Assert.AreEqual("2 min ago", WidgetCopy.ReadAge(now - TimeSpan.FromMinutes(2), now));
         Assert.AreEqual("3 h ago", WidgetCopy.ReadAge(now - TimeSpan.FromHours(3), now));
-        Assert.AreEqual("0 s ago", WidgetCopy.ReadAge(now + TimeSpan.FromMinutes(5), now), "A reading from the future is never a negative age.");
+        Assert.AreEqual("", WidgetCopy.ReadAge(now + TimeSpan.FromMinutes(5), now), "A reading from the future is fresh, never a negative age.");
         Assert.AreEqual("Battery read 2 min ago", WidgetCopy.BatteryReadLine(now - TimeSpan.FromMinutes(2), now), "The whole sentence stays, for the tooltip.");
         Assert.AreEqual("1.3.0 available", WidgetCopy.UpdateAvailableShort("1.3.0"));
         Assert.AreEqual("Version 1.3.0 is available", WidgetCopy.UpdateAvailable("1.3.0"));

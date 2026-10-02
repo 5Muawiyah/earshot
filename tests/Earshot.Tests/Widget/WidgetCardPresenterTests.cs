@@ -122,7 +122,7 @@ public sealed class WidgetCardPresenterTests
     }
 
     [TestMethod]
-    public void TheReadLineRefreshesEvery5SecondsWhileTheCardIsOpen()
+    public void TheReadLineRefreshesEvery5SecondsWhileTheCardIsOpenAndSaysNothingWhileTheReadingIsFresh()
     {
         Phase5.CardDesktop.Run(() =>
         {
@@ -135,11 +135,15 @@ public sealed class WidgetCardPresenterTests
 
             presenter.RequestShow(Gauge, Gauge.Location);
             Application.DoEvents();
-            Assert.AreEqual("Battery read 10 s ago", WidgetCopy.BatteryReadLine(card!.Model.Snapshot.BatteryReadAt, card.Model.Now));
+            Assert.AreEqual("", WidgetCopy.BatteryReadLine(card!.Model.Snapshot.BatteryReadAt, card.Model.Now), "Fresh: no age.");
 
             Assert.AreEqual(TimeSpan.FromSeconds(5), WidgetCardPresenter.ReadLineRefreshInterval);
             time.Advance(WidgetCardPresenter.ReadLineRefreshInterval);
-            Assert.AreEqual("Battery read 15 s ago", WidgetCopy.BatteryReadLine(card.Model.Snapshot.BatteryReadAt, card.Model.Now), "The read line moves forward with the clock while open.");
+            Assert.AreEqual(time.GetUtcNow(), card.Model.Now, "Re-rendered at the new time.");
+            Assert.AreEqual("", card.ReadLineText, "Still fresh at 15 s: nothing to tick.");
+            time.Advance(TimeSpan.FromSeconds(20));
+            time.Advance(WidgetCardPresenter.ReadLineRefreshInterval);
+            Assert.AreEqual("Battery read under 1 min ago", card.ReadLineText, "Past the fresh window it says its age, in minutes.");
         });
     }
 

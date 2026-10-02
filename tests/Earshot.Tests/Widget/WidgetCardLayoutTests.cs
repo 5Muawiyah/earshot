@@ -178,7 +178,8 @@ public sealed class WidgetCardLayoutTests
     {
         var now = new DateTimeOffset(2026, 9, 27, 12, 0, 0, TimeSpan.Zero);
         Assert.AreEqual("Battery not read yet", WidgetCopy.BatteryReadLine(null, now));
-        Assert.AreEqual("Battery read 30 s ago", WidgetCopy.BatteryReadLine(now - TimeSpan.FromSeconds(30), now));
+        Assert.AreEqual("", WidgetCopy.BatteryReadLine(now - TimeSpan.FromSeconds(30), now), "Fresh: no age, the line's place is kept (ReadLineStillnessTests).");
+        Assert.AreEqual("Battery read under 1 min ago", WidgetCopy.BatteryReadLine(now - TimeSpan.FromSeconds(31), now));
         Assert.AreEqual("Battery read 5 min ago", WidgetCopy.BatteryReadLine(now - TimeSpan.FromMinutes(5), now));
         Assert.AreEqual("Battery read 2 h ago", WidgetCopy.BatteryReadLine(now - TimeSpan.FromHours(2), now));
     }

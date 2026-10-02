@@ -217,7 +217,10 @@ internal sealed class JsonSettingsStore : ISettingsStore
             _log.Write(LogLevel.Debug, "Widget " + note.Step + ": " + note.Detail);
         }
 
-        _current.Widget = clamped;
+        // Enabled is the OR of the four consumers (WidgetSettings.WithWatcherRecomputed). An older file saved it before the
+        // case-open card was a consumer, so it can read false while the card is on: recompute at load, so the watcher runs
+        // whenever the card is wanted (the owner's decision of 2 October 2026), not only after an unrelated toggle.
+        _current.Widget = clamped.WithWatcherRecomputed();
     }
 
     // Returns why the settings cannot be used, or null when they can.

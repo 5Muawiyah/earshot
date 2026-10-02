@@ -14,7 +14,8 @@ internal sealed partial class WidgetCard
 
     // The line under the where line: Windows' own figure when that is what is shown ("Windows reads 70%"), else
     // when the battery was last read ("Battery read 4 min ago"). The age is the newest part's: a part that is old
-    // greys by itself, and must not make buds that were just heard read as old.
+    // greys by itself, and must not make buds that were just heard read as old. Empty while that reading is fresh: no age is
+    // shown for a live value (WidgetCopy.ReadAge), and the line's place is kept.
     internal string ReadLineText =>
         _model.Refresh?.ReadLine is { } refreshing ? refreshing
         : _model.ShownParts.WindowsPercent is int figure

@@ -396,7 +396,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         Assert.AreEqual(GaugeMode.CaseAway, away.Mode, "Away, the gauge shows the case.");
         Assert.AreEqual(90, away.Percent);
         Assert.IsTrue(away.CaseMark);
-        Assert.IsTrue(away.Tertiary);
+        Assert.IsFalse(away.Tertiary, "The case was read moments ago, so it is live and drawn in full ink.");
 
         Connect();
         WearThem(2);
@@ -532,5 +532,60 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
 
         Assert.IsGreaterThan(0, notifier.Calls.Count, "Connected and linked, the same low buds are shown and alert.");
         Assert.IsTrue(notifier.Calls.All(c => c.Text.EndsWith("10%", StringComparison.Ordinal)));
+    }
+
+    // ---- The case-open card follows the link (owner's decision: an open that links a pair by the existing rule counts)
+
+    // A pair that takes the link by the 8 dB rule while another is linked and heard is an open of the linked pair.
+    [TestMethod]
+    public void ASwitchedLinkRaisesOneCaseOpen()
+    {
+        using WidgetStatusService service = NewService();
+        int opens = 0;
+        service.CaseOpened += (_, _) => opens++;
+        service.Start();
+        Connect();
+        OpenTheCase(seconds: 3);
+        Assert.AreEqual(1, opens, "The owner's own open.");
+        Tick(5);
+
+        StrangerOpensTheCase(seconds: 3, rssi: -45); // 10 dB nearer than the owner's -55: past the 8 dB margin
+
+        Assert.AreEqual(70, Shown(service).Left.Percent, "The stranger's pair took the link.");
+        Assert.AreEqual(2, opens, "The switch is one more open, however many messages the burst held.");
+    }
+
+    // A set that does not take the link is no open of the linked pair, however long it sends: it never raises one.
+    [TestMethod]
+    public void ASetThatDoesNotTakeTheLinkNeverRaisesACaseOpen()
+    {
+        using WidgetStatusService service = NewService();
+        int opens = 0;
+        service.CaseOpened += (_, _) => opens++;
+        service.Start();
+        Connect();
+        OpenTheCase(seconds: 3);
+        Tick(5);
+        Assert.AreEqual(1, opens);
+
+        StrangerOpensTheCase(seconds: 3, rssi: -70);
+        StrangerWornNearby(seconds: 30);
+
+        Assert.AreEqual(1, opens, "Only the owner's own open.");
+        Assert.AreEqual(100, Shown(service).Left.Percent);
+    }
+
+    [TestMethod]
+    public void WornBudsNeverRaiseACaseOpen()
+    {
+        using WidgetStatusService service = NewService();
+        int opens = 0;
+        service.CaseOpened += (_, _) => opens++;
+        service.Start();
+        Connect();
+
+        StrangerWornNearby(seconds: 60);
+
+        Assert.AreEqual(0, opens);
     }
 }

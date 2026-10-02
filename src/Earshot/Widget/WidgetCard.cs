@@ -240,7 +240,7 @@ internal sealed partial class WidgetCard : Form
     private void OnAccentChanged(object? sender, EventArgs e)
     {
         _accentRepaints++;
-        Invalidate();
+        RepaintIfChanged();
     }
 
     protected override void Dispose(bool disposing)
@@ -658,6 +658,14 @@ internal sealed partial class WidgetCard : Form
         }
     }
 
+    // Every invalidation, with its rectangle, to the recording seam. A full invalidation reports the whole client.
+    protected override void OnInvalidated(InvalidateEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        base.OnInvalidated(e);
+        Record(CardWindowCallKind.Invalidate, e.InvalidRect, e.InvalidRect == ClientRectangle ? "invalidate whole" : "invalidate");
+    }
+
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         // OnPaint fills the whole client area.
@@ -721,8 +729,9 @@ internal sealed partial class WidgetCard : Form
         {
             DrawProblemLine(g, layout.ReadLine, ReadLineText);
         }
-        else
+        else if (ReadLineShort.Length > 0)
         {
+            // A fresh reading shows no age: the line is empty and its place stays, drawn as nothing.
             DrawIconLine(g, layout.ReadLine, AsksToOpenTheCase ? FluentGlyphs.Earbud : FluentGlyphs.Clock, ReadLineShort, ReadLineText);
         }
 
@@ -830,7 +839,10 @@ internal sealed partial class WidgetCard : Form
             }
 
             ToggleRequested?.Invoke(this, EventArgs.Empty);
-            RequestClose(WidgetCardCloseReason.Action);
+            if (CaseOpenCardRules.ConnectClosesCard(_notice))
+            {
+                RequestClose(WidgetCardCloseReason.Action);
+            }
         }
         else if (_focus == WidgetCardFocus.Gear)
         {
@@ -884,6 +896,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         int preference = Dwm.DWMWCP_ROUND;
+        Record(CardWindowCallKind.DwmAttribute, Rectangle.Empty, "corner preference");
         int hr = Dwm.DwmSetWindowAttribute(handle, Dwm.DWMWA_WINDOW_CORNER_PREFERENCE, in preference, sizeof(int));
         _cornersApplied = hr >= 0;
         NoteFrame(hr >= 0 ? null : StepOutcomes.FromHResult("dwm-corner-preference:widget-card", hr), "rounded corners");
@@ -910,6 +923,7 @@ internal sealed partial class WidgetCard : Form
         _darkApplied = _dark;
         _darkModeApplications++;
         int dark = _dark ? 1 : 0;
+        Record(CardWindowCallKind.DwmAttribute, Rectangle.Empty, "dark mode");
         int hr = Dwm.DwmSetWindowAttribute(handle, Dwm.DWMWA_USE_IMMERSIVE_DARK_MODE, in dark, sizeof(int));
         NoteFrame(hr >= 0 ? null : StepOutcomes.FromHResult("dwm-dark-mode:widget-card", hr), "dark mode");
     }
@@ -930,6 +944,7 @@ internal sealed partial class WidgetCard : Form
         _backdropApplications++;
 
         int type = Dwm.DWMSBT_TRANSIENTWINDOW;
+        Record(CardWindowCallKind.DwmAttribute, Rectangle.Empty, "backdrop type");
         int hr = Dwm.DwmSetWindowAttribute(handle, Dwm.DWMWA_SYSTEMBACKDROP_TYPE, in type, sizeof(int));
         if (hr < 0)
         {
@@ -938,6 +953,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         MARGINS margins = MARGINS.Full;
+        Record(CardWindowCallKind.DwmAttribute, Rectangle.Empty, "extend frame");
         int extendHr = Dwm.DwmExtendFrameIntoClientArea(handle, in margins);
         if (extendHr < 0)
         {

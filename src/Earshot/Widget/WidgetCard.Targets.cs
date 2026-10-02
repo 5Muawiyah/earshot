@@ -227,7 +227,7 @@ internal sealed partial class WidgetCard
         if (!_notice && !OnSettingsPage && _model.View == WidgetCardView.Main)
         {
             WidgetCardLayout.Layout layout = _mainLayout;
-            if (layout.ShowColumns && layout.ReadLine.Contains(point))
+            if (layout.ShowColumns && ReadLineText.Length > 0 && layout.ReadLine.Contains(point))
             {
                 return (ReadLineText, layout.ReadLine);
             }
