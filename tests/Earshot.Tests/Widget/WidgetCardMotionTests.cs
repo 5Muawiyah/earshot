@@ -422,6 +422,11 @@ public sealed class WidgetCardMotionTests
                 presenter.OpenSettingsForTest();
                 Application.DoEvents();
                 Assert.AreEqual(WidgetCardView.Settings, presenter.CurrentModelForTest!.View);
+
+                // The page's height is an animation of its own: let it finish, so the card is at rest on the settings page. Closed
+                // part way (which a card does leave from, where it has got to), its rest is the height it had reached.
+                time.Advance(Ms(300));
+                Assert.IsFalse(card.IsMoving, "Sanity: the card is at rest on the settings page.");
                 Size sizeBefore = card.ClientSize;
                 Rectangle restBefore = card.RestBounds;
                 int reappliesBefore = presenter.LookReappliesForTest;

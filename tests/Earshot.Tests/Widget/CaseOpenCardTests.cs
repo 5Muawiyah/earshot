@@ -254,7 +254,10 @@ public sealed class CaseOpenCardTests
             Application.DoEvents();
 
             Assert.AreEqual(1, created, "A second CaseOpened while one is already open must not create a second window.");
-            Assert.IsTrue(log.Has(LogLevel.Debug, "already open"));
+            // The card already open takes the new open in place (drawn again, its close time started over), as the presenter says; it is
+            // not a refusal, so it is not logged as one.
+            Assert.IsTrue(presenter.IsShown, "The one card is still on screen.");
+            Assert.IsFalse(log.Has(LogLevel.Debug, "already open"), "A second open of the case is not refused.");
         });
     }
 
