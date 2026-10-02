@@ -664,6 +664,32 @@ public sealed class CaseOpenCardTests
         });
     }
 
+    // A second open of the case while the card is up takes the card in place and starts its close time over (the presenter's own words).
+    [TestMethod]
+    public void ASecondOpenOfTheCaseStartsTheCloseTimeOver()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var time = new Streaming.TestTimeProvider();
+            (CaseOpenCardPresenter presenter, _, _, _, _) = Rig(Gate(closeSeconds: 5, displays: [CaseOpenCardDisplayChoice.All]), ThreeDisplays(), time);
+            using (presenter)
+            {
+                presenter.RequestShow(gaugeBounds: null);
+                Application.DoEvents();
+                time.Advance(TimeSpan.FromSeconds(3));
+                Assert.IsTrue(presenter.IsShown, "Sanity: 3 s into a 5 s card.");
+
+                presenter.RequestShow(gaugeBounds: null);
+                Application.DoEvents();
+                time.Advance(TimeSpan.FromSeconds(3));
+                Assert.IsTrue(presenter.IsShown, "6 s after the first open but 3 s after the second: the close time started over.");
+
+                time.Advance(TimeSpan.FromSeconds(2));
+                Assert.IsFalse(presenter.IsShown, "5 s after the second open it closes.");
+            }
+        });
+    }
+
     [TestMethod]
     public void UntilTheCaseClosesItStaysPastEveryCloseTimeAndClosesWhenTheCaseCloses()
     {
