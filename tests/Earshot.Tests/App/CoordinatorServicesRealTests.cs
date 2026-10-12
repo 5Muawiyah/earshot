@@ -80,4 +80,15 @@ public sealed class CoordinatorServicesRealTests
         hints.Source = () => DeviceHint.LidClosed;
         Assert.AreEqual(DeviceHint.LidClosed, hints.Read());
     }
+
+    // "Signed in and active": a session that is not WTSActive (disconnected, or a user switched away from) has nobody at its screen,
+    // so it counts as locked whatever its lock flag says. WTSActive is 0, WTSDisconnected 4.
+    // https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ne-wtsapi32-wts_connectstate_class
+    [TestMethod]
+    public void OnlyAnActiveUnlockedSessionReadsUnlocked()
+    {
+        Assert.IsFalse(WtsSession.FromLevel1(sessionState: 0, sessionFlags: 1).Locked);
+        Assert.IsTrue(WtsSession.FromLevel1(sessionState: 0, sessionFlags: 0).Locked);
+        Assert.IsTrue(WtsSession.FromLevel1(sessionState: 4, sessionFlags: 1).Locked, "A disconnected session is nobody's at the screen.");
+    }
 }

@@ -17,6 +17,7 @@ internal static class WtsSession
     private const int SessionInfoEx = 25;
     private const int LockFlag = 0;
     private const int UnlockFlag = 1;
+    private const int WtsActive = 0;
 
     // WINSTATIONNAME_LENGTH 32, USERNAME_LENGTH 20 and DOMAIN_LENGTH 17 in wtsapi32.h, each plus the terminating null.
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -84,16 +85,23 @@ internal static class WtsSession
                 return new Reading(null, 0, info.Level, "WTSINFOEXW level (the code is the level, 1 expected)");
             }
 
-            return info.Data.SessionFlags switch
-            {
-                LockFlag => new Reading(true, info.Data.SessionFlags, 0, ""),
-                UnlockFlag => new Reading(false, info.Data.SessionFlags, 0, ""),
-                _ => new Reading(null, info.Data.SessionFlags, 0, "SessionFlags is not a documented lock value"),
-            };
+            return FromLevel1(info.Data.SessionState, info.Data.SessionFlags);
         }
         finally
         {
             WTSFreeMemory(buffer);
         }
     }
+
+    // What the level 1 structure's state and flags say. A session that is not WTSActive (0) has nobody at its screen (it is
+    // disconnected, or a user switched away from it), so it counts as locked whatever its lock flag says; the state is the code.
+    // https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ne-wtsapi32-wts_connectstate_class
+    internal static Reading FromLevel1(int sessionState, int sessionFlags) => sessionState != WtsActive
+        ? new Reading(true, sessionFlags, (uint)sessionState, "SessionState is not WTSActive (the code is the state)")
+        : sessionFlags switch
+    {
+        LockFlag => new Reading(true, sessionFlags, 0, ""),
+        UnlockFlag => new Reading(false, sessionFlags, 0, ""),
+        _ => new Reading(null, sessionFlags, 0, "SessionFlags is not a documented lock value"),
+    };
 }
