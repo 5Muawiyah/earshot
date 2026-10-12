@@ -84,6 +84,16 @@ public sealed class WidgetCardScrollTests
             using ScrollPage page = ScrollPage.Open(LargeWorkArea);
             int bottom = page.Card.Bounds.Bottom;
             page.OpenSettings(capped: false);
+
+            // Windows cuts a window taller than the screen to the screen, so a page that fits the work area but not this screen
+            // cannot show its full height here; that is the screen the tests run on, not the card.
+            // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.systeminformation.maxwindowtracksize
+            if (page.Card.CurrentSettingsLayout!.Frame.Height > SystemInformation.MaxWindowTrackSize.Height)
+            {
+                Assert.Inconclusive("The settings page is " + page.Card.CurrentSettingsLayout.Frame.Height + " px tall and this screen allows a window of " +
+                    SystemInformation.MaxWindowTrackSize.Height + " px at most, so a page that fits cannot be shown whole here.");
+            }
+
             int[] before = page.Card.CurrentControls().Select(c => c.Bounds.Y).ToArray();
 
             Wheel(page.Card, -120 * 10);

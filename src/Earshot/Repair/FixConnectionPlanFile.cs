@@ -50,7 +50,8 @@ internal sealed class FixPlanFiles : IFixPlanFiles
         return new FixPlanFileInfo(path, Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
-    public void Delete(FixPlanFileInfo info)
+    // A plan left behind is only a file nothing reads without its hash, so a failure is a step with its code, not a stop.
+    public StepOutcome Delete(FixPlanFileInfo info)
     {
         ArgumentNullException.ThrowIfNull(info);
         string? folder = Path.GetDirectoryName(info.Path);
@@ -60,14 +61,16 @@ internal sealed class FixPlanFiles : IFixPlanFiles
             {
                 Directory.Delete(folder, recursive: true);
             }
+
+            return new StepOutcome("fix-plan-delete", true, 0, "ERROR_SUCCESS", null);
         }
-        catch (IOException)
+        catch (IOException ex)
         {
-            // A plan left behind is only a file nothing reads without its hash.
+            return StepOutcomes.FromHResult("fix-plan-delete", ex.HResult, ex.GetType().Name);
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
-            // Same.
+            return StepOutcomes.FromHResult("fix-plan-delete", ex.HResult, ex.GetType().Name);
         }
     }
 

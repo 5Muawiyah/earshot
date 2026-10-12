@@ -695,6 +695,10 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 // One administrator prompt, asked for by the click. The result comes back on a card of its own.
                 _host?.RepairEarshot();
                 break;
+            case SetupAction.FixConnection:
+                // Fix connection asks for its own OKs on screens of its own; the card only starts it.
+                _host?.FixConnection();
+                break;
             case SetupAction.ToggleAutoCheck:
                 if (_host is not null)
                 {

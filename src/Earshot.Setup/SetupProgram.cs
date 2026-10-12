@@ -3,7 +3,7 @@ using System.Security.Principal;
 
 namespace Earshot.Setup;
 
-internal sealed class WindowsSetupHost : ISetupHost
+internal sealed partial class WindowsSetupHost : ISetupHost
 {
     public bool IsElevated
     {
@@ -19,6 +19,73 @@ internal sealed class WindowsSetupHost : ISetupHost
 
     public string InstalledExe =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Earshot", "Earshot.exe");
+
+    public string? OwnUserSid
+    {
+        get
+        {
+            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+            return identity.User?.Value;
+        }
+    }
+
+    // The account signed in to this session: its user and domain names from the session, turned into a SID.
+    // https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsquerysessioninformationw
+    public string? SignedInUserSid
+    {
+        get
+        {
+            string? user = SessionText(WtsUserName);
+            string? domain = SessionText(WtsDomainName);
+            if (string.IsNullOrEmpty(user) || domain is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return ((SecurityIdentifier)new NTAccount(domain, user).Translate(typeof(SecurityIdentifier))).Value;
+            }
+            catch (SystemException ex)
+            {
+                SignedInUserProblem = "The signed-in account could not be read: " + ex.GetType().Name + " (HRESULT 0x" +
+                    ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ").";
+                return null;
+            }
+        }
+    }
+
+    public string SignedInUserProblem { get; private set; } = "";
+
+    private const int WtsUserName = 5;
+    private const int WtsDomainName = 7;
+    private const uint WtsCurrentSession = 0xFFFFFFFF;
+
+    [LibraryImport("wtsapi32.dll", EntryPoint = "WTSQuerySessionInformationW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool WTSQuerySessionInformation(nint server, uint sessionId, int infoClass, out nint buffer, out uint bytes);
+
+    [LibraryImport("wtsapi32.dll")]
+    private static partial void WTSFreeMemory(nint memory);
+
+    private string? SessionText(int infoClass)
+    {
+        if (!WTSQuerySessionInformation(0, WtsCurrentSession, infoClass, out nint buffer, out _))
+        {
+            SignedInUserProblem = "WTSQuerySessionInformation (" + infoClass.ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                ") failed with error " + Marshal.GetLastPInvokeError().ToString(System.Globalization.CultureInfo.InvariantCulture) + ".";
+            return null;
+        }
+
+        try
+        {
+            return Marshal.PtrToStringUni(buffer);
+        }
+        finally
+        {
+            WTSFreeMemory(buffer);
+        }
+    }
 }
 
 internal static partial class SetupProgram

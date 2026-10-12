@@ -13,7 +13,7 @@ internal interface IFixPlanFiles
 {
     FixPlanFileInfo Write(FixPlan plan);
 
-    void Delete(FixPlanFileInfo info);
+    StepOutcome Delete(FixPlanFileInfo info);
 }
 
 // Starts the elevated mode with one administrator prompt and waits for it. It takes the consent of the first question, so no

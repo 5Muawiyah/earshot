@@ -16,6 +16,9 @@ internal static class SetupText
     public const string NotElevatedInstruction = "Setup needs administrator rights";
     public const string NotElevatedContent = "Run Setup again and choose Yes when Windows asks.";
 
+    public const string NotThePersonInstruction = "Setup must run as the person signed in";
+    public const string NotThePersonContent = "Another account answered the administrator prompt. Sign in as an administrator and run Setup again, or use the one-line installer from the README.";
+
     public const string StagingInstruction = "Setup could not make a safe working folder";
 
     public const string UnpackInstruction = "Setup could not unpack Earshot";
@@ -53,8 +56,10 @@ internal static class SetupText
     public const string InstalledAppsNote = "Earshot is also listed under Settings, Apps, Installed apps.";
 
     public const string InstalledInstruction = "Earshot is installed";
-    public const string InstalledContentStarted = "Earshot is starting. Its icon appears by the clock.";
-    public const string InstalledContentNotStarted = "Open Earshot from the Start menu to begin.";
+    public const string FixDeclinedInstruction = "Fix connection stopped at your answer";
+
+    public const string NothingChanged = "Nothing was changed.";
+    public const string InstalledContent = "Open Earshot from the Start menu.";
     public const string RepairedInstruction = "Earshot is repaired";
     public const string RepairedContent = "Nothing else needs doing.";
     public const string UninstalledInstruction = "Earshot is removed";

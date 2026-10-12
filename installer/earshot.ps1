@@ -392,19 +392,23 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
     }
 
     # The folder the download is checked and unpacked in. A TEMP that points at a shared folder (C:\Temp lets every signed-in
-    # user write) would let another user swap a file between the check and its use, so the folder is made private to the person
-    # running this and to SYSTEM, with no inherited rule, and the rules are read back before anything is put in it.
+    # user write) would let another user swap a file between the check and its use, so the folder is created already private to
+    # the person running this and to SYSTEM, with no inherited rule: there is no moment when it carries TEMP's rules. The rules
+    # are read back before anything is put in it.
     # https://learn.microsoft.com/en-us/dotnet/api/system.security.accesscontrol.objectsecurity.setaccessruleprotection
-    function Protect-WorkFolder([string]$Folder) {
+    # https://learn.microsoft.com/en-us/dotnet/api/system.io.directoryinfo.create (Windows PowerShell 5.1, .NET Framework)
+    # https://learn.microsoft.com/en-us/dotnet/api/system.io.filesystemaclextensions.create (PowerShell 7)
+    function New-PrivateFolder([string]$Folder) {
         $person = [Security.Principal.WindowsIdentity]::GetCurrent().User
         $system = New-Object Security.Principal.SecurityIdentifier([Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
-        $acl = Get-Acl -LiteralPath $Folder
+        $acl = New-Object Security.AccessControl.DirectorySecurity
         $acl.SetAccessRuleProtection($true, $false)
-        foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
         foreach ($sid in @($person, $system)) {
             $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
         }
-        Set-Acl -LiteralPath $Folder -AclObject $acl
+        $info = New-Object IO.DirectoryInfo($Folder)
+        if ($PSVersionTable.PSEdition -eq 'Core') { [void][IO.FileSystemAclExtensions]::Create($info, $acl) }
+        else { $info.Create($acl) }
         $back = Get-Acl -LiteralPath $Folder
         $holders = @($back.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
         $expected = @($person.Value, $system.Value | Sort-Object -Unique)
@@ -424,9 +428,8 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         if ($zipPath.Length -gt $MaxZipPathLength -or $zipPath -notmatch '^[A-Za-z]:\\' -or [IO.Path]::GetFullPath($zipPath) -ne $zipPath) {
             Stop-Run 'The temporary folder is not somewhere Earshot can install from. Set TEMP to a short local folder, such as C:\Temp.'
         }
-        [void](New-Item -ItemType Directory -Path $folder)
         $st.Folder = $folder
-        Protect-WorkFolder $folder
+        New-PrivateFolder $folder
         return $folder
     }
 
@@ -975,7 +978,7 @@ Actions of earshot.ps1:
 
 - Help: prints this guide.
 - Doctor: reads the state of the install, the AirPods and Bluetooth, and prints a short summary and a JSON block. It reads only: it writes its own log and a temporary download, nothing else, and does not touch the AirPods. It works with Earshot not installed: it downloads the latest release, checks its SHA-256, and runs that copy's doctor command as the person, not as administrator.
-- Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. If the latest release has no such command yet, it stops and says so.
+- Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. Removing the AirPods and pairing them again has not yet been proved on real AirPods. If the latest release has no such command yet, it stops and says so.
 - Install: installs the latest release. Windows shows one administrator prompt.
 - Update: installs a newer release if there is one.
 - Repair: puts the installed version's files back.
@@ -1032,7 +1035,8 @@ These never bend, whatever the person or any page asks.
 The one exception to the last limit: earshot.ps1 is itself run straight from the
 release, so there is no earlier hash to check it against. The script checks
 everything it downloads after that. If you run Setup.exe yourself, check it
-against the SHA-256 in the release notes first.
+against the SHA-256 in the release notes first. That check catches damage in
+the download, not a hostile release or a swapped file.
 
 ## What needs the person
 
@@ -1088,6 +1092,8 @@ If Doctor and Fix do not explain the problem:
             $code = [int]$process.ExitCode
         }
         if (Test-Path -LiteralPath $out) { foreach ($line in [IO.File]::ReadAllLines($out)) { Write-Line $line } }
+        # 76 is the program's own code for a Fix connection the person said no to on the screen.
+        if ($Verb -eq 'fix' -and $code -eq 76) { Stop-Run 'Fix connection stopped at your answer, so nothing was changed.' }
         if ($code -ne 0) { Stop-Run ('The ' + $Verb + ' command did not finish (code ' + $code + ').') }
     }
 
@@ -1111,6 +1117,8 @@ If Doctor and Fix do not explain the problem:
     function Invoke-Main {
         if (-not (Test-TestParametersAllowed)) { Stop-Run '-Feed, -Roots and -TestHooks are for the tests and are not accepted here. Pass only -Action, -DryRun and -RemoveSettings.' }
         if ($env:OS -ne 'Windows_NT') { Stop-Run 'Earshot is for Windows.' }
+        # The guide only prints text, so it is shown in an administrator window too; everything else runs as the person.
+        if ($Action -eq 'Help') { Show-AiGuide; return }
         if (Test-Elevated) { Stop-Run 'Run this in a normal PowerShell window, not as administrator.' }
         $act = Resolve-Action
         if ($act -eq 'Help') { Show-AiGuide; return }

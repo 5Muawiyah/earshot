@@ -33,14 +33,14 @@ public sealed class InstallerDoctorTests
 
     // The driver: hooks that stand in for the program's version and its run, the stub roots, the script called with the action.
     // verbProbe is PowerShell run inside the stand-in for the program's word, while the work folder exists; $out is the report's path in it.
-    private static InstallerRun Run(InstallerWorld world, ShellKind shell, string action, string version = "1.5.0", int exitCode = 0, bool realRun = false, string verbProbe = "")
+    private static InstallerRun Run(InstallerWorld world, ShellKind shell, string action, string version = "1.5.0", int exitCode = 0, bool realRun = false, string verbProbe = "", bool elevated = false)
     {
         var d = new StringBuilder();
         d.AppendLine("$ErrorActionPreference = 'Stop'");
         d.AppendLine("$global:NoteFile = " + InstallerWorld.Q(world.LogFile));
         d.AppendLine(InstallerWorld.NoteFunction);
         d.AppendLine("$h = @{}");
-        d.AppendLine("$h.IsElevated = { $false }");
+        d.AppendLine("$h.IsElevated = { $" + (elevated ? "true" : "false") + " }");
         d.AppendLine("$h.CanAsk = $false");
         d.AppendLine("$h.Elevate = { param($exe, $line) Note ('Elevate|' + $exe); [pscustomobject]@{ ExitCode = 0 } }");
         d.AppendLine("$h.StartTray = { param($exe) Note ('StartTray|' + $exe) }");
@@ -151,6 +151,35 @@ public sealed class InstallerDoctorTests
 
         StringAssert.StartsWith(run.Final, "Earshot: stopped. The fix command did not finish (");
         StringAssert.Contains(run.Final, "code 74");
+    }
+
+    // The guide only prints text, so an AI working in an administrator window can still read it. Doctor and Fix still refuse
+    // there: they run the program, and it must run as the person.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void HelpPrintsTheGuideInAnAdministratorWindowAndDoctorStillRefuses(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        InstallerRun help = Run(world, shell, "Help", elevated: true);
+        Assert.AreEqual("Earshot: done.", help.Final, help.Describe());
+
+        using var other = new InstallerWorld();
+        InstallerRun doctor = Run(other, shell, "Doctor", elevated: true);
+        Assert.AreEqual("Earshot: stopped. Run this in a normal PowerShell window, not as administrator.", doctor.Final, doctor.Describe());
+        Assert.IsEmpty(doctor.CallsNamed("RunVerb"));
+    }
+
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void AFixThePersonSaidNoToSaysNothingWasChanged(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+
+        InstallerRun run = Run(world, shell, "Fix", exitCode: 76);
+
+        Assert.AreEqual("Earshot: stopped. Fix connection stopped at your answer, so nothing was changed.", run.Final, run.Describe());
     }
 
     // The one real run of the helper that starts the program: a harmless Windows program stands in for Earshot.exe, so the

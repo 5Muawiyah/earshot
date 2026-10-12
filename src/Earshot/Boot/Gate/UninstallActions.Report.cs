@@ -6,8 +6,8 @@ namespace Earshot.Boot.Gate;
 //   SettingsPinAirPods  the signed-in user's own settings.json pins an AirPods. The elevated run cannot read that file
 //                       safely, so the caller (which runs as the user) says it.
 //   ChosenAddress       the 12 hex characters of the AirPods the user picked on screen, for a PC where Earshot left no
-//                       record of which pair it blocked and several pairs are paired. The pick is the user's own act, so it
-//                       also counts as evidence that Earshot was set up.
+//                       record of which pair it blocked and several pairs are paired. The pick says which pair; it is not
+//                       evidence that Earshot was set up.
 internal sealed record UninstallOptions
 {
     public bool SettingsPinAirPods { get; init; }

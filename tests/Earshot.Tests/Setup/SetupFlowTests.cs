@@ -108,6 +108,47 @@ public sealed class SetupFlowTests
         Assert.IsEmpty(w.Launcher.Runs);
     }
 
+    // An administrator's own account that is not the person signed in (another administrator typed their password into the
+    // prompt) would register Earshot, its tasks and Fix connection's records for that account, not for the person. Setup stops
+    // before anything is unpacked or run.
+    [TestMethod]
+    public void SetupElevatedAsSomeoneOtherThanThePersonSignedInDoesNothingAtAll()
+    {
+        foreach ((string? own, string? signedIn) in new (string?, string?)[]
+                 {
+                     ("S-1-5-21-1000000001-1000000002-1000000003-500", FakeHost.PersonSid),
+                     (FakeHost.PersonSid, null),
+                     (null, FakeHost.PersonSid),
+                 })
+        {
+            using var w = new World();
+            w.Host.OwnUserSid = own;
+            w.Host.SignedInUserSid = signedIn;
+
+            SetupOutcome outcome = w.Run();
+
+            Assert.AreEqual(SetupExit.NotThePersonSignedIn, outcome.ExitCode, own + " / " + signedIn);
+            Assert.AreEqual(SetupText.NotThePersonInstruction, outcome.Instruction);
+            Assert.AreEqual(0, w.Payload.Opens);
+            Assert.IsEmpty(w.Acl.Created);
+            Assert.IsEmpty(w.Launcher.Runs);
+        }
+    }
+
+    [TestMethod]
+    public void AnUnreadableSignedInAccountIsRefusedWithItsRawCode()
+    {
+        using var w = new World();
+        w.Host.SignedInUserSid = null;
+        w.Host.SignedInUserProblem = "WTSQuerySessionInformation (5) failed with error 1168.";
+
+        SetupOutcome outcome = w.Run();
+
+        Assert.AreEqual(SetupExit.NotThePersonSignedIn, outcome.ExitCode);
+        StringAssert.Contains(outcome.Detail, SetupText.NotThePersonContent);
+        StringAssert.Contains(outcome.Detail, "error 1168");
+    }
+
     [TestMethod]
     public void AFreshInstallUnpacksInTheProtectedFolderThenRunsInstallZipWithTheCheckedValues()
     {
@@ -132,7 +173,8 @@ public sealed class SetupFlowTests
         Assert.AreEqual(UserSid, install[3]);
         Assert.AreEqual(AddressA, install[4]);
         Assert.AreEqual(ContainerA, install[5]);
-        CollectionAssert.AreEqual(new[] { w.InstalledExe }, w.Launcher.UserSessionStarts);
+        Assert.HasCount(2, w.Launcher.Runs, "Setup starts nothing after the install; the person opens Earshot from the Start menu.");
+        Assert.AreEqual(SetupText.InstalledContent, w.Ui.Messages.Last().Content);
         Assert.IsFalse(Directory.Exists(Path.Combine(w.StagingRoot)), "The working folder and its empty parent are gone.");
         StringAssert.Contains(w.Ui.Footer, "does not show the file is genuine", "The wording says what the check does not do.");
     }
@@ -289,6 +331,23 @@ public sealed class SetupFlowTests
 
         Assert.AreEqual(SetupExit.Done, outcome.ExitCode, outcome.Detail);
         Assert.AreEqual("fix", string.Join("|", w.Launcher.Runs[1].Args));
+    }
+
+    // A no to one of Fix connection's on-screen questions is its own exit code, so Setup does not report it as a fix that
+    // worked or as a failure.
+    [TestMethod]
+    public void AFixConnectionThePersonDeclinedSaysNothingWasChanged()
+    {
+        using var w = new World();
+        w.Launcher.ValuesJson = Values("usable", "1.5.0");
+        w.Ui.Choose = _ => SetupAction.FixConnection;
+        w.Launcher.Handler = (_, args) => new Earshot.Setup.LaunchResult(true, args[0] == "fix" ? Earshot.ExitCodes.Declined : 0, "");
+
+        SetupOutcome outcome = w.Run();
+
+        Assert.AreEqual(SetupExit.Cancelled, outcome.ExitCode, outcome.Detail);
+        Assert.AreEqual("Nothing was changed.", outcome.Detail);
+        Assert.AreEqual(MessageKind.Information, w.Ui.Messages.Last().Kind);
     }
 
     [TestMethod]

@@ -10,10 +10,6 @@ internal interface IProcessLauncher
     // reason when it could not be started or did not end in time.
     LaunchResult RunAndWait(string exePath, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout);
 
-    // Asks Explorer to open a program, which starts it in the signed-in user's own session and not elevated, and does not
-    // wait. That Explorer hands an opened path to the running shell is how it behaves, not something Windows documents, so
-    // the result only decides what the last message says; nothing depends on it.
-    LaunchResult StartInUserSession(string exePath);
 }
 
 internal readonly record struct LaunchResult(bool Started, int ExitCode, string Detail);
@@ -70,21 +66,4 @@ internal sealed class WindowsProcessLauncher : IProcessLauncher
     internal static bool IsRuntimeVariable(string name) =>
         name.StartsWith("DOTNET_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("COMPlus_", StringComparison.OrdinalIgnoreCase) ||
         name.StartsWith("COR_", StringComparison.OrdinalIgnoreCase) || name.StartsWith("CORECLR_", StringComparison.OrdinalIgnoreCase);
-
-    public LaunchResult StartInUserSession(string exePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(exePath);
-        string explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
-        var start = new ProcessStartInfo(explorer) { UseShellExecute = false };
-        start.ArgumentList.Add(exePath);
-        try
-        {
-            using Process? process = Process.Start(start);
-            return new LaunchResult(process is not null, 0, process is null ? "Explorer did not start." : "");
-        }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
-        {
-            return new LaunchResult(false, -1, ex.Message);
-        }
-    }
 }

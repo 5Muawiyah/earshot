@@ -210,6 +210,9 @@ internal interface IWidgetCardHost
 
     void RepairEarshot();
 
+    // Starts Fix connection, which removes and pairs the AirPods again after two OKs of its own.
+    void FixConnection();
+
     void SwitchToInstalled();
 
     // Raised, on any thread, whenever the update flow moves.

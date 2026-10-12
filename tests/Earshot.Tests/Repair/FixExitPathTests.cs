@@ -78,6 +78,7 @@ public sealed class FixExitPathTests
         FixResult result = await RunAsync(rig);
 
         Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+        Assert.AreEqual(Earshot.ExitCodes.Declined, result.ExitCode, "A no on the screen is not reported as a fix that worked.");
         Expect.Same(rig.GateFake.Calls, "block");
         Assert.IsEmpty(rig.Pairing.Calls, "Nothing was unpaired or scanned.");
         Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
@@ -105,10 +106,99 @@ public sealed class FixExitPathTests
         FixResult result = await RunAsync(rig);
 
         Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+        Assert.AreEqual(Earshot.ExitCodes.Declined, result.ExitCode);
         Assert.IsEmpty(rig.GateFake.Calls);
         Assert.IsEmpty(rig.Elevator.Calls);
         Assert.IsEmpty(rig.Gate.Nodes.Calls);
         Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
+    }
+
+    // A plan file, a marker or a desktop handle that could not be let go is not an error the person must act on, but it is
+    // recorded with its raw code rather than dropped.
+    [TestMethod]
+    public async Task APlanFileThatCouldNotBeRemovedIsAStepAndALogLine()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Prompter.SayCancel();
+        Func<string, string, ElevatedRun> applied = rig.Elevator.Result;
+        FileStream? held = null;
+        rig.Elevator.Result = (path, sha) =>
+        {
+            ElevatedRun run = applied(path, sha);
+            held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return run;
+        };
+
+        try
+        {
+            FixResult result = await RunAsync(rig);
+
+            StepOutcome deleted = result.Steps.Single(s => s.Step == "fix-plan-delete");
+            Assert.IsFalse(deleted.Ok);
+            Assert.AreNotEqual(0, deleted.Code);
+            Assert.IsTrue(rig.Log.Has(LogLevel.Warn, "fix-plan-delete"), string.Join("; ", rig.Log.Entries.Select(e => e.Message)));
+        }
+        finally
+        {
+            held?.Dispose();
+        }
+    }
+
+    [TestMethod]
+    public async Task AMarkerThatCouldNotBeClearedIsSaidAndLogged()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Prompter.SayCancel();
+        Func<string, string, ElevatedRun> applied = rig.Elevator.Result;
+        FileStream? held = null;
+        rig.Elevator.Result = (path, sha) =>
+        {
+            ElevatedRun run = applied(path, sha);
+            held = new FileStream(rig.RecoveryFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            return run;
+        };
+
+        try
+        {
+            FixResult result = await RunAsync(rig);
+
+            Assert.IsFalse(result.Steps.Single(s => s.Step == "fix-marker-clear").Ok);
+            Assert.IsTrue(result.Lines.Any(l => l.Contains("could not be removed", StringComparison.Ordinal)), string.Join("; ", result.Lines));
+            Assert.IsTrue(rig.Log.Has(LogLevel.Warn, "fix-marker-clear"));
+        }
+        finally
+        {
+            held?.Dispose();
+        }
+    }
+
+    [TestMethod]
+    public async Task ADesktopHandleThatDidNotCloseIsLogged()
+    {
+        using FixRig rig = Arranged();
+        rig.Desktop = new FakeDesktop { Reading = FakeDesktop.Interactive().Reading with { CloseError = 6 } };
+        rig.Prompter.SayCancel();
+
+        await RunAsync(rig);
+
+        Assert.IsTrue(rig.Log.Has(LogLevel.Warn, "CloseDesktop failed with Win32 error 6"), string.Join("; ", rig.Log.Entries.Select(e => e.Message)));
+    }
+
+    // The administrator run may have started and changed the nodes before the wait for it ends in an exception, so the run
+    // counts as having touched them and the closing block follows.
+    [TestMethod]
+    public async Task AnAdministratorRunWhoseWaitEndsInAnExceptionEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Elevator.Result = (_, _) => throw new OperationCanceledException();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        Expect.Same(rig.GateFake.Calls, "block");
     }
 
     [TestMethod]
@@ -233,6 +323,18 @@ public sealed class FixExitPathTests
 
         Expect.Same(rig.GateFake.Calls, "adopt:" + FixRig.NewAirPodsAddress, "block");
         Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        AssertTheNewPairIsReportedUnprotected(result);
+    }
+
+    // The closing block after a failed adoption goes to the pin Earshot still holds, which is the pair that was just removed,
+    // so it cannot protect the new pair. The result must say the new pair is not protected and must never claim the AirPods
+    // were blocked.
+    private static void AssertTheNewPairIsReportedUnprotected(FixResult result)
+    {
+        string all = string.Join(" | ", result.Lines);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("new pair is not protected", StringComparison.OrdinalIgnoreCase)), all);
+        Assert.IsFalse(result.Lines.Any(l => l.Contains("blocked the AirPods again", StringComparison.OrdinalIgnoreCase)
+            || l.Contains("blocking the AirPods again", StringComparison.OrdinalIgnoreCase)), all);
     }
 
     [TestMethod]
@@ -253,6 +355,7 @@ public sealed class FixExitPathTests
 
         Expect.Same(rig.GateFake.Calls, "adopt:" + FixRig.NewAirPodsAddress, "block");
         Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        AssertTheNewPairIsReportedUnprotected(result);
     }
 
     [TestMethod]

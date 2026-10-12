@@ -214,6 +214,10 @@ internal sealed class FakeCardHost : IWidgetCardHost
 
     public void RepairEarshot() => RepairCalls++;
 
+    public int FixConnectionCalls { get; private set; }
+
+    public void FixConnection() => FixConnectionCalls++;
+
     public void SwitchToInstalled() => SwitchCalls++;
 }
 

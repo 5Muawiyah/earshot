@@ -262,7 +262,7 @@ internal sealed class FixRig : IDisposable
 
         Records = new StoreFixRecords(Gate.Store, () => File.Exists(SettingsFile));
         PlanFiles = new FixPlanFiles(Path.Combine(_temp.Path, "fix"));
-        Recovery = new FixRecovery(Path.Combine(_temp.Path, "fix-window.json"), Gate.Time, _ => true);
+        Recovery = new FixRecovery(RecoveryFile, Gate.Time, _ => true);
         Desktop = FakeDesktop.Interactive();
         Output = new StringWriter();
     }
@@ -294,6 +294,8 @@ internal sealed class FixRig : IDisposable
     public CapturingLog Log { get; } = new();
 
     public string SettingsFile => Path.Combine(_temp.Path, "settings.json");
+
+    public string RecoveryFile => Path.Combine(_temp.Path, "fix-window.json");
 
     public StubLeftovers Leftovers { get; } = new();
 

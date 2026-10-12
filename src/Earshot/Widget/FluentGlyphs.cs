@@ -24,6 +24,7 @@ internal static class FluentGlyphs
     public const char ReadTime = '\uE823';
     public const char Bolt = '\uE945';
     public const char BluetoothOff = '\uE702';
+    public const char Bluetooth = '\uE702';
     public const char WhatsNew = '\uE946';
     public const char OpenExternal = '\uE8A7';
     public const char ChevronLeft = '\uE76B';

@@ -37,6 +37,7 @@ internal sealed record FixResult(FixOutcome Outcome, IReadOnlyList<string> Lines
     {
         FixOutcome.Usage => Earshot.ExitCodes.Usage,
         FixOutcome.PlanOnly => Earshot.ExitCodes.PlanOnly,
+        FixOutcome.Declined => Earshot.ExitCodes.Declined,
         FixOutcome.Failed => Earshot.ExitCodes.Software,
         _ => Earshot.ExitCodes.Ok,
     };
@@ -91,7 +92,7 @@ internal static class FixConnection
         FixPlan plan = planned.Plan;
         host.Output.WriteLine(FixPlanText.Describe(plan));
 
-        var dialog = new FixConsentDialog(host.Prompter, host.Desktop);
+        var dialog = new FixConsentDialog(host.Prompter, host.Desktop, host.Log);
         if (!dialog.CanAsk())
         {
             host.Output.WriteLine(PlanOnlyNote);
@@ -110,6 +111,10 @@ internal static class FixConnection
         public bool Touched { get; set; }
 
         public bool Adopted { get; set; }
+
+        // A new pair was paired and offered for adoption, and the adoption has not succeeded. The closing block can only reach
+        // the pin Earshot still holds, the pair that was removed, so it must not be reported as protecting anything.
+        public bool NewPairUnprotected { get; set; }
 
         public bool Installed { get; init; }
     }
@@ -163,18 +168,23 @@ internal static class FixConnection
             FixPlanFileInfo file = host.PlanFiles.Write(work);
             steps.Add(host.Recovery.Begin("restoring"));
             ElevatedRun run;
+
+            // Counted as touched before the wait: the administrator run may change the nodes and then the wait end in an
+            // exception, and the closing block must still follow. Only a run Windows never started clears it again.
+            state.Touched = true;
             try
             {
                 run = await host.Elevator.ApplyAsync(first.Consent, file.Path, file.Sha256, ct).ConfigureAwait(false);
             }
             finally
             {
-                host.PlanFiles.Delete(file);
+                Record(host, steps, host.PlanFiles.Delete(file));
             }
 
             steps.Add(run.Step);
             if (run.ExitCode is not int exit)
             {
+                state.Touched = false;
                 lines.Add("Windows did not start the administrator run: " + run.Step.CodeName + " (" + run.Step.Code.ToString(CultureInfo.InvariantCulture) + "). Nothing was changed.");
                 return FixOutcome.Failed;
             }
@@ -228,12 +238,14 @@ internal static class FixConnection
             }
             else
             {
+                state.NewPairUnprotected = true;
                 FixGateResult adoption = await host.Gate.AdoptDeviceAsync(candidate.Address, ct).ConfigureAwait(false);
                 steps.AddRange(adoption.Steps);
                 state.Adopted = adoption.Ok;
+                state.NewPairUnprotected = !adoption.Ok;
                 lines.Add(adoption.Ok
                     ? "Earshot now protects the new pair, and it is blocked at rest."
-                    : "Could not adopt the new pair: " + adoption.Summary + (adoption.ExitCode is int code ? " (" + code.ToString(CultureInfo.InvariantCulture) + ")" : "") + ". Earshot is blocking the AirPods again.");
+                    : "Could not adopt the new pair: " + adoption.Summary + (adoption.ExitCode is int code ? " (" + code.ToString(CultureInfo.InvariantCulture) + ")" : "") + ".");
             }
         }
 
@@ -243,11 +255,39 @@ internal static class FixConnection
     // The block that ends every path that changed something. An adoption is a pin and a block in one gate run, so it needs no
     // second one. The block is sent with no cancellation: a cancelled run still ends protected. False when the block was
     // needed and did not happen, which leaves the marker for the tray's next start.
+    internal const string NewPairUnprotectedLine = "The new pair is not protected yet. Run Fix connection again.";
+
+    // The marker says a run is under way. One that stays makes the tray's next start block once more, which is safe, so it is
+    // said and logged rather than treated as a failure.
+    private static void ClearMarker(FixHost host, List<string> lines, List<StepOutcome> steps)
+    {
+        StepOutcome cleared = host.Recovery.Clear();
+        if (Record(host, steps, cleared))
+        {
+            return;
+        }
+
+        lines.Add("The record of this run could not be removed (code 0x" + cleared.Code.ToString("X8", CultureInfo.InvariantCulture) +
+                  "). Earshot blocks the AirPods once more the next time it starts.");
+    }
+
+    // Adds the step; a failed one also goes to the log with its raw code.
+    private static bool Record(FixHost host, List<StepOutcome> steps, StepOutcome step)
+    {
+        steps.Add(step);
+        if (!step.Ok)
+        {
+            host.Log.Warn("fix: " + step.Step + " failed with 0x" + step.Code.ToString("X8", CultureInfo.InvariantCulture) + " (" + step.CodeName + ").");
+        }
+
+        return step.Ok;
+    }
+
     private static async Task<bool> EndAsync(FixHost host, RunState state, List<string> lines, List<StepOutcome> steps)
     {
         if (!state.Touched || state.Adopted || !state.Installed)
         {
-            steps.Add(host.Recovery.Clear());
+            ClearMarker(host, lines, steps);
             return true;
         }
 
@@ -257,9 +297,14 @@ internal static class FixConnection
             steps.AddRange(block.Steps);
             if (block.Ok)
             {
-                lines.Add("Earshot blocked the AirPods again.");
-                steps.Add(host.Recovery.Clear());
+                lines.Add(state.NewPairUnprotected ? NewPairUnprotectedLine : "Earshot blocked the AirPods again.");
+                ClearMarker(host, lines, steps);
                 return true;
+            }
+
+            if (state.NewPairUnprotected)
+            {
+                lines.Add(NewPairUnprotectedLine);
             }
 
             lines.Add("Could not block the AirPods again: " + block.Summary + ". Earshot tries again the next time it starts.");

@@ -129,8 +129,6 @@ internal sealed class FakeLauncher : IProcessLauncher
 {
     public List<(string Exe, string[] Args)> Runs { get; } = [];
 
-    public List<string> UserSessionStarts { get; } = [];
-
     public Func<string, string[], LaunchResult>? Handler { get; set; }
 
     // What "probe setup-values" writes.
@@ -147,12 +145,6 @@ internal sealed class FakeLauncher : IProcessLauncher
         }
 
         return Handler?.Invoke(exePath, args) ?? new LaunchResult(true, 0, "");
-    }
-
-    public LaunchResult StartInUserSession(string exePath)
-    {
-        UserSessionStarts.Add(exePath);
-        return new LaunchResult(true, 0, "");
     }
 }
 
@@ -202,7 +194,15 @@ internal sealed class ScriptedUi : ISetupUi
 
 internal sealed class FakeHost(string machineFolder, string installedExe, bool elevated = true) : ISetupHost
 {
+    public const string PersonSid = "S-1-5-21-1000000001-1000000002-1000000003-1001";
+
     public bool IsElevated => elevated;
+
+    public string? OwnUserSid { get; set; } = PersonSid;
+
+    public string? SignedInUserSid { get; set; } = PersonSid;
+
+    public string SignedInUserProblem { get; set; } = "";
 
     public string MachineFolder => machineFolder;
 
