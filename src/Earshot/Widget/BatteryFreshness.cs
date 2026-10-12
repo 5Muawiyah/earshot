@@ -136,9 +136,12 @@ internal static class BatteryFreshness
             caseReading = PartReading.Unknown;
         }
 
-        ShownPart l = Part(left, ChargeComponent.Left, saved, now);
-        ShownPart r = Part(right, ChargeComponent.Right, saved, now);
-        ShownPart c = Part(caseReading, ChargeComponent.Case, saved, now);
+        // An estimate is for a pair that is away from this PC, where nothing is heard of it and it may have been charging since.
+        // With the AirPods on this PC the last reading is shown as it was read.
+        bool estimate = !onThisPc;
+        ShownPart l = Part(left, ChargeComponent.Left, saved, now, estimate);
+        ShownPart r = Part(right, ChargeComponent.Right, saved, now, estimate);
+        ShownPart c = Part(caseReading, ChargeComponent.Case, saved, now, estimate);
 
         bool freshBud = l.Fresh || r.Fresh;
         bool windowsShown = !freshBud && IsHeadsetCurrent(headset, onThisPc, now);
@@ -152,7 +155,7 @@ internal static class BatteryFreshness
     // One part: this run's reading while it is fresh; otherwise the newer of this run's reading and the saved one, as a
     // last reading, or grown as an estimate when the part was charging and a rate is known. A saved reading is never live:
     // it was not heard by this run.
-    private static ShownPart Part(PartReading live, ChargeComponent component, SavedBattery? saved, DateTimeOffset now)
+    private static ShownPart Part(PartReading live, ChargeComponent component, SavedBattery? saved, DateTimeOffset now, bool allowEstimate)
     {
         bool liveHas = live.Percent is not null && live.ReadAt is not null;
         if (liveHas && IsFresh(live, now))
@@ -182,6 +185,11 @@ internal static class BatteryFreshness
         }
 
         percent = Math.Clamp(percent, 0, 100);
+        if (!allowEstimate)
+        {
+            return new ShownPart(percent, charging, ReadingKind.Last, readAt);
+        }
+
         double? rate = saved is { Model: ushort model }
             ? ChargeRates.For(saved.Book, model, ChargeRates.PartOf(component), saved.UseAppleBudSeed)
             : null;

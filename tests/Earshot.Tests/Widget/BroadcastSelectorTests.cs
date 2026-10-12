@@ -49,9 +49,9 @@ public sealed class BroadcastSelectorTests
         Burst(d, rssi, seconds, SetB, SetBOtherBud, colour, caseNibble: 0x2, pairHigh: 0x3, pairLow: 0x1);
 
     // The owner's pair, linked by a three second burst at a strong signal.
-    private static SelectorDriver Linked(byte colour = WidgetFixtures.Colour, sbyte rssi = -55)
+    private static SelectorDriver Linked(byte colour = WidgetFixtures.Colour, sbyte rssi = -55, bool? refind = true)
     {
-        var d = new SelectorDriver();
+        var d = new SelectorDriver(refind: refind);
         Burst(d, rssi, 3, colour: colour);
         Assert.IsTrue(d.Selector.IsLinked, "Sanity: the burst linked the pair.");
         d.Tick(0.25);
@@ -795,9 +795,10 @@ public sealed class BroadcastSelectorTests
     // The owner's pair linked by a case open (right 70, left 40, case 90), with its saved readings handed to the selector,
     // and the given time of silence after it.
     private static SelectorDriver LinkedThenSilent(
-        double silenceSeconds, int left = 40, int right = 70, bool budsCharging = false, byte colour = WidgetFixtures.Colour)
+        double silenceSeconds, int left = 40, int right = 70, bool budsCharging = false, byte colour = WidgetFixtures.Colour,
+        bool? refind = true)
     {
-        SelectorDriver d = Linked(colour);
+        SelectorDriver d = Linked(colour, refind: refind);
         LastReadingBook book = BookOf(d.Now, left, right, budsCharging: budsCharging);
         d.Selector.SavedBook = () => book;
         d.Tick(silenceSeconds);
@@ -842,6 +843,47 @@ public sealed class BroadcastSelectorTests
         Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now));
         Assert.AreEqual(WidgetFixtures.Colour, d.Selector.HeldColour);
         Assert.AreEqual(BroadcastClass.Chosen, d.Send(SetANewAddress, Bud(true, caseNibble: 0x0F), -60).Class, "And it goes on being followed.");
+    }
+
+    // A pair of the same model and colour, alone near the PC, whose levels the last reading can lead to cannot be told from the
+    // owner's by anything the rule has: fifty minutes can take 100 down by 30 (10 and 25 an hour), and 70 is within that. So
+    // the rule ships off, and the default never finds a pair again.
+    [TestMethod]
+    public void ANearbyPairOfTheSameModelAndColourIsNotTakenForTheOwnersByDefault()
+    {
+        Assert.IsFalse(BroadcastRules.RefindEnabled, "The rule ships off.");
+        Assert.IsFalse(new BroadcastSelector().RefindEnabled, "A selector made with no setting has it off.");
+
+        SelectorDriver ruleOn = LinkedThenSilent(50 * 60, left: 100, right: 100);
+        Assert.IsTrue(Worn(ruleOn, 0x7, 0x7, -60).Any(o => o.Refound), "With the rule on, a stranger's 70 and 70 passes for a 100 and 100 pair.");
+
+        SelectorDriver byDefault = LinkedThenSilent(50 * 60, left: 100, right: 100, refind: null);
+        List<SelectionObservation> seen = Worn(byDefault, 0x7, 0x7, -60);
+
+        Assert.IsFalse(seen.Any(o => o.Refound || o.Class == BroadcastClass.Chosen || o.Followed));
+        Assert.IsFalse(seen.Any(o => o.RefindRefused is not null), "Nor is it weighed.");
+        Assert.IsFalse(byDefault.Selector.IsLinked);
+        Assert.IsNotNull(byDefault.Selector.Memory, "The remembered link stays, so the last readings stay on show.");
+    }
+
+    [TestMethod]
+    public void WithTheDefaultNoWornPairIsFoundAgainWhateverItsLevelsOrTheTimeSinceTheLink()
+    {
+        foreach (double silence in new[] { 180.0, 30 * 60.0, 3 * 3600.0 })
+        {
+            SelectorDriver ruleOn = LinkedThenSilent(silence);
+            Assert.IsTrue(Worn(ruleOn, 0x7, 0x4, -60).Any(o => o.Refound), "Sanity, silent " + silence + " s: the rule finds the same pair when it is on.");
+
+            SelectorDriver byDefault = LinkedThenSilent(silence, refind: null);
+            List<SelectionObservation> seen = Worn(byDefault, 0x7, 0x4, -60, messages: 12, seconds: 40);
+            Assert.IsFalse(seen.Any(o => o.Refound || o.Class == BroadcastClass.Chosen), "Silent " + silence + " s.");
+            Assert.IsFalse(byDefault.Selector.IsLinked);
+            Assert.IsNotNull(byDefault.Selector.Memory);
+
+            byDefault.Tick(5);
+            Burst(byDefault, -60, 3);
+            Assert.IsTrue(byDefault.Selector.IsLinked, "A case open still links, silent " + silence + " s.");
+        }
     }
 
     [TestMethod]

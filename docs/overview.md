@@ -624,8 +624,9 @@ address, so it does not depend on the mode.
   20 to 100) from the last broadcast Earshot heard. A value older than 30
   seconds is greyed with its age, and is kept, across a restart too, until a
   newer one is heard. It is only ever of the pair you linked by opening the
-  case. A part that was charging when last read may be shown as an estimate,
-  marked `≈` with the age of the reading it grew from: it rises at a rate learned
+  case. While the AirPods are away from this PC, a part that was charging when
+  last read may be shown as an estimate, marked `≈` with the age of the reading
+  it grew from (with them on this PC the last reading is shown as it was read): it rises at a rate learned
   from your own pair's charging (none until one is learned) and stops at 100. It
   never falls, and a newer reading replaces it.
 - **The case shows only after your case has been seen once.** Until Earshot has

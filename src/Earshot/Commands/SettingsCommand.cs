@@ -11,6 +11,14 @@ internal static class SettingsCommand
 {
     internal const string Usage = "Usage: Earshot.exe settings list | get <name> | set <name> <value>";
 
+    // Whether these words can save settings. list and get only read, so their store is opened read-only: a load that finds a
+    // half-edited file would otherwise move it aside and put the backup in its place.
+    public static bool Writes(IReadOnlyList<string> args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        return args.Count > 0 && args[0] == "set";
+    }
+
     // args are the words after "settings". Returns the process exit code: 0, ExitCodes.Usage for a bad name, value or line, or
     // ExitCodes.Refused when the file belongs to a newer Earshot and nothing can be saved.
     public static int Run(IReadOnlyList<string> args, JsonSettingsStore store, TextWriter output)

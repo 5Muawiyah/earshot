@@ -151,6 +151,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private int _savedMarksVersion;
     private long _bookSequence;
 
+    // The order link memories are taken to be written in, as for the books: LinkMemoryStore drops one that arrives after a
+    // later one, so a link that was forgotten is not brought back by a write that was taken earlier and landed later.
+    private long _memorySequence;
+
     // The pinned device the paired model was last read for, so a settings change that leaves it alone reads nothing.
     private (Guid Container, string Address)? _pairedModelFor;
 
@@ -235,6 +239,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _savedMemory = _selector.Memory;
         _highWater = new EstimateHighWater(_book.Marks);
         _savedMarksVersion = _highWater.Version;
+    }
+
+    // Whether a worn pair may be found again with no case open (BroadcastRules.RefindEnabled, off by default). Set before
+    // Start; the re-find tests turn it on.
+    internal bool RefindEnabled
+    {
+        get => _selector.RefindEnabled;
+        set => _selector.RefindEnabled = value;
     }
 
     private static LinkMemoryStore? BesideTheReadings(ILastReadingStore? lastReadings, ILog log) =>
@@ -442,7 +454,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         if (memoryToSave.Due)
         {
-            _linkMemoryStore?.Save(memoryToSave.Memory);
+            _linkMemoryStore?.Save(memoryToSave.Memory, memoryToSave.Sequence);
         }
 
         if (sourceToStop is not null)
@@ -1070,7 +1082,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         if (memoryToSave.Due)
         {
-            _linkMemoryStore?.Save(memoryToSave.Memory);
+            _linkMemoryStore?.Save(memoryToSave.Memory, memoryToSave.Sequence);
         }
 
         foreach (StepOutcome step in read.Steps.Where(s => !s.Ok))
@@ -1328,7 +1340,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         if (memoryToSave.Due)
         {
-            _linkMemoryStore?.Save(memoryToSave.Memory);
+            _linkMemoryStore?.Save(memoryToSave.Memory, memoryToSave.Sequence);
         }
 
         if (toSave is not null)
@@ -1412,10 +1424,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         _savedMemory = current;
         _memorySavedAt = at;
-        return new MemorySave(true, current);
+        return new MemorySave(true, current, ++_memorySequence);
     }
 
-    private readonly record struct MemorySave(bool Due, LinkMemory? Memory);
+    private readonly record struct MemorySave(bool Due, LinkMemory? Memory, long Sequence);
 
     // The two buds of the chosen set each send on their own address and each carry the pair swapped. Both decode to
     // the same left and right under the decode table's rule; if two of them, heard within two seconds, do not, the

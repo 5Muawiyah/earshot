@@ -55,7 +55,7 @@ internal static partial class Program
 
         using (output)
         {
-            var store = new JsonSettingsStore(paths.SettingsFile, log);
+            var store = new JsonSettingsStore(paths.SettingsFile, log, readOnly: !Commands.SettingsCommand.Writes(rest));
             ctx.ExitCode = Commands.SettingsCommand.Run(rest, store, output.Writer);
         }
     }

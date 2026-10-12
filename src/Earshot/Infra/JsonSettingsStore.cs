@@ -17,6 +17,14 @@ internal enum SettingsLoadStatus
     UnusableReadOnly       // read-only store, settings.json unusable or gone with a backup left; backup or defaults in memory, nothing moved or written
 }
 
+// What ReloadIfFileChanged did: found nothing new, loaded an edit, or could not read the file yet and should be asked again.
+internal enum SettingsReload
+{
+    Unchanged,
+    Reloaded,
+    TryAgain
+}
+
 // User settings in %APPDATA%\Earshot\settings.json.
 //
 // Load:
@@ -46,6 +54,9 @@ internal enum SettingsLoadStatus
 // this run only and nothing is written. A load again (in Update or Reload) that still leaves the files
 // untouched keeps the values already in memory, including earlier changes kept for this run, rather than
 // falling back to defaults; and Update raises Changed once, with the values it ends with.
+//
+// Update also checks, before it saves, whether another program has changed settings.json since this store last wrote or read
+// it, and applies its change to that edit rather than to what memory holds, so a save never undoes an edit not yet taken up.
 //
 // A store opened read-only (probe and diag, which must change nothing) follows the same rules but
 // never saves, moves or quarantines a file. On a read-only store Update changes the values for this
@@ -147,6 +158,11 @@ internal sealed class JsonSettingsStore : ISettingsStore
                 LoadAgainLocked();
             }
 
+            if (!_openedReadOnly && !_newerSchema && !_loadUnsettled)
+            {
+                TakeUpEditLocked();
+            }
+
             EarshotSettings next = Clone(_current);
             mutate(next);
             next.Widget = next.Widget.Clamped(out IReadOnlyList<StepOutcome> widgetNotes);
@@ -193,8 +209,9 @@ internal sealed class JsonSettingsStore : ISettingsStore
     }
 
     // Loads the settings again, and raises Changed, only when settings.json holds something other than what this store last wrote
-    // or read. Returns whether it did. Called by SettingsFileWatcher after the file changes on disk.
-    public bool ReloadIfFileChanged()
+    // or read. Says whether it did, or that the file could not be read yet and the caller should ask again. Called by
+    // SettingsFileWatcher after the file changes on disk.
+    public SettingsReload ReloadIfFileChanged()
     {
         byte[] bytes;
         try
@@ -203,29 +220,30 @@ internal sealed class JsonSettingsStore : ISettingsStore
         }
         catch (FileNotFoundException)
         {
-            return false;
+            return SettingsReload.Unchanged;
         }
         catch (DirectoryNotFoundException)
         {
-            return false;
+            return SettingsReload.Unchanged;
         }
         catch (IOException ex)
         {
-            // A save in progress by the other program: the next change event brings this back.
-            _log.Write(LogLevel.Debug, "Settings file not read for a reload yet: " + ex.Message);
-            return false;
+            // The other program may still hold the file open, and nothing raises another change event when it lets go, so the
+            // caller is asked to try again.
+            _log.Warn("Settings file not read for a reload yet: " + ex.Message);
+            return SettingsReload.TryAgain;
         }
         catch (UnauthorizedAccessException ex)
         {
             _log.Warn("Settings file not read for a reload: " + ex.Message);
-            return false;
+            return SettingsReload.Unchanged;
         }
 
         lock (_gate)
         {
             if (_knownFileHash is not null && System.Security.Cryptography.SHA256.HashData(bytes).AsSpan().SequenceEqual(_knownFileHash))
             {
-                return false;
+                return SettingsReload.Unchanged;
             }
         }
 
@@ -240,12 +258,59 @@ internal sealed class JsonSettingsStore : ISettingsStore
         if (read.Kind != ReadKind.Valid)
         {
             _log.Warn("Settings file changed on disk but cannot be used yet (" + (read.Problem ?? read.Kind.ToString()) + "), so the values in use are kept: " + FilePath);
-            return false;
+            return SettingsReload.Unchanged;
         }
 
         _log.Info("Settings file changed on disk, so it is loaded again: " + FilePath);
         Reload();
-        return true;
+        return SettingsReload.Reloaded;
+    }
+
+    // Another program (the settings command, a hand edit) may have saved settings.json since this store last wrote or read it, and
+    // the file watcher may not have taken that up yet. Saving the values in memory now would put them over that edit, so a valid
+    // edit is taken up first and the change is applied to it. The edit reaches Changed subscribers through the Update that
+    // follows, with the change applied, so they see it once. A file that cannot be used is left to the save, as before.
+    private void TakeUpEditLocked()
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(FilePath);
+        }
+        catch (FileNotFoundException)
+        {
+            return;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return;
+        }
+        catch (IOException ex)
+        {
+            _log.Warn("Settings file not checked for an edit before saving: " + ex.Message);
+            return;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn("Settings file not checked for an edit before saving: " + ex.Message);
+            return;
+        }
+
+        if (_knownFileHash is not null && System.Security.Cryptography.SHA256.HashData(bytes).AsSpan().SequenceEqual(_knownFileHash))
+        {
+            return;
+        }
+
+        ReadResult read = TryRead(FilePath);
+        if (read.Kind != ReadKind.Valid)
+        {
+            _log.Warn("Settings file was changed on disk and cannot be used (" + (read.Problem ?? read.Kind.ToString()) + "), so it is saved over: " + FilePath);
+            return;
+        }
+
+        _log.Info("Settings file was changed on disk before this save, so the edit is kept: " + FilePath);
+        _current = read.Settings!;
+        ClampWidgetLocked();
     }
 
     // Loads the files again. A load that still leaves them untouched (unreadable, or unusable and not moved

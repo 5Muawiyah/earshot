@@ -1847,7 +1847,8 @@ public sealed class WidgetStatusServiceTests : IDisposable
             rates ?? []);
 
     // A new process: stores over the same files, read at start.
-    private WidgetStatusService NewRememberingService(LinkMemory? remembered, LastReadingBook book)
+    // refind: whether the service may find a worn pair again with no case open; null leaves the default.
+    private WidgetStatusService NewRememberingService(LinkMemory? remembered, LastReadingBook book, bool? refind = true)
     {
         var links = new LinkMemoryStore(WidgetFile("link.json"), _log);
         var readings = new LastReadingStore(WidgetFile("last-reading.json"), _log);
@@ -1862,6 +1863,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
             action => { Interlocked.Increment(ref _posts); action(); }, _clock, _paired, _handsFree, ProximityDecodeTable.Documented,
             runInBackground: work => work(), lastReadings: new LastReadingStore(WidgetFile("last-reading.json"), _log),
             linkMemory: new LinkMemoryStore(WidgetFile("link.json"), _log));
+        if (refind is bool on)
+        {
+            service.RefindEnabled = on;
+        }
+
         service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
         return service;
     }
@@ -1903,6 +1909,66 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.IsEmpty(_caseOpenedEvents, "A pair found again is not a case open.");
     }
 
+    // By default a worn pair is never found again, so a pair of the same model and colour near the PC is not shown as the
+    // owner's: the saved readings stay on show, greyed with their age.
+    [TestMethod]
+    public void ByDefaultARememberedLinkLeavesTheSavedReadingsGreyedWhenAWornPairIsHeard()
+    {
+        Assert.IsFalse(BroadcastRules.RefindEnabled);
+        DateTimeOffset heard = _clock.GetUtcNow() - TimeSpan.FromMinutes(30);
+        using WidgetStatusService service = NewRememberingService(
+            new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, heard - TimeSpan.FromMinutes(5), heard),
+            SavedBook(heard, left: 40, right: 70), refind: null);
+        service.Start();
+
+        WearThePair();
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, snapshot.Selection);
+        Assert.AreEqual(0, snapshot.Counters.Refound);
+        Assert.AreEqual(0, snapshot.Counters.RefindRefused, "It is not even weighed.");
+        ShownBattery shown = BatteryFreshness.Shown(snapshot, _clock.GetUtcNow());
+        Assert.AreEqual(40, shown.Left.Percent);
+        Assert.AreEqual(70, shown.Right.Percent);
+        Assert.AreEqual(ReadingKind.Last, shown.Left.Kind, "Greyed: the saved reading, never live.");
+        Assert.AreEqual(ReadingKind.Last, shown.Right.Kind);
+        Assert.IsTrue(File.Exists(WidgetFile("link.json")), "The remembered link is kept.");
+    }
+
+    // The writes of the link are numbered in the order they were taken, so the store can drop a late older one.
+    [TestMethod]
+    public void EachWriteOfTheLinkIsNumberedInTheOrderItWasTaken()
+    {
+        var store = new RecordingLinkStore();
+        var service = new WidgetStatusService(
+            () => _source, _settings, _deviceMonitor, () => null, _log, action => action(), _clock, _paired, _handsFree,
+            ProximityDecodeTable.Documented, runInBackground: work => work(), linkMemory: store);
+        service.Start();
+        for (int i = 0; i <= 12; i++)
+        {
+            bool one = i % 2 == 0;
+            Raise(one ? 1u : 2u, BroadcastFixtures.Bud(one, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4), -55);
+            Tick(0.25);
+        }
+
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        service.Close();
+
+        Assert.IsGreaterThanOrEqualTo(2, store.Saves.Count, "The link when it was made, and the memory at close.");
+        Assert.IsTrue(store.Saves.All(save => save.Sequence > 0));
+        CollectionAssert.AreEqual(store.Saves.Select(save => save.Sequence).Order().ToList(), store.Saves.Select(save => save.Sequence).ToList());
+        Assert.AreEqual(store.Saves.Count, store.Saves.Select(save => save.Sequence).Distinct().Count(), "No two writes share a number.");
+    }
+
+    private sealed class RecordingLinkStore : ILinkMemoryStore
+    {
+        public List<(LinkMemory? Memory, long Sequence)> Saves { get; } = [];
+
+        public LinkMemory? Load() => null;
+
+        public void Save(LinkMemory? memory, long sequence = 0) => Saves.Add((memory, sequence));
+    }
+
     [TestMethod]
     public void ALinkMadeOnACaseOpenIsRememberedBesideTheReadingsAndFoundAgainAfterARestart()
     {
@@ -1929,6 +1995,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
             () => _source, _settings, _deviceMonitor, () => null, _log,
             action => action(), _clock, _paired, _handsFree, ProximityDecodeTable.Documented,
             runInBackground: work => work(), lastReadings: new LastReadingStore(WidgetFile("last-reading.json"), _log));
+        second.RefindEnabled = true;
         second.Start();
 
         WearThePair();
