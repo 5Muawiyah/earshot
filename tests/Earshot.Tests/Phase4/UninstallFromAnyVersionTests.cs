@@ -564,6 +564,23 @@ public sealed class UninstallFromAnyVersionTests
         Assert.IsFalse(run.Report.NeedsChoice);
     }
 
+    // Picking a pair on screen says which AirPods, not that Earshot was ever set up: on a PC with no footprint, a node the owner
+    // disabled by hand stays as it is.
+    [TestMethod]
+    public void AChosenAddressAloneIsNotAFootprint()
+    {
+        using var h = new Harness(TableWithSecondPair());
+        Disable(h.Nodes, RecordedNodes.AirPodsTargets);
+        Disable(h.Nodes, RecordedNodes.AirPodsTargets.Select(SecondOf));
+        h.Options = new UninstallOptions { ChosenAddress = SecondAddress };
+
+        UninstallRun run = h.Run();
+
+        Assert.AreEqual(GateExitCode.Success, run.Result.Outcome, Fail(run.Result));
+        Assert.IsEmpty(h.Nodes.Calls);
+        AssertOnly("Nothing shows that Earshot was set up on this PC, so no AirPods setting was changed.", run.Report.Notes);
+    }
+
     [TestMethod]
     public void AChosenAddressThatIsNotAmongTheAirPodsFoundRestoresNone()
     {

@@ -13,10 +13,11 @@ internal sealed partial class UninstallActions
     private static readonly string[] MachineRecordFiles = ["config.json", "device.json", "protection.json"];
 
     // Evidence, read from this machine only, that Earshot was set up here. Without any of it nothing about the AirPods is
-    // Earshot's to undo: a node the owner disabled by hand looks the same as one Earshot blocked.
-    private sealed record Footprint(bool MachineFiles, bool Tasks, bool Service, bool InstallFolder, bool PrototypeTask, bool SettingsPin, bool Chosen)
+    // Earshot's to undo: a node the owner disabled by hand looks the same as one Earshot blocked. A pair picked on screen at
+    // uninstall says which AirPods, not that Earshot was ever here, so it is not evidence.
+    private sealed record Footprint(bool MachineFiles, bool Tasks, bool Service, bool InstallFolder, bool PrototypeTask, bool SettingsPin)
     {
-        public bool Any => MachineFiles || Tasks || Service || InstallFolder || PrototypeTask || SettingsPin || Chosen;
+        public bool Any => MachineFiles || Tasks || Service || InstallFolder || PrototypeTask || SettingsPin;
 
         public string Describe()
         {
@@ -27,7 +28,6 @@ internal sealed partial class UninstallActions
             AddIf(found, InstallFolder, "the install folder");
             AddIf(found, PrototypeTask, "the old gate task");
             AddIf(found, SettingsPin, "the user's settings");
-            AddIf(found, Chosen, "the AirPods the user chose");
             return string.Join(", ", found);
         }
 
@@ -62,7 +62,7 @@ internal sealed partial class UninstallActions
         bool install = Directory.Exists(_layout.InstallFolder);
         bool prototype = PrototypeTask(steps) == PrototypeTaskState.Earshots;
         var footprint = new Footprint(
-            files, tasks, _serviceWasRegistered, install, prototype, Options.SettingsPinAirPods, Options.ChosenAddress is not null);
+            files, tasks, _serviceWasRegistered, install, prototype, Options.SettingsPinAirPods);
         steps.Add(new StepOutcome("uninstall-footprint", true, 0, "S_OK",
             footprint.Any ? "Earshot was set up here: " + footprint.Describe() + "." : "Nothing shows that Earshot was set up here."));
         return footprint;
