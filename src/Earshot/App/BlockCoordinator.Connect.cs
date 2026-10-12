@@ -225,7 +225,7 @@ internal sealed partial class BlockCoordinator
 
             // A temporary failure is tried once more when the time allows; whatever follows is judged with the retry spent.
             ConnectFailure first = ConnectFailureClassifier.Classify(result, _services.Hints.Read(), retried: false);
-            if (first.IsTemporary && attempt.RoomToRetry)
+            if (first.IsTemporary && !attempt.Retried && attempt.RoomToRetry)
             {
                 attempt.Retried = true;
                 Progress(request, attempt, TryingAgainStatus);

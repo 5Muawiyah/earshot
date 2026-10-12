@@ -248,6 +248,22 @@ public sealed class ConnectEveryStateTests
     }
 
     [TestMethod]
+    public void AnEndpointWaitThatWasRetriedLeavesNoSecondRetryOfTheRequest()
+    {
+        using var h = NodesBlockedAndAway();
+        EndpointsComeBackAfter(h, BlockCoordinator.EndpointWait + TimeSpan.FromSeconds(1));
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Temporary()));
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Temporary()));
+
+        ToggleReport report = Await(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)), out TimeSpan elapsed);
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        Assert.IsTrue(report.Retried, "The wait for the endpoint was the one retry.");
+        Assert.HasCount(2, h.Connection.Calls, "The pass that found the nodes blocked, and one request after the retried wait; no third.");
+        Assert.IsLessThanOrEqualTo(Limit + TimeSpan.FromSeconds(1), elapsed);
+    }
+
+    [TestMethod]
     public void WhenTheAirPodsAreNotHeardTheFailureIsTheDevicesAndNeverOffersFix()
     {
         using var h = new CoordinatorHarness();
