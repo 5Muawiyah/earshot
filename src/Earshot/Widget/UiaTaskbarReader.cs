@@ -177,7 +177,14 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out StepOutcome? failure) =>
         TryReadOccupants(hwnd, containerRect, release, out occupied, out startButton, out _, out failure);
 
-    internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure)
+    internal bool TryReadOccupants(nint hwnd, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure) =>
+        TryReadOccupants(hwnd, containerRect, release, Environment.ProcessId, out occupied, out startButton, out notificationArea, out failure);
+
+    // ownProcessId: the process whose elements are not occupants. Production passes this process (the overloads above); the real
+    // read of an owned window in a test passes 0 to see what the boundary lists before the filter.
+    internal bool TryReadOccupants(
+        nint hwnd, Rectangle containerRect, Action<object> release, int ownProcessId,
+        out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure)
     {
         ArgumentNullException.ThrowIfNull(release);
         occupied = [];
@@ -241,6 +248,11 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                         hr = cacheRequest.AddProperty(UiAutomation.UIA_ClassNamePropertyId);
                     }
 
+                    if (hr >= 0)
+                    {
+                        hr = cacheRequest.AddProperty(UiAutomation.UIA_ProcessIdPropertyId);
+                    }
+
                     if (hr < 0)
                     {
                         failure = StepOutcomes.FromHResult("uia:add-property", hr);
@@ -260,7 +272,7 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
 
                     try
                     {
-                        return TryReadElements(found, containerRect, release, out occupied, out startButton, out notificationArea, out failure);
+                        return TryReadElements(found, containerRect, release, ownProcessId, out occupied, out startButton, out notificationArea, out failure);
                     }
                     finally
                     {
@@ -296,7 +308,19 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
     // that spans them. Both are undocumented names read from this machine's own taskbar, so a taskbar that
     // names them differently yields null here and the gauge falls back to the tray icon rather than
     // guessing where the area starts.
-    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure)
+    internal static bool TryReadElements(IUIAutomationElementArray found, Rectangle containerRect, Action<object> release, out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure) =>
+        TryReadElements(found, containerRect, release, Environment.ProcessId, out occupied, out startButton, out notificationArea, out failure);
+
+    // An element of ownProcessId is never an occupant. The gauge is the owned window of the taskbar it sits on, and UI Automation
+    // lists a window's owned top-level windows among its descendants while they are shown, so a read made while the gauge is
+    // shown would find the gauge's own rectangle occupied, place the gauge on it, find no room, and hide it; and a hidden window
+    // is not listed, so the next read would find room and show it again. This skips the gauge, anything its accessibility tree
+    // exposes below it, and any other window of this process. A skipped element is also not the Start button and not part of
+    // the notification area.
+    // https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#owned-windows
+    internal static bool TryReadElements(
+        IUIAutomationElementArray found, Rectangle containerRect, Action<object> release, int ownProcessId,
+        out List<Rectangle> occupied, out Rectangle? startButton, out Rectangle? notificationArea, out StepOutcome? failure)
     {
         ArgumentNullException.ThrowIfNull(release);
         occupied = [];
@@ -366,6 +390,19 @@ internal sealed class UiaTaskbarReader : ITaskbarReader
                 }
 
                 if (offscreenValue is bool { } offscreen && offscreen)
+                {
+                    continue;
+                }
+
+                hr = element.GetCachedPropertyValue(UiAutomation.UIA_ProcessIdPropertyId, out object? processValue);
+                if (hr < 0)
+                {
+                    failure = StepOutcomes.FromHResult("uia:get-cached-property:process-id", hr);
+                    return false;
+                }
+
+                // VT_EMPTY (no value) is an element no process is named for: not ours.
+                if (processValue is int processId && processId == ownProcessId)
                 {
                     continue;
                 }
