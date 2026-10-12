@@ -42,6 +42,32 @@ public sealed class AwayEstimateTests
         Assert.AreEqual(ReadAt, after.ReadAt, "...and when that was read.");
     }
 
+    // An estimate is for a pair that is away: nothing is heard of it and it may have been charging since. With the AirPods on
+    // this PC the last reading of a charging part is shown as it was read, whatever the rate and however long ago.
+    [TestMethod]
+    public void WhileTheAirPodsAreOnThisPcNoPartIsEstimated()
+    {
+        LastReadingBook book = Book(
+            left: Saved(40, charging: true), right: Saved(45, charging: true), box: Saved(50, charging: true),
+            rates: [Rate(ChargePart.Bud, 30), Rate(ChargePart.Case, 30)]);
+        DateTimeOffset now = ReadAt + TimeSpan.FromHours(1);
+
+        ShownBattery away = Shown(book, now, onThisPc: false);
+        Assert.AreEqual(ReadingKind.Estimated, away.Left.Kind, "The same book is estimated when the pair is away.");
+        Assert.AreEqual(70, away.Left.Percent);
+
+        ShownBattery here = Shown(book, now, onThisPc: true);
+        Assert.AreEqual(ReadingKind.Last, here.Left.Kind);
+        Assert.AreEqual(40, here.Left.Percent);
+        Assert.AreEqual(ReadingKind.Last, here.Right.Kind);
+        Assert.AreEqual(45, here.Right.Percent);
+        Assert.AreEqual(ReadingKind.Last, here.Case.Kind);
+        Assert.AreEqual(50, here.Case.Percent);
+        Assert.AreEqual(ReadingKind.Last, here.Gauge?.Kind);
+        Assert.AreEqual(40, here.Gauge?.Percent);
+        Assert.IsFalse(here.Left.Estimated || here.Right.Estimated || here.Case.Estimated);
+    }
+
     [TestMethod]
     public void TheEstimateStopsAt100()
     {

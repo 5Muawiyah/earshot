@@ -11,8 +11,9 @@ internal interface ILinkMemoryStore
     LinkMemory? Load();
 
     // Writes the memory, or removes the file when memory is null (the link was forgotten). A failure is logged with its
-    // code and the memory stays in memory for this run.
-    void Save(LinkMemory? memory);
+    // code and the memory stays in memory for this run. Sequence is the order the writes were taken in (0: not ordered); a
+    // write with a sequence lower than one already written is dropped.
+    void Save(LinkMemory? memory, long sequence = 0);
 }
 
 // The memory as one small JSON file, link.json beside last-reading.json in the widget folder. It holds the paired model and
@@ -25,12 +26,17 @@ internal interface ILinkMemoryStore
 // Save writes link.json.tmp, then moves it over the file (File.Move with overwrite replaces it in one step on one volume,
 // https://learn.microsoft.com/en-us/dotnet/api/system.io.file.move), so a cut-short save leaves the old file whole. Saving
 // nothing deletes the file, so a forgotten link is not remembered after a restart.
+//
+// Order. The service takes each memory to write with a sequence number, under its own lock, and the writes may reach the
+// file on different threads in another order. A write with a sequence lower than one already written is dropped, so an
+// older link is never put over a newer one, and a link that was forgotten is not brought back.
 internal sealed class LinkMemoryStore : ILinkMemoryStore
 {
     public const int SchemaVersion = 1;
 
     private readonly ILog _log;
     private readonly Lock _gate = new();
+    private long _lastSequence;
 
     public LinkMemoryStore(string path, ILog log)
     {
@@ -106,15 +112,21 @@ internal sealed class LinkMemoryStore : ILinkMemoryStore
         }
     }
 
-    public void Save(LinkMemory? memory)
+    public void Save(LinkMemory? memory, long sequence = 0)
     {
         lock (_gate)
         {
+            if (sequence != 0 && sequence < _lastSequence)
+            {
+                return; // a later memory has been written since this one was taken
+            }
+
             try
             {
                 if (memory is null)
                 {
                     File.Delete(FilePath);
+                    _lastSequence = Math.Max(_lastSequence, sequence);
                     return;
                 }
 
@@ -135,6 +147,7 @@ internal sealed class LinkMemoryStore : ILinkMemoryStore
                 }
 
                 File.Move(TempPath, FilePath, overwrite: true);
+                _lastSequence = Math.Max(_lastSequence, sequence);
             }
             catch (IOException ex)
             {

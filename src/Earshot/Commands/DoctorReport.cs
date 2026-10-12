@@ -9,13 +9,14 @@ namespace Earshot.Commands;
 // The AirPods models the report names, by the product id Windows holds in a Bluetooth node's instance id
 // (_VID&0001004C_PID&xxxx: source 0001 is the Bluetooth SIG's list, 004C is Apple's vendor id there). 200E is the one model the
 // furiousMAC Continuity notes name (github.com/furiousMAC/continuity, messages/proximity_pairing.md); 2027 is the id the owner's
-// own pair reports. Any other Apple node is only counted, never named, because an iPhone has the same vendor id.
+// own pair reports, and no published source names it, so the report gives only the code. Any other Apple node is only counted,
+// never named, because an iPhone has the same vendor id.
 internal static partial class AirPodsModels
 {
     private static readonly Dictionary<string, string> Names = new(StringComparer.OrdinalIgnoreCase)
     {
         ["200E"] = "AirPods Pro",
-        ["2027"] = "AirPods Pro 3",
+        ["2027"] = "model 2027",
     };
 
     [GeneratedRegex(@"_VID&0001004C_PID&(?<pid>[0-9A-Fa-f]{4})(?![0-9A-Fa-f])", RegexOptions.CultureInvariant)]
@@ -47,7 +48,21 @@ internal static class DoctorReport
 
     private static readonly string[] HistoryKeys = ["time", "step", "outcome", "code", "attempt", "durationMs", "reason"];
 
-    private static readonly Regex OneWord = new("^[A-Za-z0-9_.:-]{1,40}$", RegexOptions.CultureInvariant);
+    // The keys of a history line that hold a number, and the range each may hold. A time is Unix seconds up to the year 2100; a
+    // code is a Win32 error, an HRESULT (signed or not) or an exit code; a try count and a duration in milliseconds (up to a day)
+    // are small. A 48-bit address is far outside every one of them, as a number of any size.
+    private static readonly Dictionary<string, (long Min, long Max)> NumericKeys = new(StringComparer.Ordinal)
+    {
+        ["time"] = (0, 4_102_444_800),
+        ["code"] = (int.MinValue, uint.MaxValue),
+        ["attempt"] = (0, 1_000),
+        ["durationMs"] = (0, 86_400_000),
+    };
+
+    // A time written as text must be a plain UTC time and nothing else.
+    private static readonly Regex IsoTime = new(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?Z$", RegexOptions.CultureInvariant);
+
+    private static readonly Regex OneWord =new("^[A-Za-z0-9_.:-]{1,40}$", RegexOptions.CultureInvariant);
 
     public static string Build(DoctorFacts f)
     {
@@ -289,14 +304,31 @@ internal static class DoctorReport
                     continue;
                 }
 
-                string? text = value.ValueKind switch
+                // A number is kept only under a key that is a number, and only inside that key's range, so a 48-bit address
+                // written as a number under any key (or a word key) never reaches the report. A word key keeps only text and
+                // true or false.
+                string? text;
+                if (NumericKeys.TryGetValue(key, out (long Min, long Max) range))
                 {
-                    JsonValueKind.String => value.GetString(),
-                    JsonValueKind.Number => value.GetRawText(),
-                    JsonValueKind.True => "true",
-                    JsonValueKind.False => "false",
-                    _ => null,
-                };
+                    text = value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number) && number >= range.Min && number <= range.Max
+                        ? number.ToString(CultureInfo.InvariantCulture)
+                        : null;
+                    if (key == "time" && value.ValueKind == JsonValueKind.String && IsoTime.IsMatch(value.GetString() ?? ""))
+                    {
+                        text = value.GetString();
+                    }
+                }
+                else
+                {
+                    text = value.ValueKind switch
+                    {
+                        JsonValueKind.String => value.GetString(),
+                        JsonValueKind.True => "true",
+                        JsonValueKind.False => "false",
+                        _ => null,
+                    };
+                }
+
                 if (text is null)
                 {
                     continue;
@@ -343,6 +375,13 @@ internal static class DoctorReport
         sb.AppendLine(count == 0
             ? "AirPods in Windows: none found."
             : "AirPods in Windows: " + count.ToString(CultureInfo.InvariantCulture) + " entries, " + present.ToString(CultureInfo.InvariantCulture) + " present.");
+        int otherApple = report.GetProperty("otherAppleNodes").GetInt32();
+        if (otherApple > 0)
+        {
+            // Not named: an iPhone has the same vendor id as AirPods, and only two AirPods models are told apart by their id.
+            sb.AppendLine(otherApple.ToString(CultureInfo.InvariantCulture) + " other Apple " + (otherApple == 1 ? "entry" : "entries") + ": an iPhone or AirPods of a model not listed.");
+        }
+
         int bad = airpods.EnumerateArray().Count(a =>
             (a.GetProperty("problemCode").ValueKind == JsonValueKind.Number && a.GetProperty("problemCode").GetInt32() != 0) ||
             (a.GetProperty("disabled").ValueKind == JsonValueKind.True));

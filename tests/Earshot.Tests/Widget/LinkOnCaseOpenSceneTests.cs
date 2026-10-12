@@ -52,11 +52,17 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
-    private WidgetStatusService NewService()
+    // refind: whether the service may find a worn pair again with no case open; the scenes that rely on it turn it on.
+    private WidgetStatusService NewService(bool? refind = true)
     {
         var service = new WidgetStatusService(
             () => _source, _settings, _monitor, () => null, _log, action => action(), _clock, _paired, null,
             ProximityDecodeTable.Documented, runInBackground: work => work());
+        if (refind is bool on)
+        {
+            service.RefindEnabled = on;
+        }
+
         service.ReadingApplied += (_, e) => _readings.Add(e);
         return service;
     }
@@ -338,6 +344,29 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
     }
 
     // ---- Dropping the link
+
+    // The default: the same scene finds nothing again, so the worn pair stays unlinked and the last reading stays greyed.
+    [TestMethod]
+    public void ByDefaultALinkLostForMoreThanTwoMinutesIsNotFoundAgainByAWornPair()
+    {
+        using WidgetStatusService service = NewService(refind: null);
+        service.Start();
+        Connect();
+        OpenTheCase(3);
+        WearThem(5);
+        Tick(125);
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection, "Over two minutes: the link is dropped.");
+
+        WearThem(600);
+
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        Assert.AreEqual(0, service.Current.Counters.Refound);
+        Assert.AreEqual(ReadingKind.Last, Shown(service).Left.Kind, "The last reading stays, greyed, never live.");
+        Assert.AreEqual(100, Shown(service).Left.Percent);
+
+        OpenTheCase(3);
+        Assert.AreEqual(ReadingKind.Live, Shown(service).Left.Kind, "A case open next to the PC still links.");
+    }
 
     [TestMethod]
     public void ALinkLostForMoreThanTwoMinutesLeavesTheLastReadingAndTheWornPairIsFoundAgainWithNoCaseOpen()

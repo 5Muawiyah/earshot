@@ -242,4 +242,32 @@ public sealed class SettingsCommandTests
         StringAssert.Contains(text, "```json");
         StringAssert.Contains(text, "\"schema\": 1");
     }
+
+    [TestMethod]
+    public void OnlySetCanSaveSettings()
+    {
+        Assert.IsTrue(SettingsCommand.Writes(["set", "low-battery-percent", "30"]));
+        Assert.IsFalse(SettingsCommand.Writes(["list"]));
+        Assert.IsFalse(SettingsCommand.Writes(["get", "gauge-position"]));
+        Assert.IsFalse(SettingsCommand.Writes([]));
+    }
+
+    [TestMethod]
+    public void TheRealProgramsListAndGetLeaveAHalfEditedFileWhereItIs()
+    {
+        using var temp = new TempFolder();
+        string folder = Path.Combine(temp.File("data"), "Roaming", "Earshot");
+        Directory.CreateDirectory(folder);
+        string file = Path.Combine(folder, "settings.json");
+        File.WriteAllText(file, "{ \"DeviceMatch\": \"Lat");
+
+        (int list, string listText) = RunProgram(temp, "settings", "list");
+        Assert.AreEqual(0, list, listText);
+        (int get, string getText) = RunProgram(temp, "settings", "get", "low-battery-percent");
+        Assert.AreEqual(0, get, getText);
+
+        Assert.AreEqual("{ \"DeviceMatch\": \"Lat", File.ReadAllText(file), "A read must not rewrite a file someone is editing.");
+        Assert.IsEmpty(Directory.GetFiles(folder, "settings.corrupt-*"), "A read must not move the file aside.");
+        Assert.IsFalse(File.Exists(file + ".bak"));
+    }
 }

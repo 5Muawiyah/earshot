@@ -303,7 +303,7 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
             [new LearnedRate(Model, ChargePart.Bud, 5, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]);
         WidgetSnapshot estimate = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
-            Where = AirPodsWhere.ThisPc,
+            Where = AirPodsWhere.NotInUse,
             LastReadings = estimated,
             PairedModel = Model,
             HighWater = new EstimateHighWater(),
@@ -311,6 +311,11 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         ShownPart shown = BatteryFreshness.Shown(estimate, _clock.GetUtcNow()).Left;
         Assert.AreEqual(ReadingKind.Estimated, shown.Kind);
         Assert.AreEqual(10, shown.Percent);
+
+        // With the AirPods on this PC the same book is shown as it was read: 5%, a last reading, not grown.
+        ShownPart onThisPc = BatteryFreshness.Shown(estimate with { Where = AirPodsWhere.ThisPc }, _clock.GetUtcNow()).Left;
+        Assert.AreEqual(ReadingKind.Last, onThisPc.Kind);
+        Assert.AreEqual(5, onThisPc.Percent);
 
         _status.Raise(estimate);
         Assert.AreEqual(0, _notifier.Calls.Count, "An estimate of 10% is not a low reading.");
@@ -345,12 +350,15 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
             [new LearnedRate(Model, ChargePart.Case, 5, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]);
         WidgetSnapshot estimate = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
-            Where = AirPodsWhere.ThisPc,
+            Where = AirPodsWhere.NotInUse,
             LastReadings = estimated,
             PairedModel = Model,
             HighWater = new EstimateHighWater(),
         };
         Assert.AreEqual(ReadingKind.Estimated, BatteryFreshness.Shown(estimate, _clock.GetUtcNow()).Case.Kind);
+        ShownPart onThisPc = BatteryFreshness.Shown(estimate with { Where = AirPodsWhere.ThisPc }, _clock.GetUtcNow()).Case;
+        Assert.AreEqual(ReadingKind.Last, onThisPc.Kind);
+        Assert.AreEqual(5, onThisPc.Percent);
         _notifier.Calls.Clear();
 
         _status.Raise(estimate);

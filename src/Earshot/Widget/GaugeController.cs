@@ -333,6 +333,21 @@ internal sealed class GaugeController : IDisposable
     private void OnNoPlacement(PlacementFailure failure)
     {
         string key = "NoFreeSpace " + failure;
+        if (failure == PlacementFailure.AutoHiddenAway)
+        {
+            // The bar itself has slid off screen. That is not a read that may be wrong, as a crowded or failed read can be: the bar
+            // is gone, and a gauge left on its own over the desktop would be seen. So it goes at once, as for a full-screen window.
+            bool wasShown = _state is GaugeState.Shown;
+            ClearGate(lapsed: !wasShown);
+            if (wasShown || !(_state is GaugeState.Hidden { Reason: HiddenReason.NoFreeSpace } && _lastHideKey == key))
+            {
+                _log.Write(LogLevel.Debug, GaugeEventLog.PlacementFailed(failure));
+            }
+
+            TransitionHidden(HiddenReason.NoFreeSpace, key, GaugeEventLog.HiddenNoFreeSpace(), outcome: null);
+            return;
+        }
+
         if (_state is GaugeState.Shown shown)
         {
             Held held = Observe(new Verdict(VerdictKind.Hide, HiddenReason.NoFreeSpace, Rectangle.Empty), GaugeStability.HideWindow, GaugeStability.HideReads, failure.ToString());

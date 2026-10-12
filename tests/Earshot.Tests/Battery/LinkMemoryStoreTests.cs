@@ -43,6 +43,39 @@ public sealed class LinkMemoryStoreTests : IDisposable
         Assert.IsEmpty(_log.Entries);
     }
 
+    // Writes are taken in an order under the service's lock and may reach the file in another. A forgotten link (nothing
+    // saved, sequence 3) must not be brought back by a write of the link taken before it (sequence 2) that lands after it.
+    [TestMethod]
+    public void ALateOlderWriteDoesNotBringAForgottenLinkBack()
+    {
+        LinkMemoryStore store = NewStore();
+        store.Save(Sample(), 1);
+        store.Save(null, 3);
+        Assert.IsFalse(File.Exists(FilePath), "Forgotten.");
+
+        store.Save(Sample(), 2);
+
+        Assert.IsFalse(File.Exists(FilePath), "A write taken before the forgetting is dropped.");
+        Assert.IsNull(NewStore().Load());
+    }
+
+    [TestMethod]
+    public void ALateOlderWriteDoesNotReplaceANewerLinkAndAnUnorderedWriteStillLands()
+    {
+        LinkMemoryStore store = NewStore();
+        LinkMemory newer = Sample() with { LastHeardAt = LinkedAt + TimeSpan.FromMinutes(20) };
+        store.Save(newer, 5);
+
+        store.Save(Sample(), 4);
+        Assert.AreEqual(newer, NewStore().Load(), "The older write is dropped.");
+
+        store.Save(Sample(), 6);
+        Assert.AreEqual(Sample(), NewStore().Load(), "A later write lands.");
+
+        store.Save(newer);
+        Assert.AreEqual(newer, NewStore().Load(), "A write with no sequence is not ordered and lands.");
+    }
+
     [TestMethod]
     public void AMissingFileAndAMissingFolderAreNoMemoryWithNothingLogged()
     {

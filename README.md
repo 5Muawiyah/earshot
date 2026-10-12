@@ -98,8 +98,9 @@ Startup on is not covered.
   endpoint, and the list of sound devices when it has not, with one line on what
   to press. Call quality with it on is unproved until I have tried it.
 - **Shows the battery** of the left bud, the right bud and the case: live while
-  it hears them, then greyed with its age, and kept across a restart. A part that
-  was charging is shown rising as an estimate, marked `≈`. Earshot listens to the
+  it hears them, then greyed with its age, and kept across a restart. While the
+  AirPods are away from this PC, a part that was charging is shown rising as an
+  estimate, marked `≈`. Earshot listens to the
   AirPods' own Bluetooth broadcast, and you link your pair by opening the case
   next to the PC. See [Battery](#battery) for what that does and does not prove.
 - **Opens a card when your case opens near the PC**, with the three levels and
@@ -147,10 +148,11 @@ number and charging bolt. **Display** puts the gauge on one display's taskbar,
 or on every display's taskbar at once with **All displays**. The rarer settings
 are under **More**, and Repair is on the Updates page.
 
-Earshot reads the battery from the AirPods' own Bluetooth broadcast, which gives
-each bud and the case only in steps of 10%, so a figure here can be up to 9 points
-away from the exact one your iPhone shows. A figure that is not current is shown
-greyed with its age, and one marked ≈ is an estimate for a part that was charging.
+Earshot reads the battery from the AirPods' own Bluetooth broadcast. The broadcast
+gives each bud and the case in steps of 10%, so a figure here can differ from the
+one your iPhone shows by up to one step. A figure that is not current is shown
+greyed with its age, and one marked ≈ is an estimate for a part that was charging,
+shown only while the AirPods are away from this PC.
 
 What to know before you trust a number:
 
@@ -164,24 +166,26 @@ What to know before you trust a number:
   drops the link after two minutes without hearing it, showing the last readings,
   greyed. It remembers the model and colour of the pair you linked, and when it was
   last heard, in `link.json` beside `last-reading.json` (no address and no name), so
-  a restart does not forget it. While it is remembered, for up to 8 hours after it
-  was last heard, your pair is found again without opening the case when exactly one
-  set of that model and colour is heard near the PC (-70 dBm or stronger, at least
-  three messages over two seconds or more, inside a minute) and its levels are ones
-  your last reading could have led to: a bud no more than 10 points above it unless it
-  was charging, and no further below it than 25 points an hour allows. Two sets of
-  that model and colour in that minute, or buds that read higher than they could,
-  are never found again, and opening the case links them. With the AirPods connected
-  and nothing linked, the card says "Open the case to show battery".
+  a restart does not forget it, and the last readings stay on show. With the AirPods
+  connected and nothing linked, the card says "Open the case to show battery".
+- **Finding your pair again without a case open is built and off.** Earshot has a
+  rule that would take a pair worn near the PC as yours again, with no case open,
+  for up to 8 hours after yours was last heard: exactly one set of that model and
+  colour near the PC (-70 dBm or stronger, at least three messages over two seconds
+  or more, inside a minute) whose levels your last reading could have led to (a bud
+  no more than 10 points above it unless it was charging, and no further below it
+  than 25 points an hour allows). It is off until the owner chooses, and nothing in
+  the settings turns it on. Its risk, stated plainly: after a link made while the
+  buds were charging, or after a few hours, almost any levels are ones your last
+  reading could have led to, so any pair of that model and colour alone near the PC
+  would qualify, and would be shown as yours. With it off, only opening the case
+  links a pair.
 - **The risk that remains.** A pair of the same model that opens its case next to
   the PC more strongly than yours can be linked instead, and one whose levels
   equal yours, heard within 30 seconds of yours going quiet, can be followed as if
   it were yours. Once your pair has been unheard for more than 10 seconds (the
   case shut, or the buds out of range), any pair of the same model that opens its
   case at -70 dBm or stronger is linked at once, with no 8 dB margin to clear.
-  With your pair silent, a pair of the same model and colour that is alone near the PC
-  within those 8 hours, and whose levels are no higher than yours last read (or are
-  charging), can be found again as yours: the same risk, for longer than 30 seconds.
   I accept that risk, and you should know it is there. Saved readings, estimates
   and the case-open card all follow that link, so a pair that takes it is shown
   as mine. Opening your own case takes the link back: at least 8 dB stronger while the other pair is still heard, or at -70 dBm or stronger once it has been unheard for 10 seconds.
@@ -199,11 +203,12 @@ What to know before you trust a number:
   `battery-history.json` beside it: the part, the level, the charging flag and the
   time. Nothing else, no address and no name.
 - **Age.** A value older than 30 seconds is greyed, with how long ago it was read.
-- **Estimates are estimates.** A part that was charging when last read is shown
-  rising, marked `≈` with the age of the reading it grew from, at a rate learned
-  from your own pair's charging, and only once one has been learned. It stops at
-  100, never falls, and a newer reading replaces it, even a lower one. It is not
-  a reading.
+- **Estimates are estimates.** While the AirPods are away from this PC, a part that
+  was charging when last read is shown rising, marked `≈` with the age of the
+  reading it grew from, at a rate learned from your own pair's charging, and only
+  once one has been learned. With the AirPods on this PC the last reading is shown
+  as it was read, never grown. An estimate stops at 100, never falls, and a newer
+  reading replaces it, even a lower one. It is not a reading.
 - **Left and right.** Which bud is left and which right rests partly on a
   published description of the broadcast and partly on one local capture. It is
   unproved.

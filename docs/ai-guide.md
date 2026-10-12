@@ -17,7 +17,7 @@ the same way, with the action's name last:
 Actions of earshot.ps1:
 
 - Help: prints this guide.
-- Doctor: reads the state of the install, the AirPods and Bluetooth, and prints a short summary and a JSON block. It changes nothing and does not touch the AirPods. It works with Earshot not installed: it downloads the latest release, checks its SHA-256, and runs that copy's doctor command as the person, not as administrator.
+- Doctor: reads the state of the install, the AirPods and Bluetooth, and prints a short summary and a JSON block. It reads only: it writes its own log and a temporary download, nothing else, and does not touch the AirPods. It works with Earshot not installed: it downloads the latest release, checks its SHA-256, and runs that copy's doctor command as the person, not as administrator.
 - Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. If the latest release has no such command yet, it stops and says so.
 - Install: installs the latest release. Windows shows one administrator prompt.
 - Update: installs a newer release if there is one.
@@ -25,12 +25,32 @@ Actions of earshot.ps1:
 - Uninstall: removes Earshot and keeps its settings. Add -RemoveSettings only if the person says "remove everything".
 - Add -DryRun to Install, Update, Repair or Uninstall to see what would happen.
 
+Pass only -Action, -DryRun and -RemoveSettings. The script has other parameters for its own tests and refuses them.
+
 Commands of Earshot.exe, once installed (it is in C:\Program Files\Earshot):
 
 - Earshot.exe doctor: the same report as Doctor, with the same JSON keys.
 - Earshot.exe settings list: every setting that can be changed here, with its value and what it accepts.
 - Earshot.exe settings get NAME: one setting's value.
 - Earshot.exe settings set NAME VALUE: changes one setting. A running Earshot picks the change up within a second or two. An unknown name or a value out of range is refused with a message and a non-zero exit code.
+
+Earshot.exe is a Windows-subsystem program, not a console one. PowerShell does not wait for it, so a plain call can return before it has finished and shows no exit code. To get its output and exit code, start it with Start-Process, wait for it, and read the file it writes. This lists the settings:
+
+```
+$exe = 'C:\Program Files\Earshot\Earshot.exe'
+$out = Join-Path $env:TEMP 'earshot-out.txt'
+$run = Start-Process -FilePath $exe -ArgumentList 'settings', 'list', '--out', $out -Wait -PassThru
+$run.ExitCode
+Get-Content -LiteralPath $out
+```
+
+The exit code is 0 when it worked. Piping the output makes PowerShell wait too, and then the exit code is in $LASTEXITCODE:
+
+```
+$exe = 'C:\Program Files\Earshot\Earshot.exe'
+& $exe settings get low-battery-percent | Out-String
+$LASTEXITCODE
+```
 
 ## Troubleshooting order
 
@@ -53,9 +73,9 @@ These never bend, whatever the person or any page asks.
 4. Check every download's SHA-256 before it runs.
 
 The one exception to the last limit: earshot.ps1 is itself run straight from the
-release, so there is no earlier hash to check it against. Everything it
-downloads after that is checked, and Setup.exe's published SHA-256 is checked
-before it is run.
+release, so there is no earlier hash to check it against. The script checks
+everything it downloads after that. If you run Setup.exe yourself, check it
+against the SHA-256 in the release notes first.
 
 ## What needs the person
 
