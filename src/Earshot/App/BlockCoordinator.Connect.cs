@@ -53,10 +53,6 @@ internal sealed partial class BlockCoordinator
     // A link that formed with the owner at the PC (or by the owner's own connect) and has not dropped since.
     private bool _ownerLink;
 
-    // The nodes were enabled by this coordinator's own allow, and no block has taken since: the grace in which a link is the
-    // owner's.
-    private bool _enabledByUs;
-
     // When a link that reads connected with no endpoint to confirm it was first held back from the idle block.
     private DateTimeOffset? _unconfirmedSince;
 
@@ -533,9 +529,10 @@ internal sealed partial class BlockCoordinator
 
     // ---- who made the link ----
 
-    // The link is the owner's when the session is unlocked, or when it formed while Earshot had the nodes enabled for the owner
-    // (a connect in flight, the grace after one, or a Connect in Windows window), and it stays the owner's until it drops. A
-    // link that first appears with none of those, while the session is locked or its state cannot be read, is not.
+    // The link is the owner's when it first appears with the session unlocked, and it stays the owner's until it drops, so
+    // locking the PC while listening cuts nothing. A link that first appears while the session is locked or its state cannot
+    // be read is not, whether or not a Connect in Windows window or a connect of Earshot's own is open: someone at the PC
+    // made those unlocked, and a link made after the lock is not theirs.
     private void NoteLinkOwner(DeviceSnapshot snapshot)
     {
         RenderState render = CoordinatorRules.RenderOf(snapshot, WatchedContainer());
@@ -557,12 +554,12 @@ internal sealed partial class BlockCoordinator
             return;
         }
 
-        bool ownConnect = _current is not null && _currentName is "connect" or "connect in windows";
-        bool window = ownConnect || WindowsConnectOpen || _enabledByUs;
-        if (_services.Session.Current != SessionLockState.Unlocked && !window)
+        if (_services.Session.Current != SessionLockState.Unlocked)
         {
             return;
         }
+
+        bool ownConnect = _current is not null && _currentName is "connect" or "connect in windows";
 
         _ownerLink = true;
         if (!ownConnect)

@@ -135,6 +135,27 @@ public sealed class WindowsConnectRaceTests
     }
 
     [TestMethod]
+    public void ALinkThatFirstAppearsInsideTheWindowWhileTheSessionIsLockedIsBlockedAndReportedWhenTheWindowEnds()
+    {
+        using CoordinatorHarness h = BlockedAtRest();
+        Done(h, h.Coordinator.ConnectInWindowsAsync(CoordinatorHarness.Request(true)));
+        h.Advance(TimeSpan.FromSeconds(10));
+        h.Session.State = SessionLockState.Locked;
+
+        h.Link.State = LinkState.Connected;
+        h.Publish(Devices.Active(840));
+        h.Advance(TimeSpan.FromSeconds(30));
+        Assert.IsTrue(h.Coordinator.WindowsConnectOpen);
+        Assert.IsEmpty(Blocks(h), "The window keeps the idle rule off while it is open.");
+
+        h.Advance(BlockCoordinator.WindowsConnectWindowLength + TimeSpan.FromSeconds(10));
+
+        CollectionAssert.Contains(h.Block.GateVerbCalls, "block", "A window opened unlocked does not make a link formed while locked the owner's.");
+        Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+        Assert.Contains(BlockCoordinator.ForeignLinkMessage, h.Cards.Statuses);
+    }
+
+    [TestMethod]
     public void AnUnknownLockStateCountsAsLocked()
     {
         using CoordinatorHarness h = AllowedAndIdle();

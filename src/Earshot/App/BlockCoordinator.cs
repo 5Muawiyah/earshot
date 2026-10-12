@@ -618,11 +618,6 @@ internal sealed partial class BlockCoordinator : IDisposable
                 _blockStatus = status;
                 _blockStatusFresh = true;
                 _tasksSeenInstalled |= status.TasksInstalled;
-                if (status.State == BlockState.Blocked && !AllowMayLand)
-                {
-                    _enabledByUs = false;
-                }
-
                 if (_statusAtIdleFailure is { } before &&
                     (before.State != status.State || before.BlockAtBoot != status.BlockAtBoot))
                 {
@@ -2648,11 +2643,6 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         Record(steps, action, allow);
-        if (allow.Status is OpStatus.Success or OpStatus.Partial or OpStatus.AlreadyInState)
-        {
-            _enabledByUs = true;
-        }
-
         if (CoordinatorRules.MayStillRun(allow))
         {
             _allowSettlesAt = _time.GetUtcNow() + UnsettledGateWindow;
