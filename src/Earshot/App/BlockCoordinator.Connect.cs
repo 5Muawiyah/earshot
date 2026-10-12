@@ -83,6 +83,9 @@ internal sealed partial class BlockCoordinator
 
         public ConnectFailure Failure { get; set; } = ConnectFailure.None;
 
+        // The allow was refused or failed outright. Connect in Windows makes the same allow, so it is not offered then.
+        public bool AllowRefused { get; set; }
+
         public TimeSpan Remaining
         {
             get
@@ -115,7 +118,7 @@ internal sealed partial class BlockCoordinator
             FailureClass = failure.Class,
             Progress = attempt.Progress.ToList(),
             Retried = attempt.Retried,
-            OfferConnectInWindows = failed && failure.Class != FailureClass.None,
+            OfferConnectInWindows = failed && failure.Class != FailureClass.None && !attempt.AllowRefused,
             FixOfferDue = offer,
         };
 
@@ -308,6 +311,7 @@ internal sealed partial class BlockCoordinator
             _log.Warn("connect: every render endpoint is NOTPRESENT and the nodes read " + (status is null ? "nothing" : Describe(status)) +
                 " for container " + request.Container.ToString("D") + ", so nothing is allowed.");
             attempt.Failure = new ConnectFailure(FailureClass.PcSide, refusal, "allow-refused");
+            attempt.AllowRefused = true;
             return (Finish(request, OpStatus.Failed, refusal, steps), null);
         }
 
@@ -337,6 +341,7 @@ internal sealed partial class BlockCoordinator
                 throw new OperationCanceledException(limitToken);
             }
 
+            attempt.AllowRefused = true;
             return (await FailAsync(request, attempt, cleanup, steps, ConnectFailureClassifier.AllowFailed(allow), ct), null);
         }
 

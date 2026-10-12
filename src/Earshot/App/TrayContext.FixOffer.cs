@@ -45,7 +45,7 @@ internal sealed partial class TrayContext
 
     // The failure card again, with the same words and Connect in Windows under them. Pressing it allows the AirPods and opens
     // Windows' Bluetooth settings page; the coordinator shows its own card for the result and then leaves a connection made
-    // there alone.
+    // there alone. Not offered in safe mode, which refuses every device action, so the button could only be refused.
     private void ShowConnectInWindowsOffer(Guid container, string title, string reason, CardPlace place)
     {
         if (_closing || _closed)

@@ -976,7 +976,7 @@ internal sealed partial class TrayContext : ApplicationContext
             {
                 ShowFixOffer(intent.DeviceName, report.UserMessage, place);
             }
-            else if (ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
+            else if (!_registry.SafeMode && ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
             {
                 ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
             }

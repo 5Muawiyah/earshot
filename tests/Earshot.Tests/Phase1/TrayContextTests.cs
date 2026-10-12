@@ -281,8 +281,12 @@ public sealed class TrayContextTests
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             tray.PumpUntilIdle();
 
-            CollectionAssert.AreEqual(new[] { TrayStatus.CardConnecting, ConnectFailureClassifier.OpenTheCaseOrFix }, tray.Cards.Statuses);
-            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "connect: Failed. " + ConnectFailureClassifier.OpenTheCaseOrFix));
+            // The reason, then the same card again with Connect in Windows under it.
+            CollectionAssert.AreEqual(
+                new[] { TrayStatus.CardConnecting, ConnectFailureClassifier.OpenTheCaseAndTryAgain, ConnectFailureClassifier.OpenTheCaseAndTryAgain },
+                tray.Cards.Statuses);
+            Assert.AreEqual(ConnectInWindowsOffer.ButtonLabel, tray.Cards.Shown[^1].Content.Action?.Label);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "connect: Failed. " + ConnectFailureClassifier.OpenTheCaseAndTryAgain));
         });
     }
 
