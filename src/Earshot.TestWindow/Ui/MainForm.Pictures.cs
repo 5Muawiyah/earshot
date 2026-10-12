@@ -94,6 +94,15 @@ internal sealed partial class MainForm
         _statusLabel.Text = Copy.PlainFinishedStatus(row.Name, RowPresenter.PlainText(state));
     }
 
+    // Form.Show activates a form unless ShowWithoutActivation says otherwise. The picture window is shown for drawing only, so it
+    // never takes focus; the tester's own window still does.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.form.showwithoutactivation
+    private bool _showWithoutActivation;
+
+    protected override bool ShowWithoutActivation => _showWithoutActivation;
+
+    internal bool ShowsWithoutActivationForTests => ShowWithoutActivation;
+
     // Shown where no one can see it: off screen, never activated, and only on a desktop the caller vouches for.
     internal void ShowOffScreenForPictures(Func<bool> isOwnersDesktop)
     {
@@ -103,6 +112,7 @@ internal sealed partial class MainForm
             throw new InvalidOperationException("Pictures are drawn on a private desktop only.");
         }
 
+        _showWithoutActivation = true;
         StartPosition = FormStartPosition.Manual;
         Location = new Point(-32000, -32000);
         ShowInTaskbar = false;
