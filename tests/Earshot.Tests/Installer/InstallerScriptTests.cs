@@ -1132,6 +1132,45 @@ public sealed class InstallerScriptTests
 
         Assert.AreEqual("Earshot: stopped. Earshot is already installed. Use Update or Repair.", run.Final, run.Describe());
     }
+    // ----- the test-only parameters -----
+
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell, "-Feed 'https://example.invalid/'")]
+    [DataRow(ShellKind.WindowsPowerShell, "-Roots @{ Install = 'C:\\elsewhere' }")]
+    [DataRow(ShellKind.WindowsPowerShell, "-TestHooks @{ RunVerb = { 'ran' } }")]
+    [DataRow(ShellKind.PowerShell7, "-Feed 'https://example.invalid/'")]
+    [DataRow(ShellKind.PowerShell7, "-Roots @{ Install = 'C:\\elsewhere' }")]
+    [DataRow(ShellKind.PowerShell7, "-TestHooks @{ RunVerb = { 'ran' } }")]
+    public void TheTestOnlyParametersAreRefusedUnlessTheHarnessSaysSo(ShellKind shell, string parameter)
+    {
+        using var world = new InstallerWorld();
+        world.Spec.WithoutHarnessVariable = true;
+        world.Spec.Raw = true;
+        // Help makes no request, so a run that is not refused (an old script) still touches no network.
+        world.Spec.RawScript = InstallerWorld.CallScript("-Action Help " + parameter);
+
+        InstallerRun run = world.Run(shell);
+
+        StringAssert.StartsWith(run.Final, "Earshot: stopped. -Feed, -Roots and -TestHooks are for the tests and are not accepted here.", run.Describe());
+        Assert.IsEmpty(world.Feed.Requests, "Not one request before the refusal.");
+        Assert.IsEmpty(run.Calls);
+    }
+
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void TheUsualParametersAreNotRefusedWithoutTheHarnessVariable(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        world.Spec.WithoutHarnessVariable = true;
+        world.Spec.Raw = true;
+        world.Spec.RawScript = InstallerWorld.CallScript("-Action Help");
+
+        InstallerRun run = world.Run(shell);
+
+        Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
+    }
+
     // ----- helpers run for real beside their C# counterparts -----
 
     [TestMethod]
@@ -1314,6 +1353,9 @@ internal sealed class RunSpec
     public bool Raw { get; set; }
 
     public string RawScript { get; set; } = "";
+
+    // Leave out the variable the harness sets to say the test-only parameters may be used, as a person's shell does.
+    public bool WithoutHarnessVariable { get; set; }
 
     // When set, the driver runs in a runspace of its own and its pipeline is stopped, the way Ctrl+C stops it, a while after a
     // line starting with this text was recorded in the calls log: the stop lands wherever the script is then, and its finally
@@ -1568,6 +1610,15 @@ internal sealed class InstallerWorld : IDisposable
         info.RedirectStandardInput = true;
         info.Environment["EARSHOT_SAFE_MODE"] = "1";
         info.Environment["EARSHOT_DATA_ROOT"] = _temp.File("data");
+        if (Spec.WithoutHarnessVariable)
+        {
+            info.Environment.Remove("EARSHOT_INSTALLER_TESTS");
+        }
+        else
+        {
+            info.Environment["EARSHOT_INSTALLER_TESTS"] = "1";
+        }
+
         using Process process = Process.Start(info)!;
         process.StandardInput.Close();
         Task<string> output = process.StandardOutput.ReadToEndAsync();
@@ -1676,50 +1727,56 @@ internal sealed class InstallerWorld : IDisposable
 
     // The key every world's run key sits under is left empty once the worlds' own keys are gone; it goes too. A key that still
     // holds another test's key is not empty and stays (DeleteSubKey refuses it), and one that is gone already is not an error.
-    private static void RemoveEmptyParentKey()
+    // Returns null when the key is gone, still holds something, or was removed, and otherwise what failed, with the exception's
+    // type and raw HRESULT, so a cleanup that did not happen is reported and not lost. The two delegates are the registry
+    // calls, so a test can make either one fail.
+    internal static string? RemoveEmptyKey(string parent, Func<string, Microsoft.Win32.RegistryKey?> open, Action<string> delete)
     {
-        const string parent = @"Software\EarshotInstallerTests";
         try
         {
-            using Microsoft.Win32.RegistryKey? key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(parent);
+            using Microsoft.Win32.RegistryKey? key = open(parent);
             if (key is null || key.SubKeyCount != 0 || key.ValueCount != 0)
             {
-                return;
+                return null;
             }
-        }
-        catch (System.Security.SecurityException)
-        {
-            return;
-        }
 
-        try
-        {
-            Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(parent, throwOnMissingSubKey: false);
+            delete(parent);
+            return null;
         }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or InvalidOperationException or UnauthorizedAccessException or IOException)
         {
-            // Another test made a key under it between the look and the delete: it stays.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Not ours to remove.
+            return "HKCU\\" + parent + " was not removed: " + ex.GetType().Name + " 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + " " + ex.Message;
         }
     }
+
+    private static string? RemoveEmptyParentKey() => RemoveEmptyKey(
+        @"Software\EarshotInstallerTests",
+        parent => Microsoft.Win32.Registry.CurrentUser.OpenSubKey(parent),
+        parent => Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(parent, throwOnMissingSubKey: false));
 
     public void Dispose()
     {
         _watcher?.Dispose();
         Feed.Dispose();
+        var problems = new List<string>();
         try
         {
             Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(RunKey["HKCU:\\".Length..], throwOnMissingSubKey: false);
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
         {
-            // A key the test did not make is not touched; nothing was written under this name.
+            problems.Add(RunKey + " was not removed: " + ex.GetType().Name + " 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + " " + ex.Message);
         }
 
-        RemoveEmptyParentKey();
+        if (RemoveEmptyParentKey() is string left)
+        {
+            problems.Add(left);
+        }
+
         _temp.Dispose();
+        if (problems.Count != 0)
+        {
+            throw new InvalidOperationException("The installer test world left registry keys behind: " + string.Join("; ", problems));
+        }
     }
 }

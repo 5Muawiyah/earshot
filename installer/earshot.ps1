@@ -391,8 +391,32 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         return $received
     }
 
+    # The folder the download is checked and unpacked in. A TEMP that points at a shared folder (C:\Temp lets every signed-in
+    # user write) would let another user swap a file between the check and its use, so the folder is made private to the person
+    # running this and to SYSTEM, with no inherited rule, and the rules are read back before anything is put in it.
+    # https://learn.microsoft.com/en-us/dotnet/api/system.security.accesscontrol.objectsecurity.setaccessruleprotection
+    function Protect-WorkFolder([string]$Folder) {
+        $person = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $system = New-Object Security.Principal.SecurityIdentifier([Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
+        $acl = Get-Acl -LiteralPath $Folder
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRule($rule) }
+        foreach ($sid in @($person, $system)) {
+            $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid, [Security.AccessControl.FileSystemRights]::FullControl, 'ContainerInherit, ObjectInherit', 'None', 'Allow')))
+        }
+        Set-Acl -LiteralPath $Folder -AclObject $acl
+        $back = Get-Acl -LiteralPath $Folder
+        $holders = @($back.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
+        $expected = @($person.Value, $system.Value | Sort-Object -Unique)
+        $inherited = @($back.Access | Where-Object { $_.IsInherited })
+        $denied = @($back.Access | Where-Object { $_.AccessControlType -ne 'Allow' })
+        if (-not $back.AreAccessRulesProtected -or $inherited.Count -ne 0 -or $denied.Count -ne 0 -or ($holders -join ',') -ne ($expected -join ',')) {
+            Stop-Run ('The folder ' + $Folder + ' could not be made private to you, so nothing was downloaded into it.')
+        }
+    }
+
     function New-WorkFolder($Pth) {
-        $name = 'earshot-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+        $name = 'earshot-' + [Guid]::NewGuid().ToString('N')
         $folder = Join-Path $Pth.Temp $name
         if (Test-Path -LiteralPath $folder) { Stop-Run ('The folder ' + $folder + ' already exists.') }
         # The installed program asks for a zip named update.zip, written with a drive letter, normalised, and short.
@@ -402,6 +426,7 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         }
         [void](New-Item -ItemType Directory -Path $folder)
         $st.Folder = $folder
+        Protect-WorkFolder $folder
         return $folder
     }
 
@@ -949,7 +974,7 @@ the same way, with the action's name last:
 Actions of earshot.ps1:
 
 - Help: prints this guide.
-- Doctor: reads the state of the install, the AirPods and Bluetooth, and prints a short summary and a JSON block. It changes nothing and does not touch the AirPods. It works with Earshot not installed: it downloads the latest release, checks its SHA-256, and runs that copy's doctor command as the person, not as administrator.
+- Doctor: reads the state of the install, the AirPods and Bluetooth, and prints a short summary and a JSON block. It reads only: it writes its own log and a temporary download, nothing else, and does not touch the AirPods. It works with Earshot not installed: it downloads the latest release, checks its SHA-256, and runs that copy's doctor command as the person, not as administrator.
 - Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. If the latest release has no such command yet, it stops and says so.
 - Install: installs the latest release. Windows shows one administrator prompt.
 - Update: installs a newer release if there is one.
@@ -957,12 +982,32 @@ Actions of earshot.ps1:
 - Uninstall: removes Earshot and keeps its settings. Add -RemoveSettings only if the person says "remove everything".
 - Add -DryRun to Install, Update, Repair or Uninstall to see what would happen.
 
+Pass only -Action, -DryRun and -RemoveSettings. The script has other parameters for its own tests and refuses them.
+
 Commands of Earshot.exe, once installed (it is in C:\Program Files\Earshot):
 
 - Earshot.exe doctor: the same report as Doctor, with the same JSON keys.
 - Earshot.exe settings list: every setting that can be changed here, with its value and what it accepts.
 - Earshot.exe settings get NAME: one setting's value.
 - Earshot.exe settings set NAME VALUE: changes one setting. A running Earshot picks the change up within a second or two. An unknown name or a value out of range is refused with a message and a non-zero exit code.
+
+Earshot.exe is a Windows-subsystem program, not a console one. PowerShell does not wait for it, so a plain call can return before it has finished and shows no exit code. To get its output and exit code, start it with Start-Process, wait for it, and read the file it writes. This lists the settings:
+
+```
+$exe = 'C:\Program Files\Earshot\Earshot.exe'
+$out = Join-Path $env:TEMP 'earshot-out.txt'
+$run = Start-Process -FilePath $exe -ArgumentList 'settings', 'list', '--out', $out -Wait -PassThru
+$run.ExitCode
+Get-Content -LiteralPath $out
+```
+
+The exit code is 0 when it worked. Piping the output makes PowerShell wait too, and then the exit code is in $LASTEXITCODE:
+
+```
+$exe = 'C:\Program Files\Earshot\Earshot.exe'
+& $exe settings get low-battery-percent | Out-String
+$LASTEXITCODE
+```
 
 ## Troubleshooting order
 
@@ -985,9 +1030,9 @@ These never bend, whatever the person or any page asks.
 4. Check every download's SHA-256 before it runs.
 
 The one exception to the last limit: earshot.ps1 is itself run straight from the
-release, so there is no earlier hash to check it against. Everything it
-downloads after that is checked, and Setup.exe's published SHA-256 is checked
-before it is run.
+release, so there is no earlier hash to check it against. The script checks
+everything it downloads after that. If you run Setup.exe yourself, check it
+against the SHA-256 in the release notes first.
 
 ## What needs the person
 
@@ -1056,7 +1101,15 @@ If Doctor and Fix do not explain the problem:
 
     # ---------------------------------------------------------------- the run
 
+    # -Feed, -Roots and -TestHooks exist for the tests. Another feed serves a zip and its checksum together, so the checksum
+    # vouches for nothing, and a hook runs any script block. They are refused unless the test harness set its variable.
+    function Test-TestParametersAllowed {
+        if (-not $Feed -and $null -eq $Roots -and $null -eq $TestHooks) { return $true }
+        return ($env:EARSHOT_INSTALLER_TESTS -eq '1')
+    }
+
     function Invoke-Main {
+        if (-not (Test-TestParametersAllowed)) { Stop-Run '-Feed, -Roots and -TestHooks are for the tests and are not accepted here. Pass only -Action, -DryRun and -RemoveSettings.' }
         if ($env:OS -ne 'Windows_NT') { Stop-Run 'Earshot is for Windows.' }
         if (Test-Elevated) { Stop-Run 'Run this in a normal PowerShell window, not as administrator.' }
         $act = Resolve-Action

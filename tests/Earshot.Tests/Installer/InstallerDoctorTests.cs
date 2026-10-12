@@ -32,7 +32,8 @@ public sealed class InstallerDoctorTests
     private static string Normal(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n');
 
     // The driver: hooks that stand in for the program's version and its run, the stub roots, the script called with the action.
-    private static InstallerRun Run(InstallerWorld world, ShellKind shell, string action, string version = "1.5.0", int exitCode = 0, bool realRun = false)
+    // verbProbe is PowerShell run inside the stand-in for the program's word, while the work folder exists; $out is the report's path in it.
+    private static InstallerRun Run(InstallerWorld world, ShellKind shell, string action, string version = "1.5.0", int exitCode = 0, bool realRun = false, string verbProbe = "")
     {
         var d = new StringBuilder();
         d.AppendLine("$ErrorActionPreference = 'Stop'");
@@ -48,7 +49,7 @@ public sealed class InstallerDoctorTests
         d.AppendLine("$h.ExeVersion = { param($exe) Note ('ExeVersion|' + $exe); " + InstallerWorld.Q(version) + " }");
         if (!realRun)
         {
-            d.AppendLine("$h.RunVerb = { param($exe, $verb, $out) Note ('RunVerb|' + $verb + '|' + $exe); [IO.File]::WriteAllText($out, " + InstallerWorld.Q(FakeReport + " for " + action) + "); " + exitCode + " }");
+            d.AppendLine("$h.RunVerb = { param($exe, $verb, $out) Note ('RunVerb|' + $verb + '|' + $exe); " + verbProbe + " [IO.File]::WriteAllText($out, " + InstallerWorld.Q(FakeReport + " for " + action) + "); " + exitCode + " }");
         }
 
         d.AppendLine("$roots = @{ Install = " + InstallerWorld.Q(world.Install) + "; Machine = " + InstallerWorld.Q(world.Machine) + "; UserPrograms = " + InstallerWorld.Q(world.UserPrograms) +
@@ -83,6 +84,30 @@ public sealed class InstallerDoctorTests
         Assert.IsEmpty(run.CallsNamed("Elevate"), "Never elevated.");
         Assert.AreEqual(1, world.Feed.ZipDownloads);
         Assert.IsFalse(File.Exists(world.InstalledExe), "Nothing was installed.");
+    }
+
+    // The work folder is private to the person and SYSTEM: a TEMP that is shared (C:\Temp lets every signed-in user write) must not
+    // let another user swap a file between its check and its use. The rules are read inside the run, while the folder exists.
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void TheWorkFolderIsAFreshGuidFolderThatOnlyThePersonAndSystemCanUse(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+        const string probe =
+            "$f = Split-Path -Parent $out; $a = Get-Acl -LiteralPath $f; Note ('Folder|' + (Split-Path -Leaf $f)); Note ('Protected|' + $a.AreAccessRulesProtected); " +
+            "foreach ($r in $a.Access) { Note ('Rule|' + $r.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value + '|' + $r.IsInherited + '|' + $r.AccessControlType) };";
+
+        InstallerRun run = Run(world, shell, "Doctor", verbProbe: probe);
+
+        Assert.AreEqual("Earshot: done.", run.Final, run.Describe());
+        string folder = run.Calls.Single(c => c.StartsWith("Folder|", StringComparison.Ordinal))["Folder|".Length..];
+        Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(folder, "^earshot-[0-9a-f]{32}$"), "A whole GUID, not a guessable part of one: " + folder);
+        Assert.AreEqual("Protected|True", run.Calls.Single(c => c.StartsWith("Protected|", StringComparison.Ordinal)), "No rule is inherited from TEMP.");
+        string person = System.Security.Principal.WindowsIdentity.GetCurrent().User!.Value;
+        string[] rules = run.Calls.Where(c => c.StartsWith("Rule|", StringComparison.Ordinal)).Select(c => c["Rule|".Length..]).OrderBy(c => c, StringComparer.Ordinal).ToArray();
+        CollectionAssert.AreEqual(new[] { "S-1-5-18|False|Allow", person + "|False|Allow" }.OrderBy(c => c, StringComparer.Ordinal).ToArray(), rules, run.Describe());
+        Assert.IsEmpty(Directory.GetDirectories(world.TempRoot, "earshot-*"), "The folder is removed at the end.");
     }
 
     [TestMethod]
@@ -177,7 +202,7 @@ public sealed class InstallerDoctorTests
             "Defender", "SmartScreen", "UAC", "Secure Boot", "other scripts from the internet",
             "Touch only the person's AirPods", "never the Bluetooth radio", "never other drivers",
             "remove everything", "Check every download's SHA-256 before it runs",
-            "earshot.ps1 is itself run straight from the release", "Setup.exe's published SHA-256 is checked",
+            "earshot.ps1 is itself run straight from the release", "If you run Setup.exe yourself, check it against the SHA-256 in the release notes first",
             "administrator prompts", "pairing mode", "Fix's two on-screen OK prompts",
             "without asking first", "https://github.com/5Muawiyah/earshot/issues", "Show the draft to the person",
             "Run Doctor first", "-Action Doctor", "Earshot.exe settings set NAME VALUE", "Earshot.exe doctor",

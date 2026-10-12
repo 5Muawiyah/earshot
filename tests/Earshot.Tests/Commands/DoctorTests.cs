@@ -157,8 +157,8 @@ public sealed class DoctorTests
         return keys;
     }
 
-    // The same facts through the C# report. The install script's Doctor action is held to this by a test of its own, which
-    // reads the same JSON and compares the whole report.
+    // The same facts through the C# report. The install script's Doctor action makes no report of its own: it runs the program's
+    // doctor command and shows what it printed, so this report is the one a person or an AI reads either way.
     internal static JsonNode ReportFor(DoctorFacts facts) => JsonNode.Parse(DoctorReport.Build(facts))!;
 
     [TestMethod]
