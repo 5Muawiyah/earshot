@@ -71,6 +71,7 @@ internal sealed partial class TrayContext
         _menu.CheckForUpdatesClicked += (_, _) => Start("check for updates", CheckForUpdatesAsync);
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
         WireRepair(options);
+        WireFixConnection();
         RemoveStaleUpdateStaging();
         ApplyUpdates();
         if (options.UpdateOutcome is { } outcomeSource)

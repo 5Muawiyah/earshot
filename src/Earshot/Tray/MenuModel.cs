@@ -47,6 +47,7 @@ internal sealed record MenuState(
     MenuItemState ChooseDevice,
     MenuItemState SetUp,
     MenuItemState Repair,
+    MenuItemState FixConnection,
     MenuItemState CheckForUpdates,
     MenuItemState CheckAutomatically,
     MenuItemState CopyDiagnostics,
@@ -74,6 +75,8 @@ internal static class MenuModel
     public const string ChooseDevice = "Choose device...";
     public const string SetUpEarshot = "Set up Earshot...";
     public const string RepairEarshot = "Repair Earshot...";
+    // Starts the fix run, which asks its own two questions on screen; it works whether or not Earshot is installed.
+    public const string FixConnection = "Fix connection...";
     // Kept exactly as UpdateCopy has it, referenced rather than duplicated, so the menu and the update page never
     // word the same thing two ways.
     public const string CheckForUpdates = Earshot.Update.UpdateCopy.CheckRowLabel;
@@ -167,6 +170,7 @@ internal static class MenuModel
             // these are disabled and say why in their own text.
             SetUp: new MenuItemState(WithReason(SetUpEarshot, elevatedRun), Checked: false, Enabled: !busy && elevatedRun is null, Visible: TrayStatus.OffersSetUp(block)),
             Repair: new MenuItemState(WithReason(RepairEarshot, elevatedRun), Checked: false, Enabled: !busy && elevatedRun is null, Visible: TrayStatus.OffersRepair(block)),
+            FixConnection: new MenuItemState(WithReason(FixConnection, elevatedRun), Checked: false, Enabled: !busy && elevatedRun is null, Visible: true),
             // A check reads GitHub and touches no device, so a connect in flight does not stop it; only another
             // update step does.
             CheckForUpdates: new MenuItemState(WithReason(CheckForUpdates, elevatedRun), Checked: false, Enabled: !updateInProgress && elevatedRun is null, Visible: true),

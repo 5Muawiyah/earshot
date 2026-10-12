@@ -60,12 +60,18 @@ internal interface IFixLauncher
     bool Start(ILog log);
 }
 
-internal sealed class OwnProgramFixLauncher : IFixLauncher
+// When the run's process ends, `ended` is called on a pool thread; the tray posts it to the UI thread, where the coordinator runs
+// its start checks again (a run can end with a new pair Earshot does not protect). The program path is a parameter only so a
+// test can start a harmless program in place of this one.
+internal sealed class OwnProgramFixLauncher(Action? ended = null, Func<string?>? programPath = null) : IFixLauncher
 {
+    private readonly Lock _gate = new();
+    private readonly List<Process> _running = [];
+
     public bool Start(ILog log)
     {
         ArgumentNullException.ThrowIfNull(log);
-        string? exe = Environment.ProcessPath;
+        string? exe = (programPath ?? (() => Environment.ProcessPath))();
         if (exe is null)
         {
             log.Warn("Fix connection: this program's own path is not known, so it was not started.");
@@ -74,15 +80,65 @@ internal sealed class OwnProgramFixLauncher : IFixLauncher
 
         var start = new ProcessStartInfo(exe) { UseShellExecute = false };
         start.ArgumentList.Add("fix");
+        Process? process = null;
         try
         {
-            using Process? process = Process.Start(start);
-            return process is not null;
+            process = new Process { StartInfo = start, EnableRaisingEvents = ended is not null };
+            if (ended is not null)
+            {
+                process.Exited += (_, _) => OnEnded(process, log);
+                lock (_gate)
+                {
+                    _running.Add(process);
+                }
+            }
+
+            if (!process.Start())
+            {
+                Forget(process);
+                return false;
+            }
+
+            if (ended is null)
+            {
+                process.Dispose();
+            }
+
+            return true;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            log.Error("Fix connection: it could not be started (" + ex.GetType().Name + ").", ex);
+            log.Error("Fix connection: it could not be started (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ").", ex);
+            if (process is not null)
+            {
+                Forget(process);
+            }
+
             return false;
         }
+    }
+
+    private void OnEnded(Process process, ILog log)
+    {
+        Forget(process);
+        try
+        {
+            ended?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            log.Error("Fix connection: the work after the run ended failed (" + ex.GetType().Name + ").", ex);
+        }
+    }
+
+    private void Forget(Process process)
+    {
+        lock (_gate)
+        {
+            _running.Remove(process);
+        }
+
+        process.Dispose();
     }
 }

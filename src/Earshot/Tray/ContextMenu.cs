@@ -40,6 +40,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _chooseDevice = new();
     private readonly ToolStripMenuItem _setUp = new();
     private readonly ToolStripMenuItem _repair = new();
+    private readonly ToolStripMenuItem _fixConnection = new();
     private readonly ToolStripMenuItem _checkForUpdates = new();
     private readonly ToolStripMenuItem _checkAutomatically = new();
     private readonly ToolStripMenuItem _copyDiagnostics = new();
@@ -76,6 +77,7 @@ internal sealed class TrayMenu : IDisposable
             _chooseDevice,
             _setUp,
             _repair,
+            _fixConnection,
             new ToolStripSeparator(),
             _checkForUpdates,
             _checkAutomatically,
@@ -100,6 +102,7 @@ internal sealed class TrayMenu : IDisposable
         _chooseDevice.Click += (_, _) => ChooseDeviceClicked?.Invoke(this, EventArgs.Empty);
         _setUp.Click += (_, _) => SetUpClicked?.Invoke(this, EventArgs.Empty);
         _repair.Click += (_, _) => RepairClicked?.Invoke(this, EventArgs.Empty);
+        _fixConnection.Click += (_, _) => FixConnectionClicked?.Invoke(this, EventArgs.Empty);
         _checkForUpdates.Click += (_, _) => CheckForUpdatesClicked?.Invoke(this, EventArgs.Empty);
         _checkAutomatically.Click += (_, _) => CheckAutomaticallyClicked?.Invoke(this, EventArgs.Empty);
         _copyDiagnostics.Click += (_, _) => CopyDiagnosticsClicked?.Invoke(this, EventArgs.Empty);
@@ -147,6 +150,8 @@ internal sealed class TrayMenu : IDisposable
 
     public event EventHandler? RepairClicked;
 
+    public event EventHandler? FixConnectionClicked;
+
     public event EventHandler? CheckForUpdatesClicked;
 
     public event EventHandler? CheckAutomaticallyClicked;
@@ -191,6 +196,7 @@ internal sealed class TrayMenu : IDisposable
         Set(_chooseDevice, state.ChooseDevice);
         Set(_setUp, state.SetUp);
         Set(_repair, state.Repair);
+        Set(_fixConnection, state.FixConnection);
         Set(_checkForUpdates, state.CheckForUpdates);
         Set(_checkAutomatically, state.CheckAutomatically);
         Set(_copyDiagnostics, state.CopyDiagnostics);

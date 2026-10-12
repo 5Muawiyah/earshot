@@ -313,7 +313,8 @@ internal static partial class Program
     // the window of a re-pair, say when paired AirPods are not the protected ones) are inert in safe mode and with a redirected
     // data root, where the gate is never reached.
     internal static CoordinatorServices CreateCoordinatorServices(
-        Paths paths, ISettingsStore settings, ILog log, ConnectHistory? history, TimeProvider time, Func<Widget.IWidgetStatus?> widget, ISystemWorker? worker)
+        Paths paths, ISettingsStore settings, ILog log, ConnectHistory? history, TimeProvider time, Func<Widget.IWidgetStatus?> widget, ISystemWorker? worker,
+        Action? fixEnded = null)
     {
         var nodes = new CfgMgr32NodeReader();
         bool gateReachable = !paths.IsSafeMode && !paths.IsRedirected;
@@ -344,7 +345,7 @@ internal static partial class Program
             Recovery = recovery,
             RePair = rePair,
             Protection = protection,
-            FixLauncher = new OwnProgramFixLauncher(),
+            FixLauncher = new OwnProgramFixLauncher(fixEnded),
         };
     }
 
@@ -419,7 +420,8 @@ internal static partial class Program
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon),
-                    CreateCoordinatorServices(paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker));
+                    CreateCoordinatorServices(paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker,
+                        () => registry.UiPost(() => coordinator?.RecheckProtectionAfterFix())));
 
                 // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
                 // constructed below): the toast route's AppUserModelID must be set before a window or a toast
