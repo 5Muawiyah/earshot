@@ -14,6 +14,12 @@ public sealed class DoctorTests
         "time=1760000000 step=connect outcome=failed code=-2147023673 reason=timeout",
         "time=1760000100 step=connect outcome=failed reason=(text removed)",
         "time=1760000200 step=Connect <address> outcome=true attempt=2",
+        // A code, a try count and a duration outside their ranges are dropped, as is a number under a word key or in a time that is not one.
+        "time=1760000300 step=connect outcome=failed",
+        "outcome=seen <address> and <address> reason=ok",
+        "time=2026-10-12T09:15:30.123Z step=connect outcome=ok code=0 attempt=1 durationMs=850",
+        // Text under a number key (a time that is not a plain UTC time, a code written as text) is dropped.
+        "step=connect outcome=ok",
     ];
 
     private static string Fenced(string output)
@@ -51,12 +57,33 @@ public sealed class DoctorTests
 
         JsonElement pods = root.GetProperty("airpods");
         Assert.AreEqual(2, pods.GetArrayLength(), "The Pro 3 node and the Pro node; the iPhone is not an AirPods model and the other node is not Apple's.");
-        Assert.AreEqual("AirPods Pro 3", pods[0].GetProperty("model").GetString());
+        Assert.AreEqual("model 2027", pods[0].GetProperty("model").GetString(), "No published source names 2027, so the report gives the code and not a product name.");
         Assert.AreEqual(43, pods[0].GetProperty("problemCode").GetInt32());
         Assert.IsTrue(pods[0].GetProperty("disabled").GetBoolean());
         Assert.AreEqual("AirPods Pro", pods[1].GetProperty("model").GetString());
         Assert.AreEqual(JsonValueKind.Null, pods[1].GetProperty("disabled").ValueKind);
         Assert.AreEqual(1, root.GetProperty("otherAppleNodes").GetInt32(), "The iPhone's node is counted and not described.");
+    }
+
+    [TestMethod]
+    public void TheSummaryCountsOtherAppleEntriesAndSaysWhatTheyMayBe()
+    {
+        string output = Run(new FakeDoctorSource(DoctorFixture.Facts()));
+
+        StringAssert.Contains(output, "1 other Apple entry: an iPhone or AirPods of a model not listed.");
+        Assert.IsFalse(Run(new FakeDoctorSource(new DoctorFacts())).Contains("other Apple", StringComparison.Ordinal), "No line when there are none.");
+    }
+
+    [TestMethod]
+    public void AnUnlistedModelOfAirPodsIsNotReportedAsNoneFound()
+    {
+        DoctorFacts facts = DoctorFixture.Facts();
+        facts.Devices = facts.Devices!.Where(d => d.InstanceId.Contains("_PID&12A8", StringComparison.Ordinal)).ToList();
+
+        string output = Run(new FakeDoctorSource(facts));
+
+        StringAssert.Contains(output, "AirPods in Windows: none found.");
+        StringAssert.Contains(output, "1 other Apple entry: an iPhone or AirPods of a model not listed.");
     }
 
     [TestMethod]

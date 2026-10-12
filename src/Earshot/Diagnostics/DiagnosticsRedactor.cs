@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -24,8 +25,12 @@ namespace Earshot.Diagnostics;
 // prefixed "\\?\".
 // https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file
 //
+// An address is also taken in the two other forms a 48-bit number is printed in: held in 64 bits (sixteen hex digits with the
+// unused sixteen bits zero at either end) and as a decimal integer of 13 to 15 digits that fits in 48 bits.
+//
 // Design choice: a twelve-digit run of hex digits is taken as an address even when all the digits are decimal.
-// That may blank a harmless twelve-digit number; the alternative leaks about one address in 300.
+// That may blank a harmless twelve-digit number; the alternative leaks about one address in 300. The same choice is made for the
+// decimal and the 64-bit forms, so a 13-digit millisecond time or a 64-bit pointer such as 0x00007FF6A1B2C3D4 may be blanked too.
 public static partial class DiagnosticsRedactor
 {
     public const string AddressTag = "<address>";
@@ -83,6 +88,21 @@ public static partial class DiagnosticsRedactor
     [GeneratedRegex(@"(?<![0-9A-Za-z])(?:0[xX])?[0-9A-Fa-f]{12}(?![0-9A-Za-z])", RegexOptions.CultureInvariant)]
     private static partial Regex AddressDigits();
 
+    // A 48-bit address held in 64 bits: sixteen hex digits whose unused sixteen bits are zero, at the top or at the bottom.
+    [GeneratedRegex(@"(?<![0-9A-Za-z])(?:0[xX])?(?:0{4}[0-9A-Fa-f]{12}|[0-9A-Fa-f]{12}0{4})(?![0-9A-Za-z])", RegexOptions.CultureInvariant)]
+    private static partial Regex AddressWide();
+
+    // A 48-bit address written as a decimal integer. The largest is 281474976710655, 15 digits; a 12-digit run is already taken
+    // by AddressDigits. A run joined to other characters by "-", "_" or "." is part of something else (a compact date in a file
+    // name, a version), and is kept.
+    [GeneratedRegex(@"(?<![0-9A-Za-z_.\-])\d{13,15}(?![0-9A-Za-z_\-])(?!\.\d)", RegexOptions.CultureInvariant)]
+    private static partial Regex AddressDecimal();
+
+    private const long LargestAddress = 0xFFFFFFFFFFFF;
+
+    private static string DecimalAddress(Match m) =>
+        long.TryParse(m.Value, NumberStyles.None, CultureInfo.InvariantCulture, out long value) && value <= LargestAddress ? AddressTag : m.Value;
+
     // The lines the tray writes when a device is chosen or pinned carry the device's name, and the search string the owner
     // typed, which are not in the known names once the owner has chosen another device (only the one in use now is). They
     // are taken out by where they sit in the line, whatever they say. The shapes are those of TrayContext's three lines:
@@ -138,6 +158,8 @@ public static partial class DiagnosticsRedactor
         result = GuidPlain().Replace(result, IdTag);
         result = AddressPairs().Replace(result, AddressTag);
         result = AddressDigits().Replace(result, AddressTag);
+        result = AddressWide().Replace(result, AddressTag);
+        result = AddressDecimal().Replace(result, DecimalAddress);
 
         foreach (Regex name in NamePatterns(knownNames, userName))
         {

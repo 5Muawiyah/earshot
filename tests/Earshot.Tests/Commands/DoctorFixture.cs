@@ -16,6 +16,8 @@ internal static class DoctorFixture
     [
         "Jonathan", "JONATHAN-PC", "0A1B2C3D4E8C", "0A:1B:2C:3D:4E:8C", "5c3a9e21-4b7d-5f18-9a6c-2d8e0b4f7a13",
         "H9XQ2LMN0Z", "F2LXK9QWP1", "2A3B4C5D", "S-1-5-21-1111111111", "C:\\Users\\jonathan", "C00000000", "9d1e7f30",
+        // The address 0A1B2C3D4E8C as a decimal integer (and, in the fixture's history, zero-extended to 16 hex digits).
+        "11111822610060", "00000A1B2C3D4E8C",
     ];
 
     // The facts as JSON, in the shape the script's hooks read and the C# facts deserialise from. The tray read is left out
@@ -48,12 +50,16 @@ internal static class DoctorFixture
           ],
           "history": {
             "exists": true,
-            "lines": 4,
+            "lines": 7,
             "last": [
               "{\"time\":1760000000,\"step\":\"connect\",\"outcome\":\"failed\",\"code\":-2147023673,\"reason\":\"timeout\",\"device\":\"Jonathan's AirPods Pro\",\"address\":\"0A1B2C3D4E8C\"}",
               "{\"time\":1760000100,\"step\":\"connect\",\"outcome\":\"failed\",\"reason\":\"Jonathan's AirPods Pro would not answer at 0A:1B:2C:3D:4E:8C\"}",
               "not json Jonathan's AirPods 0A1B2C3D4E8C",
-              "{\"time\":1760000200,\"step\":\"Connect 0A1B2C3D4E8C\",\"outcome\":true,\"attempt\":2}"
+              "{\"time\":1760000200,\"step\":\"Connect 0A1B2C3D4E8C\",\"outcome\":true,\"attempt\":2}",
+              "{\"time\":1760000300,\"step\":\"connect\",\"outcome\":\"failed\",\"code\":11111822610060,\"attempt\":99999,\"durationMs\":-5}",
+              "{\"time\":11111822610060,\"step\":11111822610060,\"outcome\":\"seen 00000A1B2C3D4E8C and 11111822610060\",\"reason\":\"ok\"}",
+              "{\"time\":\"2026-10-12T09:15:30.123Z\",\"step\":\"connect\",\"outcome\":\"ok\",\"code\":0,\"attempt\":1,\"durationMs\":850}",
+              "{\"time\":\"11111822610060\",\"step\":\"connect\",\"outcome\":\"ok\",\"code\":\"11111822610060\"}"
             ]
           },
           "lastReadingSaved": true,
