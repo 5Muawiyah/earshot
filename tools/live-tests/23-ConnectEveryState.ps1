@@ -59,7 +59,8 @@ $run = New-LiveTestRun -TestId '23-connect-every-state' -Title 'Connect from eve
 $BudgetMs = 20000
 $KeepSeconds = 120
 
-# Every leg ends with Earshot's own Disconnect, which blocks the nodes, so the closing step finds nothing to undo.
+# Every leg but the last Connect of each half ends with Earshot's own Disconnect, which blocks the nodes; the closing step
+# blocks whatever the last one left.
 $atRestReason = ''
 
 # The AirPods' own entries in Windows, from a read-only node read: the nodes state and how many entries are
@@ -191,7 +192,7 @@ try
             'The AirPods are paired with this PC and with your iPhone, and your iPhone is with you.',
             'Nothing is connected to this PC through Bluetooth audio except, later, the AirPods.'
         ) -PhysicalActions @(
-            'Three times, connect the AirPods through Windows: Settings, Bluetooth and devices, Connect.',
+            'Three times, connect the AirPods with Earshot, then disconnect and connect them again through Windows: Settings, Bluetooth and devices.',
             'For each state, set it up, then connect from the Earshot card, three times: the AirPods in use on your iPhone, the case opened next to this PC, this PC just woken from sleep.',
             'Restart this PC when asked, sign in, and run the command this half prints, for three Connects after the restart.'
         )
@@ -206,7 +207,9 @@ try
             $keptDetails = @()
             for ($i = 1; $i -le 3; $i++)
             {
-                Wait-Owner -Run $run -Text 'Open Settings, then Bluetooth and devices. Find your AirPods and choose Connect there, not in Earshot. When they are connected, come back here.'
+                # Block at boot keeps the nodes blocked, so Windows alone cannot connect them: Earshot's Connect allows them first, and
+                # the person then disconnects and connects in Windows at once, before the idle rule blocks free nodes again.
+                Wait-Owner -Run $run -Text 'Left-click the Earshot icon and choose Connect, and wait until the AirPods play. Then open Settings, then Bluetooth and devices, find your AirPods, click Disconnect there and straight away Connect there. When they are connected, come back here.'
                 $formed = (Get-TargetEndpointStates -AudioJson (Get-AudioState -Run $run -Label ('audio-windows-' + $i + '-formed'))).Render
                 $later = $null
                 if ($formed -eq 'Active')

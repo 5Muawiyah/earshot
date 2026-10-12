@@ -133,11 +133,11 @@ internal static class TesterPictures
                 PlainLine = "Are all of those true, and are you ready to start?",
                 PlainPhysicalActions =
                 [
-                    "Three times, connect the AirPods in Windows settings.",
+                    "Three times, connect the AirPods with Earshot, then disconnect and connect them again in Windows settings.",
                     "Set up each state, then connect from the Earshot card, three times each.",
                     "Restart when asked, then connect three more times.",
                 ],
-                ScriptOwnWords = "Three times, connect the AirPods through Windows: Settings, Bluetooth and devices, Connect.",
+                ScriptOwnWords = "Three times, connect the AirPods with Earshot, then disconnect and connect them again through Windows: Settings, Bluetooth and devices.",
                 Buttons = [new PromptButton("Yes", "y"), new PromptButton("No", "n")],
                 HowToBlocks = [windowsBlock, caseBlock],
             };
