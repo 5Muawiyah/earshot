@@ -24,6 +24,8 @@ namespace Earshot;
 //   probe [target] [--json] [--out]   TryRunProbe      App\Program.Probe.cs
 //   diag <target> ...                 TryRunDiag       App\Program.Diag.cs
 //   service                           TryRunService    App\Program.Service.cs (started by the service control manager only)
+//   doctor [--out <path>]             TryRunDoctor     Commands\Program.Commands.cs (read only report for a person or an AI)
+//   settings list|get|set             TryRunSettings  Commands\Program.Commands.cs (the settings page's options, from a terminal)
 //
 // Dispatch runs before WinForms is initialised and before the single-instance mutex, so the
 // headless modes never touch WinForms and install is never mistaken for a second tray.
@@ -148,6 +150,8 @@ internal static partial class Program
             case "probe":     label = mode; TryRunProbe(ctx); break;
             case "diag":      label = mode; TryRunDiag(ctx); break;
             case "service":   label = mode; TryRunService(ctx); break;
+            case "doctor":    label = mode; TryRunDoctor(ctx); break;
+            case "settings":  label = mode; TryRunSettings(ctx); break;
             default:          label = "tray"; TryRunTray(ctx); break;
         }
 
@@ -209,6 +213,8 @@ internal static partial class Program
     static partial void TryRunProbe(RunContext ctx);
     static partial void TryRunDiag(RunContext ctx);
     static partial void TryRunService(RunContext ctx);
+    static partial void TryRunDoctor(RunContext ctx);
+    static partial void TryRunSettings(RunContext ctx);
 
     // A failure before any mode runs. Written to the debugger output, and to the log ModeLog chooses when the
     // log folder can be resolved.
