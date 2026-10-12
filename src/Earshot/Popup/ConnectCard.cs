@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Tray;
+using Earshot.Widget;
 
 namespace Earshot.Popup;
 
@@ -13,6 +14,13 @@ internal interface ICardSurface : IDisposable
     event EventHandler? Clicked;
 
     bool IsDisposed { get; }
+
+    // The user pressed the card's button (CardContent.Action). A surface with no button never raises it.
+    event EventHandler? ActionClicked
+    {
+        add { }
+        remove { }
+    }
 
     // Lays the card out for content at dpi, no wider than maxWidth physical pixels, and returns its size
     // in physical pixels. Nothing is shown yet.
@@ -67,6 +75,11 @@ internal sealed class ConnectCard : Form, ICardSurface
     internal const int PaddingYAt96 = 12;
     internal const int LineGapAt96 = 2;
     internal const int MinWidthAt96 = 240;
+
+    // The card's button, when it has one: its padding inside and the gap above it.
+    internal const int ActionPaddingXAt96 = 12;
+    internal const int ActionPaddingYAt96 = 5;
+    internal const int ActionGapAt96 = 8;
     internal const int MaxWidthAt96 = 560;
 
     // One line each, no mnemonic underscores, an ellipsis when a line is too long for the widest card.
@@ -84,8 +97,10 @@ internal sealed class ConnectCard : Form, ICardSurface
     private Font? _titleFont;
     private Font? _statusFont;
     private int _fontDpi;
+    private int _dpi = CardPlacement.BaseDpi;
     private Rectangle _titleBounds;
     private Rectangle _statusBounds;
+    private Rectangle _actionBounds;
     private bool _dwmFrame;
     private bool _shown;
     private string? _lastFrameProblem;
@@ -123,6 +138,8 @@ internal sealed class ConnectCard : Form, ICardSurface
 
     public event EventHandler? Clicked;
 
+    public event EventHandler? ActionClicked;
+
     protected override bool ShowWithoutActivation => true;
 
     protected override CreateParams CreateParams
@@ -141,6 +158,7 @@ internal sealed class ConnectCard : Form, ICardSurface
         ArgumentNullException.ThrowIfNull(palette);
 
         int effectiveDpi = dpi > 0 ? dpi : CardPlacement.BaseDpi;
+        _dpi = effectiveDpi;
         (Font title, Font status) = FontsFor(effectiveDpi);
         _content = content;
         _palette = palette;
@@ -157,12 +175,28 @@ internal sealed class ConnectCard : Form, ICardSurface
 
         int widest = Math.Max(1, Math.Min(CardPlacement.Scale(MaxWidthAt96, effectiveDpi), maxWidth));
         int narrowest = Math.Min(CardPlacement.Scale(MinWidthAt96, effectiveDpi), widest);
-        int width = Math.Clamp(Math.Max(titleText.Width, statusText.Width) + (2 * padX), narrowest, widest);
+        // The button under the status, when the card has one: as wide as its words plus the padding, never wider than the card.
+        Size actionText = content.Action is { } action ? TextRenderer.MeasureText(action.Label, status, Unbounded, LineFormat) : Size.Empty;
+        int actionPad = CardPlacement.Scale(ActionPaddingXAt96, effectiveDpi);
+        int actionWidth = content.Action is null ? 0 : actionText.Width + (2 * actionPad);
+        int width = Math.Clamp(Math.Max(Math.Max(titleText.Width, statusText.Width), actionWidth) + (2 * padX), narrowest, widest);
         int textWidth = Math.Max(1, width - (2 * padX));
 
         _titleBounds = new Rectangle(padX, padY, textWidth, titleHeight);
         _statusBounds = new Rectangle(padX, padY + titleHeight + gap, textWidth, statusHeight);
-        Size size = new(width, _statusBounds.Bottom + padY);
+        int bottom = _statusBounds.Bottom;
+        if (content.Action is null)
+        {
+            _actionBounds = Rectangle.Empty;
+        }
+        else
+        {
+            int actionHeight = Math.Max(statusHeight, status.Height) + (2 * CardPlacement.Scale(ActionPaddingYAt96, effectiveDpi));
+            _actionBounds = new Rectangle(padX, _statusBounds.Bottom + CardPlacement.Scale(ActionGapAt96, effectiveDpi), Math.Min(actionWidth, textWidth), actionHeight);
+            bottom = _actionBounds.Bottom;
+        }
+
+        Size size = new(width, bottom + padY);
         var key = new PreparedKey(content, palette, size, effectiveDpi);
         _contentChanged = _contentChanged || _prepared != key;
         _prepared = key;
@@ -253,6 +287,12 @@ internal sealed class ConnectCard : Form, ICardSurface
 
     internal Rectangle StatusLineBounds() => _statusBounds;
 
+    // Where the button is drawn, in client coordinates; empty when the card has none.
+    internal Rectangle ActionBounds() => _actionBounds;
+
+    // What a press at point does on this card, for tests: the button, or the card's dismissal.
+    internal bool PressHitsAction(Point point) => !_actionBounds.IsEmpty && _actionBounds.Contains(point);
+
     // True when DWM rounds the corners and draws the border, so the card paints no border itself.
     internal bool HasDwmFrame() => _dwmFrame;
 
@@ -278,6 +318,12 @@ internal sealed class ConnectCard : Form, ICardSurface
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
+        if (e.Button == MouseButtons.Left && PressHitsAction(e.Location))
+        {
+            ActionClicked?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         Clicked?.Invoke(this, EventArgs.Empty);
     }
 
@@ -321,6 +367,16 @@ internal sealed class ConnectCard : Form, ICardSurface
 
         DrawLine(g, _content.Title, _titleFont, _titleBounds, _palette.Title);
         DrawLine(g, _content.Status, _statusFont, _statusBounds, _palette.Status);
+        if (_content.Action is { } action && !_actionBounds.IsEmpty)
+        {
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using var pen = new Pen(_palette.Title);
+            using System.Drawing.Drawing2D.GraphicsPath path = CardPaint.RoundedRectangle(
+                new RectangleF(_actionBounds.X + 0.5f, _actionBounds.Y + 0.5f, _actionBounds.Width - 1, _actionBounds.Height - 1),
+                CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi));
+            g.DrawPath(pen, path);
+            DrawLine(g, action.Label, _statusFont, _actionBounds, _palette.Title, centre: true);
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -336,7 +392,7 @@ internal sealed class ConnectCard : Form, ICardSurface
         base.Dispose(disposing);
     }
 
-    private void DrawLine(Graphics g, string text, Font? font, Rectangle bounds, Color colour)
+    private void DrawLine(Graphics g, string text, Font? font, Rectangle bounds, Color colour, bool centre = false)
     {
         if (font is null || text.Length == 0)
         {
@@ -344,7 +400,10 @@ internal sealed class ConnectCard : Form, ICardSurface
         }
 
         _painted.Add(text);
-        TextRenderer.DrawText(g, text, font, bounds, colour, _palette.Background, LineFormat);
+        TextFormatFlags format = centre
+            ? (LineFormat & ~(TextFormatFlags.Left | TextFormatFlags.Top)) | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter
+            : LineFormat;
+        TextRenderer.DrawText(g, text, font, bounds, colour, _palette.Background, format);
     }
 
     // The title and status fonts in pixels for dpi, reused while the DPI stays the same.

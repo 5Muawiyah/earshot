@@ -51,6 +51,9 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     // How long a card stays up. A UI timing choice, not a measurement.
     public static readonly TimeSpan DismissAfter = TimeSpan.FromSeconds(4);
 
+    // How long a card with a button stays up: long enough to read the reason and reach for the button. A UI timing choice.
+    public static readonly TimeSpan ActionDismissAfter = TimeSpan.FromSeconds(12);
+
     // How long after a card was last shown at a click point that point still anchors the next card after
     // a click. A UI timing choice, not a measurement: meant to outlast the wait of a connect or disconnect,
     // including one that allows the device first, while an older click's point is not reused. A result
@@ -69,6 +72,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     private readonly Func<ICardTimer> _createTimer;
     private readonly TimeProvider _time;
     private ICardSurface? _card;
+    private CardContent? _shownContent;
     private ICardTimer? _timer;
     private Point? _clickAnchor;
     private long _clickAnchorShownAt;
@@ -161,6 +165,7 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         if (_card is not null)
         {
             _card.Clicked -= OnCardClicked;
+            _card.ActionClicked -= OnCardActionClicked;
             _card.Dispose();
             _card = null;
         }
@@ -305,7 +310,8 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
             }
 
             _onScreen = true;
-            timer.Restart(DismissAfter);
+            _shownContent = content;
+            timer.Restart(content.Action is null ? DismissAfter : ActionDismissAfter);
             _log.Write(LogLevel.Debug, string.Create(CultureInfo.InvariantCulture,
                 $"Shown at {bounds.X},{bounds.Y} {bounds.Width}x{bounds.Height}, {dpi} DPI, taskbar {target.Edge}, {where}: {what}."));
             return true;
@@ -399,10 +405,12 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
         {
             // Closed from outside, for example by Application.Exit. A new one replaces it.
             _card.Clicked -= OnCardClicked;
+            _card.ActionClicked -= OnCardActionClicked;
         }
 
         _card = _createCard();
         _card.Clicked += OnCardClicked;
+        _card.ActionClicked += OnCardActionClicked;
         return _card;
     }
 
@@ -418,6 +426,28 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
     }
 
     private void OnTimerElapsed(object? sender, EventArgs e) => HideOnUiThread();
+
+    // The card's button: the card goes away and then what the button does runs. A failure of it is logged, not thrown into the
+    // message loop.
+    private void OnCardActionClicked(object? sender, EventArgs e)
+    {
+        CardAction? action = _shownContent?.Action;
+        _log.Write(LogLevel.Debug, "Card button pressed" + (action is null ? ", but the card has none." : ": " + action.Label + "."));
+        HideOnUiThread();
+        if (action is null)
+        {
+            return;
+        }
+
+        try
+        {
+            action.OnClick();
+        }
+        catch (Exception ex)
+        {
+            _log.Error("Card: the button \"" + action.Label + "\" failed (" + ex.GetType().Name + ").", ex);
+        }
+    }
 
     private void OnCardClicked(object? sender, EventArgs e)
     {

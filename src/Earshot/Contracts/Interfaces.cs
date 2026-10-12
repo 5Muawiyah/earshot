@@ -90,7 +90,11 @@ public interface IBatteryProvider
 
 // Card surface. The popup card implements it; everything else only calls Show and Hide.
 public enum CardAnchor { NearCursor, NearTray }
-public sealed record CardContent(string Title, string Status);   // Title = device name; no battery field in v1
+// Title = device name; no battery field in v1. Action is one button under the status (the Fix offer), or null for none.
+public sealed record CardContent(string Title, string Status, CardAction? Action = null);
+
+// A button on a card: its words and what a press does. The card hides itself when it is pressed.
+public sealed record CardAction(string Label, Action OnClick);
 public interface ICardPresenter
 {
     void Show(CardContent content, CardAnchor anchor);
