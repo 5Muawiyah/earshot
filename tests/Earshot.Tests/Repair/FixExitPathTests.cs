@@ -233,6 +233,18 @@ public sealed class FixExitPathTests
 
         Expect.Same(rig.GateFake.Calls, "adopt:" + FixRig.NewAirPodsAddress, "block");
         Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        AssertTheNewPairIsReportedUnprotected(result);
+    }
+
+    // The closing block after a failed adoption goes to the pin Earshot still holds, which is the pair that was just removed,
+    // so it cannot protect the new pair. The result must say the new pair is not protected and must never claim the AirPods
+    // were blocked.
+    private static void AssertTheNewPairIsReportedUnprotected(FixResult result)
+    {
+        string all = string.Join(" | ", result.Lines);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("new pair is not protected", StringComparison.OrdinalIgnoreCase)), all);
+        Assert.IsFalse(result.Lines.Any(l => l.Contains("blocked the AirPods again", StringComparison.OrdinalIgnoreCase)
+            || l.Contains("blocking the AirPods again", StringComparison.OrdinalIgnoreCase)), all);
     }
 
     [TestMethod]
@@ -253,6 +265,7 @@ public sealed class FixExitPathTests
 
         Expect.Same(rig.GateFake.Calls, "adopt:" + FixRig.NewAirPodsAddress, "block");
         Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        AssertTheNewPairIsReportedUnprotected(result);
     }
 
     [TestMethod]

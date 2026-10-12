@@ -111,6 +111,10 @@ internal static class FixConnection
 
         public bool Adopted { get; set; }
 
+        // A new pair was paired and offered for adoption, and the adoption has not succeeded. The closing block can only reach
+        // the pin Earshot still holds, the pair that was removed, so it must not be reported as protecting anything.
+        public bool NewPairUnprotected { get; set; }
+
         public bool Installed { get; init; }
     }
 
@@ -228,12 +232,14 @@ internal static class FixConnection
             }
             else
             {
+                state.NewPairUnprotected = true;
                 FixGateResult adoption = await host.Gate.AdoptDeviceAsync(candidate.Address, ct).ConfigureAwait(false);
                 steps.AddRange(adoption.Steps);
                 state.Adopted = adoption.Ok;
+                state.NewPairUnprotected = !adoption.Ok;
                 lines.Add(adoption.Ok
                     ? "Earshot now protects the new pair, and it is blocked at rest."
-                    : "Could not adopt the new pair: " + adoption.Summary + (adoption.ExitCode is int code ? " (" + code.ToString(CultureInfo.InvariantCulture) + ")" : "") + ". Earshot is blocking the AirPods again.");
+                    : "Could not adopt the new pair: " + adoption.Summary + (adoption.ExitCode is int code ? " (" + code.ToString(CultureInfo.InvariantCulture) + ")" : "") + ".");
             }
         }
 
@@ -243,6 +249,8 @@ internal static class FixConnection
     // The block that ends every path that changed something. An adoption is a pin and a block in one gate run, so it needs no
     // second one. The block is sent with no cancellation: a cancelled run still ends protected. False when the block was
     // needed and did not happen, which leaves the marker for the tray's next start.
+    internal const string NewPairUnprotectedLine = "The new pair is not protected yet. Run Fix connection again.";
+
     private static async Task<bool> EndAsync(FixHost host, RunState state, List<string> lines, List<StepOutcome> steps)
     {
         if (!state.Touched || state.Adopted || !state.Installed)
@@ -257,9 +265,14 @@ internal static class FixConnection
             steps.AddRange(block.Steps);
             if (block.Ok)
             {
-                lines.Add("Earshot blocked the AirPods again.");
+                lines.Add(state.NewPairUnprotected ? NewPairUnprotectedLine : "Earshot blocked the AirPods again.");
                 steps.Add(host.Recovery.Clear());
                 return true;
+            }
+
+            if (state.NewPairUnprotected)
+            {
+                lines.Add(NewPairUnprotectedLine);
             }
 
             lines.Add("Could not block the AirPods again: " + block.Summary + ". Earshot tries again the next time it starts.");
