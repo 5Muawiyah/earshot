@@ -366,7 +366,7 @@ public sealed class WidgetCardSettingsTests
         AssertTheCardKeepsItsBottomEdge(new Rectangle(0, 0, 1280, 600));
     }
 
-    // Windows' default maximum tracking size (MaxWindowTrackSize, ptMaxTrackSize) is the largest a window may be made, and on a
+    // The largest size a window can be tracked to on this screen (MaxWindowTrackSize, ptMaxTrackSize) is used as the bound, and on a
     // small screen it is smaller than the work area these tests give the card, so the card cannot be shown at that height there.
     // Such a screen cannot show what the test measures, so the test is inconclusive on it rather than measuring the screen.
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-minmaxinfo

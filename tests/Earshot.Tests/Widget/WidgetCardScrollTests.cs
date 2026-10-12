@@ -85,7 +85,7 @@ public sealed class WidgetCardScrollTests
             int bottom = page.Card.Bounds.Bottom;
             page.OpenSettings(capped: false);
 
-            // Windows' default maximum tracking size is the largest a window may be made, so a page that fits the work area but is
+            // The largest size a window can be tracked to on this screen (ptMaxTrackSize) is used as the bound, so a page that fits the work area but is
             // taller than that cannot show its full height on this screen; that is the screen the tests run on, not the card.
             // https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-minmaxinfo
             if (page.Card.CurrentSettingsLayout!.Frame.Height > SystemInformation.MaxWindowTrackSize.Height)
