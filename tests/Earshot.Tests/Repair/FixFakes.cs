@@ -1,0 +1,367 @@
+using Earshot.Boot;
+using Earshot.Boot.Gate;
+using Earshot.Contracts;
+using Earshot.Repair;
+using Earshot.Tests.Phase4;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace Earshot.Tests.Repair;
+
+// The seams of Fix connection as fakes. Every one records its calls, so a test can say what was asked and what was not.
+
+internal sealed class FakeDesktop : IInputDesktop
+{
+    public DesktopReading Reading { get; set; } = new(UserInteractive: true, ThreadDesktop: "Default", InputDesktop: "Default", InputError: 0);
+
+    public int Reads { get; private set; }
+
+    public DesktopReading Read()
+    {
+        Reads++;
+        return Reading;
+    }
+
+    public static FakeDesktop Interactive() => new();
+
+    public static FakeDesktop NoOneThere() => new()
+    {
+        Reading = new DesktopReading(UserInteractive: true, ThreadDesktop: "PrivateDesktop", InputDesktop: "Default", InputError: 0),
+    };
+}
+
+internal sealed class FakePrompter : IFixPrompter
+{
+    public Queue<FixPromptAnswer> Answers { get; } = new();
+
+    public List<FixPrompt> Asked { get; } = new();
+
+    public FixPromptAnswer Ask(FixPrompt prompt)
+    {
+        Asked.Add(prompt);
+        return Answers.Count > 0 ? Answers.Dequeue() : new FixPromptAnswer(FixAnswer.Cancel, -1);
+    }
+
+    public void SayOk(int chosen = -1) => Answers.Enqueue(new FixPromptAnswer(FixAnswer.Ok, chosen));
+
+    public void SayCancel() => Answers.Enqueue(new FixPromptAnswer(FixAnswer.Cancel, -1));
+
+    public void SayTimedOut() => Answers.Enqueue(new FixPromptAnswer(FixAnswer.TimedOut, -1));
+}
+
+// Runs the elevated side in this process against a rig, or just counts.
+internal sealed class FakeElevator : IFixElevator
+{
+    public List<(string Path, string Sha256)> Calls { get; } = new();
+
+    public Func<string, string, ElevatedRun> Result { get; set; } = (_, _) => new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0));
+
+    public Task<ElevatedRun> ApplyAsync(FixConsent consent, string planPath, string planSha256, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(consent);
+        Calls.Add((planPath, planSha256));
+        return Task.FromResult(Result(planPath, planSha256));
+    }
+}
+
+internal sealed class FakeGate : IFixGate
+{
+    public List<string> Calls { get; } = new();
+
+    public Func<FixGateResult> BlockResult { get; set; } = () => new FixGateResult(true, "Blocked", [], 0);
+
+    public Func<string, FixGateResult> AdoptResult { get; set; } = _ => new FixGateResult(true, "Adopted", [], 0);
+
+    public Action<string>? OnCall { get; set; }
+
+    public Task<FixGateResult> BlockAsync(CancellationToken ct)
+    {
+        Calls.Add("block");
+        OnCall?.Invoke("block");
+        return Task.FromResult(BlockResult());
+    }
+
+    public Task<FixGateResult> AdoptDeviceAsync(string address12, CancellationToken ct)
+    {
+        Calls.Add("adopt:" + address12);
+        OnCall?.Invoke("adopt");
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult(AdoptResult(address12));
+    }
+}
+
+internal sealed class FakeRePairUi : IFixRePairUi
+{
+    public List<string> Shown { get; } = new();
+
+    public int Pick { get; set; }
+
+    public bool ConfirmPin { get; set; } = true;
+
+    public List<string> PinsShown { get; } = new();
+
+    public void ShowInstruction(string text) => Shown.Add(text);
+
+    public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
+    {
+        Shown.Add("pick:" + string.Join("|", candidates.Select(c => c.Name)));
+        return Task.FromResult(Pick >= 0 && Pick < candidates.Count ? candidates[Pick] : null);
+    }
+
+    public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin)
+    {
+        PinsShown.Add(kind + ":" + pin);
+        return Task.FromResult(ConfirmPin);
+    }
+
+    public void ShowResult(string text) => Shown.Add("result:" + text);
+
+    public void Close() => Shown.Add("closed");
+}
+
+// Delegates to a node table a test can replace, so nodes can appear when a pairing "completes".
+internal sealed class SwitchableNodes : INodeApi
+{
+    public SwitchableNodes(FakeNodeApi inner) => Inner = inner;
+
+    public FakeNodeApi Inner { get; set; }
+
+    public uint ListDeviceIds(out string[] ids) => Inner.ListDeviceIds(out ids);
+
+    public uint Locate(string instanceId, bool includeNonPresent, out uint devInst) => Inner.Locate(instanceId, includeNonPresent, out devInst);
+
+    public uint GetStatus(uint devInst, out uint status, out uint problem) => Inner.GetStatus(devInst, out status, out problem);
+
+    public uint GetContainerId(uint devInst, out Guid containerId) => Inner.GetContainerId(devInst, out containerId);
+
+    public uint GetConfigFlags(uint devInst, out uint configFlags) => Inner.GetConfigFlags(devInst, out configFlags);
+
+    public uint GetName(uint devInst, out string? name) => Inner.GetName(devInst, out name);
+
+    public uint Disable(uint devInst, uint flags) => Inner.Disable(devInst, flags);
+
+    public uint Enable(uint devInst) => Inner.Enable(devInst);
+
+    public Earshot.Interop.ConfigFlagsChange ClearDisabledFlag(string instanceId) => Inner.ClearDisabledFlag(instanceId);
+
+    public Earshot.Interop.ConfigFlagsChange SetDisabledFlag(string instanceId) => Inner.SetDisabledFlag(instanceId);
+
+    public bool Pause(TimeSpan delay) => Inner.Pause(delay);
+}
+
+internal sealed class FakePairing : IPairingApi
+{
+    public List<string> Calls { get; } = new();
+
+    public List<PairedDevice> Paired { get; } = new();
+
+    public List<WatchEvent> Events { get; } = new();
+
+    public PairingCallResult UnpairResult { get; set; } = new("Unpaired", 0, true, null);
+
+    public PairingCallResult PairResult { get; set; } = new("Paired", 0, true, null);
+
+    public bool UnpairRemovesFromList { get; set; } = true;
+
+    // Raised through the prompt while pairing runs.
+    public List<(FixPairKind Kind, string? Pin)> Requests { get; } = new();
+
+    public List<bool> RequestAnswers { get; } = new();
+
+    // Runs when a pairing succeeds: the test adds the new device to the paired list and its nodes to the table.
+    public Action<string>? OnPaired { get; set; }
+
+    public Action? OnUnpaired { get; set; }
+
+    public Exception? ThrowOnPair { get; set; }
+
+    public Task<PairedListResult> ListPairedAsync(CancellationToken ct)
+    {
+        Calls.Add("list-paired");
+        return Task.FromResult(new PairedListResult(Paired.ToList(), []));
+    }
+
+    public Task<PairingCallResult> UnpairAsync(string deviceId, CancellationToken ct)
+    {
+        Calls.Add("unpair:" + deviceId);
+        if (UnpairResult.Success)
+        {
+            if (UnpairRemovesFromList)
+            {
+                Paired.RemoveAll(p => p.Id == deviceId);
+            }
+
+            OnUnpaired?.Invoke();
+        }
+
+        return Task.FromResult(UnpairResult);
+    }
+
+    public IUnpairedWatch Watch()
+    {
+        Calls.Add("watch");
+        return new ScriptedWatch(Events);
+    }
+
+    public async Task<PairingCallResult> PairAsync(string deviceId, IPairingPrompt prompt, CancellationToken ct)
+    {
+        Calls.Add("pair:" + deviceId);
+        if (ThrowOnPair is not null)
+        {
+            throw ThrowOnPair;
+        }
+
+        foreach ((FixPairKind kind, string? pin) in Requests)
+        {
+            RequestAnswers.Add(await prompt.ConfirmAsync(kind, pin));
+        }
+
+        if (PairResult.Success)
+        {
+            OnPaired?.Invoke(deviceId);
+        }
+
+        return PairResult;
+    }
+
+    private sealed class ScriptedWatch(List<WatchEvent> events) : IUnpairedWatch
+    {
+        public async IAsyncEnumerable<WatchEvent> EventsAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+        {
+            foreach (WatchEvent e in events)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return e;
+                await Task.Yield();
+            }
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+}
+
+// Everything a Fix run needs, over a fake node table and a real GateStore and plan folder in a temp folder.
+internal sealed class FixRig : IDisposable
+{
+    private readonly TempFolder _temp = new();
+
+    public const string SecondAirPodsAddress = "0A1B2C3D4E8D";
+    public static readonly Guid SecondAirPodsContainer = new("11111111-2222-4333-8444-555555555501");
+    public const string NewAirPodsAddress = "0A1B2C3D4E8E";
+    public static readonly Guid NewAirPodsContainer = new("11111111-2222-4333-8444-555555555502");
+
+    public FixRig(FakeNodeApi? nodes = null, bool pinned = true)
+    {
+        Gate = new GateRig(nodes);
+        Nodes = new SwitchableNodes(Gate.Nodes);
+        if (pinned)
+        {
+            Gate.Pin(RecordedNodes.AirPods());
+        }
+
+        Records = new StoreFixRecords(Gate.Store, () => File.Exists(SettingsFile));
+        PlanFiles = new FixPlanFiles(Path.Combine(_temp.Path, "fix"));
+        Recovery = new FixRecovery(Path.Combine(_temp.Path, "fix-window.json"), Gate.Time, _ => true);
+        Desktop = FakeDesktop.Interactive();
+        Output = new StringWriter();
+    }
+
+    public GateRig Gate { get; }
+
+    public SwitchableNodes Nodes { get; }
+
+    public IFixRecords Records { get; set; }
+
+    public FixPlanFiles PlanFiles { get; }
+
+    public FixRecovery Recovery { get; }
+
+    public FakeDesktop Desktop { get; set; }
+
+    public FakePrompter Prompter { get; } = new();
+
+    public FakeElevator Elevator { get; } = new();
+
+    public FakePairing Pairing { get; } = new();
+
+    public FakeRePairUi Ui { get; } = new();
+
+    public FakeGate GateFake { get; } = new();
+
+    public StringWriter Output { get; }
+
+    public CapturingLog Log { get; } = new();
+
+    public string SettingsFile => Path.Combine(_temp.Path, "settings.json");
+
+    public StubLeftovers Leftovers { get; } = new();
+
+    public FixHost Host() => new()
+    {
+        Nodes = Nodes,
+        Records = Records,
+        Leftovers = Leftovers,
+        Desktop = Desktop,
+        Prompter = Prompter,
+        PlanFiles = PlanFiles,
+        Elevator = Elevator,
+        Pairing = Pairing,
+        RePairUi = Ui,
+        Gate = GateFake,
+        Recovery = Recovery,
+        Output = Output,
+        Log = Log,
+        Options = new FixOptions
+        {
+            BaselineWait = TimeSpan.FromMilliseconds(50),
+            ScanTimeout = TimeSpan.FromMilliseconds(200),
+            SettleWait = TimeSpan.FromMilliseconds(20),
+            PostPairWait = TimeSpan.Zero,
+            Delay = (_, _) => Task.CompletedTask,
+        },
+    };
+
+    // Every node of the AirPods disabled with the persistent flag, with the audio nodes out of the tree (the shape the
+    // owner's PC showed), so the plan has both kinds of step.
+    public void LeaveAirPodsBlocked()
+    {
+        Gate.BlockAirPodsAtRest();
+        foreach (int index in new[] { 4, 6, 7, 8 })
+        {
+            Gate.Nodes[RecordedNodes.AirPodsTargets[index]].Present = false;
+        }
+    }
+
+    public static FakeNode[] SecondAirPodsNodes() =>
+        [
+            new FakeNode(@"BTHENUM\DEV_" + SecondAirPodsAddress + @"\b&1a2b3c4d&0&BLUETOOTHDEVICE_" + SecondAirPodsAddress, SecondAirPodsContainer, "Second AirPods"),
+            new FakeNode(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&" + SecondAirPodsAddress + "_C00000000", SecondAirPodsContainer),
+        ];
+
+    public static FakeNode[] NewAirPodsNodes() =>
+        [
+            new FakeNode(@"BTHENUM\DEV_" + NewAirPodsAddress + @"\b&1a2b3c4d&0&BLUETOOTHDEVICE_" + NewAirPodsAddress, NewAirPodsContainer, "New AirPods"),
+            new FakeNode(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&1a2b3c4d&0&" + NewAirPodsAddress + "_C00000000", NewAirPodsContainer),
+        ];
+
+    public void Dispose()
+    {
+        Gate.Dispose();
+        _temp.Dispose();
+    }
+}
+
+internal static class Expect
+{
+    // The sequence equals the expected values, in order.
+    public static void Same<T>(IEnumerable<T> actual, params T[] expected) =>
+        CollectionAssert.AreEqual(expected, actual.ToList());
+}
+
+internal sealed class StubLeftovers : IFixLeftovers
+{
+    public List<string> Items { get; } = new();
+
+    public IReadOnlyList<string> Read() => Items.ToList();
+}
