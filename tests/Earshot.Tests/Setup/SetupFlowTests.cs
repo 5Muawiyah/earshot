@@ -12,8 +12,8 @@ public sealed class SetupFlowTests
     private const string UserSid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
     private const string AddressA = "0A1B2C3D4E5F";
     private const string AddressB = "0A1B2C3D4E60";
-    private const string ContainerA = "11111111-2222-3333-4444-555555555555";
-    private const string ContainerB = "66666666-7777-8888-9999-000000000000";
+    private const string ContainerA = "11111111-2222-4333-8444-555555555501";
+    private const string ContainerB = "11111111-2222-4333-8444-555555555502";
 
     private sealed class World : IDisposable
     {

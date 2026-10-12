@@ -314,7 +314,7 @@ public sealed class SetupPartsTests
     public void TheValuesFileIsReadWithItsCandidatesAndAMissingCandidateListStillWorks()
     {
         SetupValuesReading? one = SetupValuesReading.Parse(
-            "{\"userSid\":\"S-1-5-21-1-2-3-1001\",\"ready\":true,\"address\":\"0A1B2C3D4E5F\",\"containerId\":\"11111111-2222-3333-4444-555555555555\",\"install\":{\"state\":\"usable\",\"version\":\"1.4.0\"}}");
+            "{\"userSid\":\"S-1-5-21-1-2-3-1001\",\"ready\":true,\"address\":\"0A1B2C3D4E5F\",\"containerId\":\"11111111-2222-4333-8444-555555555501\",\"install\":{\"state\":\"usable\",\"version\":\"1.4.0\"}}");
         Assert.IsNotNull(one);
         Assert.HasCount(1, one.Choices());
         Assert.AreEqual("usable", one.InstallState);
@@ -328,7 +328,7 @@ public sealed class SetupPartsTests
     public void AValuesFileWithAnOddAddressIsNeverReady()
     {
         SetupValuesReading? reading = SetupValuesReading.Parse(
-            "{\"userSid\":\"S-1-5-21-1-2-3-1001\",\"ready\":true,\"address\":\"not-an-address\",\"containerId\":\"11111111-2222-3333-4444-555555555555\"}");
+            "{\"userSid\":\"S-1-5-21-1-2-3-1001\",\"ready\":true,\"address\":\"not-an-address\",\"containerId\":\"11111111-2222-4333-8444-555555555501\"}");
 
         Assert.IsNotNull(reading);
         Assert.IsFalse(reading.Ready);
