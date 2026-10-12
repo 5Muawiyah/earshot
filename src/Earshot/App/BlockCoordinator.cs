@@ -2805,17 +2805,20 @@ internal sealed partial class BlockCoordinator : IDisposable
             return render == RenderState.Active ? BlockDecision.Go : new BlockDecision("the link dropped before it was blocked");
         }
 
-        return check.Reason is BlockReason.Idle or BlockReason.ConnectCleanUp ? await LinkDecisionAsync(check.Container, now) : BlockDecision.Go;
+        return check.Reason is BlockReason.Idle or BlockReason.ConnectCleanUp ? await LinkDecisionAsync(check.Reason, check.Container, now) : BlockDecision.Go;
     }
 
     // The device node's link bit, weighed against the endpoint. The bit is a header comment seen to follow the link on this PC,
     // not a documented contract, so it can hold a block back for two minutes at most, and an endpoint that exists and is not
     // playing outweighs it:
     //   bit says disconnected, or cannot be read     go (the gate reads it again itself)
-    //   connected, an endpoint exists, not playing   the bit is stuck: the plain block
+    //   connected, an endpoint exists, not playing   waits LinkSettle (a connect raises the bit before A2DP reaches ACTIVE);
+    //                                                playing then: in use; still disagreeing: the bit is stuck, so the idle
+    //                                                block is the plain one and a connect's clean-up still asks the gate to
+    //                                                undo its own allow, which never cuts a live link it did not make
     //   connected, no endpoint to confirm it         held back, then blocked and reported after UnconfirmedLinkCap
     // A gate that refused a block for a live link counts toward the same cap.
-    private async Task<BlockDecision> LinkDecisionAsync(Guid container, DeviceSnapshot? now)
+    private async Task<BlockDecision> LinkDecisionAsync(BlockReason reason, Guid container, DeviceSnapshot? now)
     {
         DateTimeOffset at = _time.GetUtcNow();
         if (_unconfirmedSince is { } since && at - since >= UnconfirmedLinkCap)
@@ -2835,10 +2838,35 @@ internal sealed partial class BlockCoordinator : IDisposable
             return BlockDecision.Go;
         }
 
+        // A clean-up that changed no service has not read the device since it began.
+        now ??= await RefreshSnapshotAsync();
         if (now is not null && CoordinatorRules.RenderEndpointPresent(now, container))
         {
-            _log.Warn("The device node reads connected, but the render endpoint is not playing; the bit is taken as stuck and the block goes ahead.");
-            return new BlockDecision(null, Plain: true);
+            _log.Info("The device node reads connected while the render endpoint is not playing; it is read again in " + Seconds(LinkSettle) + ".");
+            await Task.Delay(LinkSettle, _time, CancellationToken.None);
+            now = await RefreshSnapshotAsync();
+            if (now is not null && CoordinatorRules.RenderOf(now, container) == RenderState.Active)
+            {
+                _unconfirmedSince = null;
+                return new BlockDecision(InUseReason);
+            }
+
+            link = await _services.Link.ReadAsync(CancellationToken.None);
+            if (link != LinkState.Connected)
+            {
+                if (link == LinkState.Disconnected)
+                {
+                    _unconfirmedSince = null;
+                }
+
+                return BlockDecision.Go;
+            }
+
+            if (now is not null && CoordinatorRules.RenderEndpointPresent(now, container))
+            {
+                _log.Warn("The device node still reads connected after " + Seconds(LinkSettle) + " with the render endpoint not playing; the bit is taken as stuck.");
+                return new BlockDecision(null, Plain: reason != BlockReason.ConnectCleanUp);
+            }
         }
 
         _unconfirmedSince ??= at;

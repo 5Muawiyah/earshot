@@ -175,14 +175,17 @@ public sealed class WindowsConnectRaceTests
     }
 
     [TestMethod]
-    public void ALinkBitThatReadsConnectedWhileTheEndpointIsUnpluggedIsNotTrustedAndTheBlockGoesAhead()
+    public void ALinkBitThatReadsConnectedWhileTheEndpointIsUnpluggedIsOnlyCalledStuckAfterTheSettle()
     {
         using CoordinatorHarness h = AllowedAndIdle();
         h.Link.State = LinkState.Connected;
 
-        h.Advance(Grace + TimeSpan.FromSeconds(1));
+        h.Advance(Grace + BlockCoordinator.LinkSettle - TimeSpan.FromSeconds(1));
+        Assert.IsEmpty(Blocks(h), "The bit may be a few seconds ahead of the endpoint, so it is waited for.");
 
-        CollectionAssert.AreEqual(BlockOnly, h.Block.GateVerbCalls, "The endpoint exists and is not playing, so the bit is stuck: a plain block.");
+        h.Advance(TimeSpan.FromSeconds(2));
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.GateVerbCalls, "It still disagrees with the endpoint after the settle, so the bit is stuck: a plain block.");
         Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
     }
 
@@ -222,15 +225,16 @@ public sealed class WindowsConnectRaceTests
     // ---- races ----
 
     [TestMethod]
-    public void AWindowsConnectThatLandsAtSecondTwentyFiveOfTheIdleCountdownIsNotCut()
+    public void AWindowsConnectWhoseLinkBitLeadsTheEndpointAtSecondTwentyNineOfTheIdleCountdownIsNotCut()
     {
         using CoordinatorHarness h = AllowedAndIdle();
-        h.Advance(TimeSpan.FromSeconds(25));
+        h.Advance(TimeSpan.FromSeconds(29));
 
         h.Link.State = LinkState.Connected;
+        h.Advance(TimeSpan.FromSeconds(4));
         h.Publish(Devices.Active(810));
-        h.Advance(TimeSpan.FromSeconds(10));
-        Assert.IsEmpty(Blocks(h), "Second 30 passes with the link up.");
+        h.Advance(BlockCoordinator.LinkSettle + TimeSpan.FromSeconds(2));
+        Assert.IsEmpty(Blocks(h), "Second 30 passes with the bit up and the endpoint not yet playing, and the settle ends with it playing.");
 
         h.Advance(TimeSpan.FromMinutes(1));
         h.Link.State = LinkState.Disconnected;
@@ -269,5 +273,60 @@ public sealed class WindowsConnectRaceTests
         h.Publish(Devices.Idle(821));
         h.Advance(Grace + TimeSpan.FromSeconds(1));
         Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
+    }
+
+    [TestMethod]
+    public void ALinkBitThatLeadsTheEndpointDuringTheCleanUpIsNotCut()
+    {
+        using CoordinatorHarness h = BlockedAtRest();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        bool risen = false;
+        h.Connection.Connects.Enqueue(_ =>
+        {
+            // The connect timed out, and just after it the bit rises with the endpoint still not playing.
+            h.Link.State = LinkState.Connected;
+            risen = true;
+            return Task.FromResult(Results.TimedOut());
+        });
+
+        Task<ToggleReport> task = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true));
+        h.Pump();
+        int risenAt = -1;
+        for (int i = 0; i < 400 && !task.IsCompleted; i++)
+        {
+            h.Advance(TimeSpan.FromMilliseconds(250));
+            if (risenAt < 0 && risen)
+            {
+                risenAt = i;
+            }
+
+            if (risenAt >= 0 && i == risenAt + 12)
+            {
+                h.Publish(Devices.Active(830));
+            }
+        }
+
+        Assert.IsTrue(task.IsCompleted);
+        Assert.IsTrue(risen, "The bit rose.");
+        Assert.IsEmpty(Blocks(h), "The link is the owner's, three seconds from ACTIVE: nothing is sent to cut it.");
+        Assert.AreEqual(BlockState.Allowed, h.Block.Status.State);
+    }
+
+    [TestMethod]
+    public void AStuckBitAtTheCleanUpAsksTheGateToUndoItsAllowAndNeverSendsTheFullBlock()
+    {
+        using CoordinatorHarness h = BlockedAtRest();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        h.Connection.Connects.Enqueue(_ =>
+        {
+            h.Link.State = LinkState.Connected;
+            return Task.FromResult(Results.TimedOut());
+        });
+
+        ToggleReport report = Done(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)));
+
+        string calls = string.Join(", ", h.Block.Calls) + " / " + report.UserMessage + " / " + string.Join(", ", h.Block.GateVerbCalls);
+        CollectionAssert.DoesNotContain(h.Block.GateVerbCalls, "block", "The connect's clean-up never sends the full block: " + calls);
+        Assert.IsTrue(h.Block.GateVerbCalls.Any(c => c.StartsWith("undo-allow", StringComparison.Ordinal)), "It asks the gate to undo its own allow: " + calls);
     }
 }

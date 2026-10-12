@@ -34,6 +34,11 @@ internal sealed partial class BlockCoordinator
     // blocked and reported. A waiting budget, not a measured figure.
     public static readonly TimeSpan UnconfirmedLinkCap = TimeSpan.FromMinutes(2);
 
+    // How long a device node that reads connected while its endpoint is still not playing is given before the bit is taken as
+    // stuck. A connect raises the bit some seconds before A2DP reaches ACTIVE, so the two disagree for a while on a good link.
+    // A waiting budget, not a measured figure.
+    public static readonly TimeSpan LinkSettle = TimeSpan.FromSeconds(8);
+
     // How long a link that formed with no one connecting it waits before it is blocked.
     public static readonly TimeSpan ForeignLinkDelay = TimeSpan.FromSeconds(2);
 
