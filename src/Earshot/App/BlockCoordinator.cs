@@ -2211,6 +2211,18 @@ internal sealed partial class BlockCoordinator : IDisposable
             if (run.Skipped is { } why)
             {
                 _log.Info("connect clean-up: the nodes are not blocked again, because " + why + ".");
+                if (why is GateInUseReason)
+                {
+                    // The gate refuses to undo the allow on the link bit alone. After the settle that bit without an ACTIVE render
+                    // is not a connection (a stuck bit), so the connect failed; the idle rule blocks the nodes later.
+                    DeviceSnapshot? after = await RefreshSnapshotAsync();
+                    if (after is null || CoordinatorRules.RenderOf(after, request.Container) != RenderState.Active)
+                    {
+                        _log.Warn("connect clean-up: the gate found a link, but render is not ACTIVE, so the connect is reported as failed and the nodes are left to the idle rule.");
+                        return ConnectCleanUpOutcome.NodesLeftEnabled;
+                    }
+                }
+
                 return why is InUseReason or GateInUseReason ? ConnectCleanUpOutcome.InUse : ConnectCleanUpOutcome.NodesLeftEnabled;
             }
 
@@ -2736,8 +2748,9 @@ internal sealed partial class BlockCoordinator : IDisposable
     // move the pin.
     //
     // An automatic block acts only on reads taken just before it is sent: the nodes and Block at boot are read again, then
-    // the device and, for the idle block and a clean-up, the device node's link bit, and nothing is awaited between the last
-    // read and the block. The reads the sequence took when it started may be older than a protect verb that ran since, and one
+    // the device and, for the idle block and a clean-up, the device node's link bit. Nothing else is awaited between the last
+    // read and the block, except LinkSettle when the bit reads connected and the endpoint is not playing: then the device and
+    // the bit are read again after it, and that wait also delays Exit and comes out of a queued connect's budget. The reads the sequence took when it started may be older than a protect verb that ran since, and one
     // that failed after it would otherwise leave the read from before it in hand.
     private async Task<BlockDecision> BlockSkipReasonAsync(BlockCheck check, BootBlockStatus? status, bool refreshSnapshot)
     {
@@ -2825,7 +2838,7 @@ internal sealed partial class BlockCoordinator : IDisposable
     // not a documented contract, so it can hold a block back for two minutes at most, and an endpoint that exists and is not
     // playing outweighs it:
     //   bit says disconnected, or cannot be read     go (the gate reads it again itself)
-    //   connected, an endpoint exists, not playing   waits LinkSettle (a connect raises the bit before A2DP reaches ACTIVE);
+    //   connected, an endpoint exists, not playing   waits LinkSettle (a connect may raise the bit before A2DP reaches ACTIVE);
     //                                                playing then: in use; still disagreeing: the bit is stuck, so the idle
     //                                                block is the plain one and a connect's clean-up still asks the gate to
     //                                                undo its own allow, which never cuts a live link it did not make

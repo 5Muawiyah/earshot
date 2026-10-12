@@ -27,7 +27,8 @@ internal sealed partial class BlockCoordinator
     // The least that must be left for the one retry to be worth starting.
     public static readonly TimeSpan RetryRoom = TimeSpan.FromSeconds(6);
 
-    // How long a Connect in Windows keeps the idle rule off while the person pairs or connects in Windows' settings.
+    // How long a Connect in Windows keeps the idle rule off while the person pairs or connects in Windows' settings. A waiting
+    // budget, not a measured or documented figure.
     public static readonly TimeSpan WindowsConnectWindowLength = TimeSpan.FromMinutes(2);
 
     // How long a link that the device node reports and no endpoint confirms is held back from the idle block before it is
@@ -35,8 +36,8 @@ internal sealed partial class BlockCoordinator
     public static readonly TimeSpan UnconfirmedLinkCap = TimeSpan.FromMinutes(2);
 
     // How long a device node that reads connected while its endpoint is still not playing is given before the bit is taken as
-    // stuck. A connect raises the bit some seconds before A2DP reaches ACTIVE, so the two disagree for a while on a good link.
-    // A waiting budget, not a measured figure.
+    // stuck. A connect may raise the bit some seconds before A2DP reaches ACTIVE, so the two may disagree for a while on a good
+    // link; that order is reasoned, not measured. A waiting budget, not a measured figure.
     public static readonly TimeSpan LinkSettle = TimeSpan.FromSeconds(8);
 
     // How long a link that formed with no one connecting it waits before it is blocked.

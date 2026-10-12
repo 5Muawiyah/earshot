@@ -349,5 +349,11 @@ public sealed class WindowsConnectRaceTests
         string calls = string.Join(", ", h.Block.Calls) + " / " + report.UserMessage + " / " + string.Join(", ", h.Block.GateVerbCalls);
         CollectionAssert.DoesNotContain(h.Block.GateVerbCalls, "block", "The connect's clean-up never sends the full block: " + calls);
         Assert.IsTrue(h.Block.GateVerbCalls.Any(c => c.StartsWith("undo-allow", StringComparison.Ordinal)), "It asks the gate to undo its own allow: " + calls);
+
+        // The gate refuses the undo for the same stuck bit; render never reached ACTIVE, so this is a failed connect, not a
+        // connection: no Connected card, no Connected line in the history, and the failure is counted.
+        Assert.AreEqual(OpStatus.Failed, report.Status, calls);
+        CollectionAssert.DoesNotContain(h.Cards.Statuses, Earshot.Tray.TrayStatus.CardConnected);
+        Assert.AreNotEqual(ConnectHistoryOutcomes.Connected, h.History.Read()[^1].Outcome);
     }
 }
