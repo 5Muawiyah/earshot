@@ -76,4 +76,16 @@ internal sealed class CoordinatorServices
     public ConnectHistory? History { get; init; }
 
     public FixOfferTracker FixOffer { get; init; } = new();
+
+    // A run of Fix connection that stopped half way is answered with the block when the coordinator starts.
+    public IStartRecovery Recovery { get; init; } = NoStartRecovery.Instance;
+
+    // While a Fix connection run is pairing the AirPods again, the new link is not cut.
+    public IRePairWindow RePair { get; init; } = NoRePairWindow.Instance;
+
+    // AirPods that are paired and are not the ones Earshot protects, found when the coordinator starts. Only reported, never adopted.
+    public IProtectionCheck Protection { get; init; } = NoProtectionCheck.Instance;
+
+    // What the card for unprotected AirPods does on its one button. Null shows the card without one.
+    public IFixLauncher? FixLauncher { get; init; }
 }

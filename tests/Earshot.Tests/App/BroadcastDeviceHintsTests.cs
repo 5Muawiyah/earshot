@@ -1,5 +1,6 @@
 using Earshot.App;
 using Earshot.Contracts;
+using Earshot.Infra;
 using Earshot.Tests.Integration.Coordinator;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -98,7 +99,7 @@ public sealed class BroadcastDeviceHintsTests
     {
         var time = new ManualTime();
         FakeWidgetStatus? widget = null;
-        var services = Program.CreateCoordinatorServices(new FakeSettings(), new CapturingLog(), null, time, () => widget);
+        var services = Program.CreateCoordinatorServices(Paths.FromEnvironment(_ => null), new FakeSettings(), new CapturingLog(), null, time, () => widget, null);
 
         Assert.AreEqual(DeviceHint.Unknown, services.Hints.Read(), "The widget is built after the coordinator.");
 

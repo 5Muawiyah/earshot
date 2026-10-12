@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Security;
+using Earshot.App;
 using Earshot.Boot;
 using Earshot.Contracts;
 using Earshot.Infra;
@@ -37,6 +38,7 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
         List<string> airpodsIds = (facts.Devices ?? []).Where(d => !string.IsNullOrEmpty(AirPodsModels.ModelOf(d.InstanceId))).Select(d => d.InstanceId).ToList();
         facts.Filters = Part(facts, "filters", () => ReadFilters(airpodsIds));
         facts.History = Part(facts, "history", ReadHistory);
+        facts.Protection = Part(facts, "protection", ReadProtection);
         facts.LastReadingSaved = Part(facts, "lastReading", () => (bool?)File.Exists(paths.LastReadingFile));
         facts.Identity = new IdentityFact
         {
@@ -267,6 +269,14 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
         }
 
         return rows;
+    }
+
+    // Paired AirPods that are not the pinned ones, by the identity rule. A list of the nodes and a read of the pin record.
+    private ProtectionFact? ReadProtection()
+    {
+        var store = new Earshot.Boot.Gate.GateStore(paths.MachineFolder);
+        ProtectionReading reading = new Earshot.Repair.AirPodsProtectionCheck(new CfgMgr32NodeReader(), new Earshot.Repair.StoreFixRecords(store, Earshot.Repair.FixFootprint.For(paths))).Read();
+        return reading.Read ? new ProtectionFact { Pinned = reading.Pinned, Unprotected = reading.Unprotected } : null;
     }
 
     // The Bluetooth radio is the present node of the Bluetooth class on the USB, PCI or ACPI bus; its driver's version is on the

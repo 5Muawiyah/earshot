@@ -26,6 +26,8 @@ internal sealed class DoctorFacts
 
     public IdentityFact? Identity { get; set; }
 
+    public ProtectionFact? Protection { get; set; }
+
     public List<UnreadableFact> Unreadable { get; set; } = [];
 }
 
@@ -111,6 +113,15 @@ internal sealed class HistoryFact
     public int? Lines { get; set; }
 
     public List<string>? Last { get; set; }
+}
+
+// Whether Earshot holds a record of the AirPods it protects, and how many paired sets of AirPods are not that one. Counts only, so
+// the report carries no name or identifier of any of them.
+internal sealed class ProtectionFact
+{
+    public bool Pinned { get; set; }
+
+    public int Unprotected { get; set; }
 }
 
 internal sealed class IdentityFact

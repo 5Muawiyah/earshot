@@ -47,7 +47,7 @@ internal sealed class CoordinatorHarness : IDisposable
 
         Coordinator = new BlockCoordinator(Monitor, Connection, Block, Protection, Settings, Cards, Log, Time,
             new CoordinatorOptions(safeMode, startedAtLogon),
-            new CoordinatorServices { Link = Link, Session = Session, Hints = hints ?? Hints, Launcher = Launcher, History = History, FixOffer = FixOffer });
+            new CoordinatorServices { Link = Link, Session = Session, Hints = hints ?? Hints, Launcher = Launcher, History = History, FixOffer = FixOffer, Recovery = Recovery, RePair = RePair, Protection = ProtectionScan, FixLauncher = FixLauncher });
     }
 
     private readonly string _historyFolder;
@@ -59,6 +59,14 @@ internal sealed class CoordinatorHarness : IDisposable
     public FakeHints Hints { get; } = new();
 
     public RecordingLauncher Launcher { get; } = new();
+
+    public FakeStartRecovery Recovery { get; } = new();
+
+    public FakeRePairWindow RePair { get; } = new();
+
+    public FakeProtectionCheck ProtectionScan { get; } = new();
+
+    public FakeFixLauncher FixLauncher { get; } = new();
 
     public ConnectHistory History { get; }
 
@@ -917,6 +925,52 @@ internal sealed class RecordingCards : ICardPresenter
         }
 
         Shown.Add(card);
+        return true;
+    }
+}
+
+internal sealed class FakeStartRecovery : IStartRecovery
+{
+    public int Runs { get; private set; }
+
+    public Exception? Throw { get; set; }
+
+    public bool Changed { get; set; }
+
+    public Task<bool> RunAsync(CancellationToken ct)
+    {
+        Runs++;
+        return Throw is null ? Task.FromResult(Changed) : Task.FromException<bool>(Throw);
+    }
+}
+
+internal sealed class FakeRePairWindow : IRePairWindow
+{
+    public bool Open { get; set; }
+
+    public bool IsOpen => Open;
+}
+
+internal sealed class FakeProtectionCheck : IProtectionCheck
+{
+    public ProtectionReading Reading { get; set; } = ProtectionReading.Nothing;
+
+    public int Reads { get; private set; }
+
+    public Task<ProtectionReading> ReadAsync(CancellationToken ct)
+    {
+        Reads++;
+        return Task.FromResult(Reading);
+    }
+}
+
+internal sealed class FakeFixLauncher : IFixLauncher
+{
+    public int Started { get; private set; }
+
+    public bool Start(ILog log)
+    {
+        Started++;
         return true;
     }
 }

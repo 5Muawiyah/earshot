@@ -230,6 +230,19 @@ internal static class DoctorReport
         w.WriteEndArray();
         w.WriteEndObject();
 
+        w.WriteStartObject("protection");
+        w.WriteBoolean("pinned", f.Protection?.Pinned == true);
+        if (f.Protection is { } protection)
+        {
+            w.WriteNumber("unprotectedAirPods", protection.Unprotected);
+        }
+        else
+        {
+            w.WriteNull("unprotectedAirPods");
+        }
+
+        w.WriteEndObject();
+
         w.WriteStartObject("battery");
         w.WriteString("source", "proximity broadcast, Windows Hands-Free battery property");
         w.WriteBoolean("lastReadingSaved", f.LastReadingSaved == true);
@@ -354,6 +367,12 @@ internal static class DoctorReport
         IEnumerable<string> services = report.GetProperty("bluetoothServices").EnumerateArray()
             .Select(s => s.GetProperty("name").GetString() + " " + (s.GetProperty("state").GetString() ?? "missing"));
         sb.AppendLine("Bluetooth services: " + string.Join(", ", services) + ".");
+        JsonElement protection = report.GetProperty("protection");
+        if (protection.GetProperty("pinned").GetBoolean() && protection.GetProperty("unprotectedAirPods").ValueKind == JsonValueKind.Number && protection.GetProperty("unprotectedAirPods").GetInt32() > 0)
+        {
+            sb.AppendLine("Not protected: AirPods on this PC are not the ones Earshot protects (" + protection.GetProperty("unprotectedAirPods").GetInt32().ToString(CultureInfo.InvariantCulture) + "). Fix connection can set them up.");
+        }
+
         JsonElement radio = report.GetProperty("radio");
         sb.AppendLine(radio.GetProperty("found").GetBoolean()
             ? "Bluetooth radio driver: " + (radio.GetProperty("driverVersion").GetString() ?? "version unknown") + "."

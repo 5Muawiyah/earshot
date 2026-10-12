@@ -81,6 +81,35 @@ public sealed class DoctorTests
     }
 
     [TestMethod]
+    public void PairedAirPodsThatAreNotTheProtectedOnesAreCountedAndSaidInTheSummary()
+    {
+        DoctorFacts facts = DoctorFixture.Facts();
+        facts.Protection = new ProtectionFact { Pinned = true, Unprotected = 2 };
+
+        string output = Run(new FakeDoctorSource(facts));
+
+        using JsonDocument report = JsonDocument.Parse(Fenced(output));
+        JsonElement protection = report.RootElement.GetProperty("protection");
+        Assert.IsTrue(protection.GetProperty("pinned").GetBoolean());
+        Assert.AreEqual(2, protection.GetProperty("unprotectedAirPods").GetInt32());
+        Assert.Contains("not the ones Earshot protects (2)", output, StringComparison.Ordinal);
+    }
+
+    [TestMethod]
+    public void NothingUnprotectedOrNoPinOrAnUnreadListSaysNothingInTheSummary()
+    {
+        foreach (ProtectionFact? fact in new ProtectionFact?[] { new() { Pinned = true, Unprotected = 0 }, new() { Pinned = false, Unprotected = 3 }, null })
+        {
+            DoctorFacts facts = DoctorFixture.Facts();
+            facts.Protection = fact;
+
+            string output = Run(new FakeDoctorSource(facts));
+
+            Assert.DoesNotContain("not the ones Earshot protects", output, StringComparison.Ordinal);
+        }
+    }
+
+    [TestMethod]
     public void AReadThatFailedIsReportedAsUnreadableAndTheRestStillComes()
     {
         string output = Run(new FakeDoctorSource(DoctorFixture.Facts()));
@@ -175,6 +204,7 @@ public sealed class DoctorTests
             "otherAppleNodes", "bluetoothServices", "bluetoothServices[].name", "bluetoothServices[].state",
             "radio", "radio.found", "radio.driverVersion", "filterDrivers", "filterDrivers[].name", "filterDrivers[].on",
             "connectHistory", "connectHistory.path", "connectHistory.exists", "connectHistory.lines", "connectHistory.last",
+            "protection", "protection.pinned", "protection.unprotectedAirPods",
             "battery", "battery.source", "battery.lastReadingSaved", "unreadable", "unreadable[].part", "unreadable[].reason",
         ];
         CollectionAssert.AreEquivalent(expected, keys.ToArray());

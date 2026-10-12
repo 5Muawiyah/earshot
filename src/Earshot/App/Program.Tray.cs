@@ -2,11 +2,13 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Earshot.App;
 using Earshot.Boot;
+using Earshot.Boot.Gate;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Diagnostics;
 using Earshot.Infra;
 using Earshot.Interop;
+using Earshot.Repair;
 using Earshot.Tray;
 using Earshot.Update;
 using Earshot.Widget.Alert;
@@ -307,18 +309,44 @@ internal static partial class Program
     }
 
     // What the tray's coordinator is given beyond its controllers. The widget is built later than the coordinator, so it is
-    // reached through widget() when a hint is wanted.
+    // reached through widget() when a hint is wanted. The three about Fix connection (answer a run that stopped half way, keep
+    // the window of a re-pair, say when paired AirPods are not the protected ones) are inert in safe mode and with a redirected
+    // data root, where the gate is never reached.
     internal static CoordinatorServices CreateCoordinatorServices(
-        ISettingsStore settings, ILog log, ConnectHistory? history, TimeProvider time, Func<Widget.IWidgetStatus?> widget) =>
-        new()
+        Paths paths, ISettingsStore settings, ILog log, ConnectHistory? history, TimeProvider time, Func<Widget.IWidgetStatus?> widget, ISystemWorker? worker)
+    {
+        var nodes = new CfgMgr32NodeReader();
+        bool gateReachable = !paths.IsSafeMode && !paths.IsRedirected;
+        IStartRecovery recovery = NoStartRecovery.Instance;
+        IRePairWindow rePair = NoRePairWindow.Instance;
+        IProtectionCheck protection = NoProtectionCheck.Instance;
+        if (gateReachable)
         {
-            Link = new NodeLinkProbe(new CfgMgr32NodeReader(), settings, log),
+            var store = new GateStore(paths.MachineFolder);
+            var records = new StoreFixRecords(store, FixFootprint.For(paths));
+            var marker = new FixRecovery(Path.Combine(paths.LocalFolder, "fix-window.json"), time, ProcessIsAlive);
+            rePair = new FixMarkerRePairWindow(marker);
+            protection = new AirPodsProtectionCheck(nodes, records);
+            if (worker is not null)
+            {
+                recovery = new FixRecoveryAtStart(marker, records, new TaskGateFixGate(worker, CreateTaskGate(paths, store, log), store, nodes, log), log);
+            }
+        }
+
+        return new CoordinatorServices
+        {
+            Link = new NodeLinkProbe(nodes, settings, log),
             Session = new WtsSessionState(log),
             Launcher = new ShellSettingsLauncher(),
             Hints = BroadcastDeviceHints.For(widget, time),
             History = history,
             FixOffer = history is null ? new FixOfferTracker() : FixOfferTracker.Replay(history.Read()),
+            Recovery = recovery,
+            RePair = rePair,
+            Protection = protection,
+            FixLauncher = new OwnProgramFixLauncher(),
         };
+    }
 
     private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon, out string? startAfterExit, out StartAfterExitKind startKind)
     {
@@ -390,7 +418,7 @@ internal static partial class Program
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon),
-                    CreateCoordinatorServices(registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus));
+                    CreateCoordinatorServices(paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker));
 
                 // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
                 // constructed below): the toast route's AppUserModelID must be set before a window or a toast

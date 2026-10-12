@@ -167,6 +167,9 @@ internal sealed partial class BlockCoordinator : IDisposable
 
     private const string ClosingBlockName = "block before closing";
     private const string InUseReason = "the AirPods are in use";
+    internal const string RePairWindowReason = "a Fix connection run is pairing the AirPods again";
+    public const string NotProtectedMessage = "AirPods on this PC are not protected by Earshot.";
+    private bool _notProtectedShown;
     private const string ProtectMayRunReason = "an audio quality change this tray started may still be running";
     private const string PinMayMoveReason = "a device change this tray sent may still move the pin to another device";
 
@@ -415,6 +418,73 @@ internal sealed partial class BlockCoordinator : IDisposable
         _monitor.SnapshotChanged += OnSnapshotChanged;
         _settings.Changed += OnSettingsChanged;
         _ = RefreshStatusAsync();
+        _ = RunFixStartChecksAsync();
+    }
+
+    // At start: answer a Fix connection run that stopped half way (the normal block), then say when paired AirPods are not the
+    // ones Earshot protects. Nothing here pins or adopts anything. A failure is logged with its type and code and does not stop
+    // the coordinator.
+    private async Task RunFixStartChecksAsync()
+    {
+        try
+        {
+            if (await _services.Recovery.RunAsync(CancellationToken.None) && !_closing && !_disposed)
+            {
+                // The recovery changed the nodes, so the status in hand is out of date.
+                await RefreshStatusAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("The answer to a Fix connection run that stopped half way failed (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ").", ex);
+        }
+
+        if (_closing || _disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            ProtectionReading reading = await _services.Protection.ReadAsync(CancellationToken.None);
+            if (reading.AnyUnprotected)
+            {
+                ShowNotProtectedCard(reading.Unprotected);
+            }
+            else if (!reading.Read)
+            {
+                _log.Info("The AirPods on this PC could not be checked against the one Earshot protects.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.Error("The check for AirPods that Earshot does not protect failed (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ").", ex);
+        }
+    }
+
+    private void ShowNotProtectedCard(int count)
+    {
+        if (_notProtectedShown || _closing || _disposed)
+        {
+            return;
+        }
+
+        _notProtectedShown = true;
+        _log.Warn(count.ToString(CultureInfo.InvariantCulture) + " set(s) of paired AirPods are not the one Earshot protects. Nothing was changed.");
+        IFixLauncher? launcher = _services.FixLauncher;
+        CardAction? action = launcher is null
+            ? null
+            : new CardAction(FixOffer.ButtonLabel, () =>
+            {
+                _log.Info("Fix connection: started from the card.");
+                if (!launcher.Start(_log) && !_closing)
+                {
+                    CardPlace.NearTray.Show(_cards, TrayStatus.AppName, FixOffer.NotStartedMessage);
+                }
+            });
+        _cards.Show(new CardContent(TrayStatus.AppName, NotProtectedMessage, action), CardAnchor.NearTray);
     }
 
     // Earshot is closing (Exit): no idle wait, no reads again and no start-up check. The operation in flight is
@@ -2683,6 +2753,12 @@ internal sealed partial class BlockCoordinator : IDisposable
             return new BlockDecision(PinMayMoveReason);
         }
 
+        // The idle rule checks this too; this is the look just before the block, for a window that opened since.
+        if ((check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.ForeignLink) && _services.RePair.IsOpen)
+        {
+            return new BlockDecision(RePairWindowReason);
+        }
+
         if (automatic && status is null)
         {
             return new BlockDecision("the node state is not known");
@@ -3148,6 +3224,14 @@ internal sealed partial class BlockCoordinator : IDisposable
             return ("the nodes read " + _blockStatus.State, IdleVerdict.Unsettled);
         }
 
+        // A Fix connection run is pairing the AirPods again: the link that forms is the new pairing's, not a stranger's, and
+        // the run ends with the normal block itself. Checked after the cases that settle without a block, so a quiet PC is
+        // not read again for nothing; read again later, less often each time, because no notification says when the run ends.
+        if (_services.RePair.IsOpen)
+        {
+            return (RePairWindowReason, IdleVerdict.Unsettled);
+        }
+
         // In use settles nothing while changes are not watched: no notification would say when that ends. After a
         // refresh that failed or did not come back in time, the snapshot in hand may be out of date, so the state is
         // read again later, less often each time, rather than an idle wait started on it again and again.
@@ -3422,6 +3506,11 @@ internal sealed partial class BlockCoordinator : IDisposable
     {
         if (run.Skipped is not null)
         {
+            if (run.Skipped == RePairWindowReason)
+            {
+                ScheduleRecheck(RePairWindowReason);
+            }
+
             return;
         }
 
