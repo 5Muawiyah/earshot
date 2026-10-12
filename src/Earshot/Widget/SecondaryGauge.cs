@@ -63,7 +63,8 @@ internal sealed class SecondaryGauge : IDisposable
                 _surface = created;
                 return created;
             },
-            _vote, parts.Settings, log, parts.Time, parts.CoverProbe(), parts.UiPost, parts.Foreground);
+            _vote, parts.Settings, log, parts.Time, parts.CoverProbe(), parts.UiPost, parts.Foreground,
+            requestRead: RequestRead);
         _controller.CardRequested += (_, _) => CardRequested?.Invoke(this, EventArgs.Empty);
         _controller.ToggleRequested += (_, _) => ToggleRequested?.Invoke(this, EventArgs.Empty);
         _controller.MenuRequested += (_, point) => MenuRequested?.Invoke(this, point);
@@ -73,6 +74,9 @@ internal sealed class SecondaryGauge : IDisposable
         _watcher.Start();
         _watcher.Poke();
     }
+
+    // A verdict waiting to hold asks for a confirming read of this display's taskbar. Disposed watchers ignore a poke.
+    private void RequestRead() => _watcher.Poke();
 
     // The display this gauge is for (DisplayInfo.Id) and its plain name.
     public string DisplayId { get; }
