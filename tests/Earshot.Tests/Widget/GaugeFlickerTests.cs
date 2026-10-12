@@ -92,21 +92,41 @@ public sealed class GaugeFlickerTests
         Assert.IsTrue(rig.Logged(LogLevel.Debug, "Gauge kept at 1596,1036 74x40 after a failed read (Occupants E_FAIL (7), 1 of 3)."));
     }
 
+    // Three failures hide the gauge when they have held over the window (five seconds), not when they have merely come three
+    // in a row: Explorer laying its bar out again fails several reads in a second or two.
     [TestMethod]
-    public void ThreeConsecutiveFailedReadsHideTheGauge()
+    public void ThreeConsecutiveFailedReadsHideTheGaugeOnceTheyHaveHeldFiveSeconds()
     {
         var rig = new Rig();
         rig.Layout(FreeSpace());
 
         rig.Fail();
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
         rig.Fail();
         Assert.IsInstanceOfType<GaugeState.Shown>(rig.Controller.State, "Two failures are still tolerated.");
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
         rig.Fail();
 
         Assert.AreEqual(new GaugeState.Hidden(HiddenReason.ReadFailed), rig.Controller.State);
         CollectionAssert.Contains(rig.Surface.Calls, "HideWindow");
         Assert.IsTrue(rig.Logged(LogLevel.Info, "Gauge hidden (ReadFailed Occupants E_FAIL (7) after 3 consecutive failures)."));
         Assert.IsTrue(rig.Icon.Visible, "The tray icon is back.");
+    }
+
+    [TestMethod]
+    public void ThreeFailedReadsInAMomentDoNotHideTheGauge()
+    {
+        var rig = new Rig();
+        rig.Layout(FreeSpace());
+
+        rig.Fail();
+        rig.Fail();
+        rig.Fail();
+
+        Assert.IsInstanceOfType<GaugeState.Shown>(rig.Controller.State, "Three reads, no time.");
+        rig.Time.Advance(TimeSpan.FromSeconds(5));
+        rig.Fail();
+        Assert.AreEqual(new GaugeState.Hidden(HiddenReason.ReadFailed), rig.Controller.State, "Four reads over five seconds.");
     }
 
     [TestMethod]
@@ -124,12 +144,18 @@ public sealed class GaugeFlickerTests
         Assert.IsInstanceOfType<GaugeState.Shown>(rig.Controller.State);
     }
 
+    // Missing for a moment is what a taskbar Explorer is creating again looks like, so one read that finds none is not a verdict.
     [TestMethod]
-    public void NoTaskbarHidesAtOnce()
+    public void NoTaskbarHidesTheGaugeWhenItLasts()
     {
         var rig = new Rig();
         rig.Layout(FreeSpace());
 
+        rig.Fail(TaskbarReadFailureStep.NoTaskbar);
+        Assert.IsInstanceOfType<GaugeState.Shown>(rig.Controller.State, "One read.");
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
+        rig.Fail(TaskbarReadFailureStep.NoTaskbar);
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
         rig.Fail(TaskbarReadFailureStep.NoTaskbar);
 
         Assert.AreEqual(new GaugeState.Hidden(HiddenReason.NoTaskbar), rig.Controller.State);
@@ -164,8 +190,11 @@ public sealed class GaugeFlickerTests
         var rig = new Rig();
         rig.Layout(FreeSpace());
         rig.Fail();
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
         rig.Fail();
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
         rig.Fail();
+        Assert.IsInstanceOfType<GaugeState.Hidden>(rig.Controller.State, "Sanity: the failures held, so it is hidden.");
 
         rig.Layout(FreeSpace());
 

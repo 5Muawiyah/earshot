@@ -201,7 +201,8 @@ internal sealed partial class TrayContext
                 _time,
                 _gaugeCoverProbeFactory?.Invoke() ?? new WindowCoverProbe(),
                 _registry.UiPost,
-                () => _foregroundWindowProbe(_displaySource.Read().Displays));
+                () => _foregroundWindowProbe(_displaySource.Read().Displays),
+                requestRead: () => _taskbarWatcher?.Poke());
             controller.CardRequested += OnWidgetCardRequested;
             controller.ToggleRequested += (_, _) => StartToggle();
             controller.MenuRequested += (_, point) => _menu.Strip.Show(point);

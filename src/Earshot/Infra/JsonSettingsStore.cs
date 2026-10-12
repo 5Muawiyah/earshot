@@ -75,6 +75,10 @@ internal sealed class JsonSettingsStore : ISettingsStore
     // opened, or because an unusable file could not be moved aside. Update loads again before saving.
     private bool _loadUnsettled;
 
+    // A hash of the bytes of settings.json as this store last wrote or read them, so the file watcher can tell the store's own
+    // save, which changes nothing, from an edit by another program or another run of Earshot.
+    private byte[]? _knownFileHash;
+
     public JsonSettingsStore(string path, ILog log, bool readOnly = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -186,6 +190,62 @@ internal sealed class JsonSettingsStore : ISettingsStore
         }
 
         Changed?.Invoke(this, published);
+    }
+
+    // Loads the settings again, and raises Changed, only when settings.json holds something other than what this store last wrote
+    // or read. Returns whether it did. Called by SettingsFileWatcher after the file changes on disk.
+    public bool ReloadIfFileChanged()
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(FilePath);
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (IOException ex)
+        {
+            // A save in progress by the other program: the next change event brings this back.
+            _log.Write(LogLevel.Debug, "Settings file not read for a reload yet: " + ex.Message);
+            return false;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _log.Warn("Settings file not read for a reload: " + ex.Message);
+            return false;
+        }
+
+        lock (_gate)
+        {
+            if (_knownFileHash is not null && System.Security.Cryptography.SHA256.HashData(bytes).AsSpan().SequenceEqual(_knownFileHash))
+            {
+                return false;
+            }
+        }
+
+        // A file that cannot be used (a hand edit half done, a newer version's file) is not repaired here: loading it would move it
+        // aside and put the backup over the person's edit. The values the tray holds stay until the file is usable.
+        ReadResult read;
+        lock (_gate)
+        {
+            read = TryRead(FilePath);
+        }
+
+        if (read.Kind != ReadKind.Valid)
+        {
+            _log.Warn("Settings file changed on disk but cannot be used yet (" + (read.Problem ?? read.Kind.ToString()) + "), so the values in use are kept: " + FilePath);
+            return false;
+        }
+
+        _log.Info("Settings file changed on disk, so it is loaded again: " + FilePath);
+        Reload();
+        return true;
     }
 
     // Loads the files again. A load that still leaves them untouched (unreadable, or unusable and not moved
@@ -438,11 +498,14 @@ internal sealed class JsonSettingsStore : ISettingsStore
         WithRetry("save settings", () =>
         {
             Directory.CreateDirectory(folder);
+            byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(settings, SettingsJsonContext.Default.EarshotSettings);
             using (var stream = new FileStream(TempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                JsonSerializer.Serialize(stream, settings, SettingsJsonContext.Default.EarshotSettings);
+                stream.Write(bytes);
                 stream.Flush(flushToDisk: true);
             }
+
+            _knownFileHash = System.Security.Cryptography.SHA256.HashData(bytes);
 
             if (File.Exists(FilePath))
             {
@@ -484,6 +547,11 @@ internal sealed class JsonSettingsStore : ISettingsStore
         if (json.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]))
         {
             json = json[3..];
+        }
+
+        if (string.Equals(path, FilePath, StringComparison.Ordinal))
+        {
+            _knownFileHash = System.Security.Cryptography.SHA256.HashData(bytes);
         }
 
         long? declaredNewer = DeclaredNewerSchemaVersion(json);

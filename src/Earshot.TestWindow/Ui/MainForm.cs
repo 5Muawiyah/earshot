@@ -17,7 +17,7 @@ namespace Earshot.TestWindow.Ui;
 // a real click (Button.PerformClick is a no-op on it) without anything here needing to track that
 // separately for production code; only test seams that click such a control need to ask for the
 // right view first (SwitchToView, and the small Ensure/Show*ForTests helpers below that call it).
-internal sealed class MainForm : Form
+internal sealed partial class MainForm : Form
 {
     internal enum MainView { Home, List, Running }
 

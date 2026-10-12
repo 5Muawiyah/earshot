@@ -395,7 +395,14 @@ public sealed class OwnerCaptureReplayTests
             snapshot.Counters.OkForm,
             snapshot.Counters.Chosen + snapshot.Counters.OtherSet + snapshot.Counters.NoPairedModel + snapshot.Counters.ModelMismatch + snapshot.Counters.ColourMismatch,
             "Every documented-form message lands in at most one of the classes.");
-        Assert.AreEqual(50, BatteryFreshness.Shown(snapshot with { Where = AirPodsWhere.ThisPc }, now).Gauge?.Percent, "With the AirPods connected to this PC the lower bud is on the gauge.");
+
+        // With the AirPods connected to this PC the lower bud is on the gauge. The bud read at 50 was heard some time before the
+        // end of the capture and was charging, so it is shown grown from 50 at the seed's rate (Apple's figure for the buds).
+        ShownBattery shown = BatteryFreshness.Shown(snapshot with { Where = AirPodsWhere.ThisPc }, now);
+        ShownPart lower = shown.Left.ReadPercent == 50 || shown.Left.Percent == 50 ? shown.Left : shown.Right;
+        Assert.AreEqual(lower.Percent, shown.Gauge?.Percent);
+        Assert.IsGreaterThanOrEqualTo(50, shown.Gauge?.Percent ?? 0);
+        Assert.IsLessThan(60, shown.Gauge?.Percent ?? 100, "It stays the lower bud's, under the other bud's 60.");
     }
 
     [TestMethod]

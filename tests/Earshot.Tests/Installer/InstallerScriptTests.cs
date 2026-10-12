@@ -22,11 +22,11 @@ namespace Earshot.Tests.Installer;
 public sealed class InstallerScriptTests
 {
     private const string UsageLine =
-        "Usage: & ([scriptblock]::Create((irm https://github.com/5Muawiyah/earshot/releases/latest/download/earshot.ps1))) -Action Install|Update|Repair|Uninstall [-DryRun] [-RemoveSettings]";
+        "Usage: & ([scriptblock]::Create((irm https://github.com/5Muawiyah/earshot/releases/latest/download/earshot.ps1))) -Action Install|Update|Repair|Uninstall|Doctor|Fix|Help [-DryRun] [-RemoveSettings]";
 
     private const string AdministratorRefusalLine = "Earshot: stopped. Run this in a normal PowerShell window, not as administrator.";
 
-    private static readonly string[] MenuLines = ["Earshot", "  1  Install", "  2  Update", "  3  Repair", "  4  Uninstall", "Choose 1 to 4, or press Enter to cancel"];
+    private static readonly string[] MenuLines = ["Earshot", "  1  Install", "  2  Update", "  3  Repair", "  4  Uninstall", "  5  Doctor", "  6  Fix", "  7  Help", "Choose 1 to 7, or press Enter to cancel"];
     private static readonly string[] ClosedThenElevated = ["ExitTray|4242", "Elevate"];
 
     private const string Sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
@@ -117,7 +117,7 @@ public sealed class InstallerScriptTests
 
         CollectionAssert.Contains(run.Lines, UsageLine);
         Assert.AreEqual("Earshot: stopped. No action was given and no one is here to ask.", run.Final);
-        Assert.IsFalse(run.Lines.Any(l => l.Contains("Choose 1 to 4", StringComparison.Ordinal)), "No menu when no one can answer it.");
+        Assert.IsFalse(run.Lines.Any(l => l.Contains("Choose 1 to 7", StringComparison.Ordinal)), "No menu when no one can answer it.");
         Assert.IsEmpty(world.Feed.Requests, "Not one request before the usage line.");
         Assert.IsEmpty(run.Calls);
     }
@@ -134,7 +134,7 @@ public sealed class InstallerScriptTests
         InstallerRun run = world.Run(shell);
 
         CollectionAssert.Contains(run.Lines, UsageLine);
-        Assert.IsFalse(run.Lines.Any(l => l.Contains("Choose 1 to 4", StringComparison.Ordinal)));
+        Assert.IsFalse(run.Lines.Any(l => l.Contains("Choose 1 to 7", StringComparison.Ordinal)));
         Assert.IsEmpty(world.Feed.Requests);
     }
 
@@ -198,7 +198,7 @@ public sealed class InstallerScriptTests
         Assert.IsGreaterThanOrEqualTo(0, menu, run.Describe());
         CollectionAssert.AreEqual(
             MenuLines,
-            run.Lines.Skip(menu).Take(6).ToArray());
+            run.Lines.Skip(menu).Take(9).ToArray());
         Assert.AreEqual("Earshot: stopped. Cancelled.", run.Final);
         Assert.IsEmpty(world.Feed.Requests);
     }
@@ -206,16 +206,16 @@ public sealed class InstallerScriptTests
     [TestMethod]
     [DataRow(ShellKind.WindowsPowerShell)]
     [DataRow(ShellKind.PowerShell7)]
-    public void ASeventhChoiceIsNotAChoiceAndNothingIsRequested(ShellKind shell)
+    public void AnEighthChoiceIsNotAChoiceAndNothingIsRequested(ShellKind shell)
     {
         using var world = new InstallerWorld();
         world.Spec.Action = null;
         world.Spec.CanAsk = true;
-        world.Spec.Answers = ["7"];
+        world.Spec.Answers = ["8"];
 
         InstallerRun run = world.Run(shell);
 
-        Assert.AreEqual("Earshot: stopped. \"7\" is not one of the choices.", run.Final);
+        Assert.AreEqual("Earshot: stopped. \"8\" is not one of the choices.", run.Final);
         Assert.IsEmpty(world.Feed.Requests);
     }
 
@@ -1064,7 +1064,7 @@ public sealed class InstallerScriptTests
 
         InstallerRun run = world.Run(shell);
 
-        Assert.AreEqual("Earshot: stopped. The action must be Install, Update, Repair or Uninstall, not Frobnicate.", run.Final, run.Describe());
+        Assert.AreEqual("Earshot: stopped. The action must be Install, Update, Repair, Uninstall, Doctor, Fix or Help, not Frobnicate.", run.Final, run.Describe());
         Assert.IsEmpty(world.Feed.Requests);
     }
 
@@ -1674,6 +1674,38 @@ internal sealed class InstallerWorld : IDisposable
         return d.ToString();
     }
 
+    // The key every world's run key sits under is left empty once the worlds' own keys are gone; it goes too. A key that still
+    // holds another test's key is not empty and stays (DeleteSubKey refuses it), and one that is gone already is not an error.
+    private static void RemoveEmptyParentKey()
+    {
+        const string parent = @"Software\EarshotInstallerTests";
+        try
+        {
+            using Microsoft.Win32.RegistryKey? key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(parent);
+            if (key is null || key.SubKeyCount != 0 || key.ValueCount != 0)
+            {
+                return;
+            }
+        }
+        catch (System.Security.SecurityException)
+        {
+            return;
+        }
+
+        try
+        {
+            Microsoft.Win32.Registry.CurrentUser.DeleteSubKey(parent, throwOnMissingSubKey: false);
+        }
+        catch (InvalidOperationException)
+        {
+            // Another test made a key under it between the look and the delete: it stays.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Not ours to remove.
+        }
+    }
+
     public void Dispose()
     {
         _watcher?.Dispose();
@@ -1687,6 +1719,7 @@ internal sealed class InstallerWorld : IDisposable
             // A key the test did not make is not touched; nothing was written under this name.
         }
 
+        RemoveEmptyParentKey();
         _temp.Dispose();
     }
 }

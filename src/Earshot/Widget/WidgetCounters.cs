@@ -17,7 +17,11 @@ namespace Earshot.Widget;
 // while no paired model is known. Links counts the links made (a case opened near the PC), Followed the times the
 // linked set was followed to new addresses, Drops the links dropped for being lost too long, and Switches the times
 // another pair opening its case nearer took the link. Sets is how many sets were in range at the last message, not a
-// running total. BudOrderDisagree counts messages whose other sender of the linked set, heard within two seconds,
+// running total. Refound counts the times the remembered pair was found again without a case open, and RefindRefused
+// the times a worn pair was weighed for that and refused, by reason (ambiguous: two field sets in the window; weak: too
+// far from the PC; inconsistent: levels the last reading cannot lead to; expired: last heard too long ago). LinkMiss
+// counts the case-known bursts of the paired model that ended without a link, by reason (too few messages, too short a
+// span, too weak). BudOrderDisagree counts messages whose other sender of the linked set, heard within two seconds,
 // decoded to a different left and right: it should stay 0.
 public sealed record WidgetCounters(
     long AllSections, long AppleSections, long OtherCompanySections,
@@ -34,6 +38,26 @@ public sealed record WidgetCounters(
     public long Followed { get; init; }
 
     public long Drops { get; init; }
+
+    public long Refound { get; init; }
+
+    public long RefindAmbiguous { get; init; }
+
+    public long RefindWeak { get; init; }
+
+    public long RefindInconsistent { get; init; }
+
+    public long RefindExpired { get; init; }
+
+    public long LinkMissTooFew { get; init; }
+
+    public long LinkMissTooShort { get; init; }
+
+    public long LinkMissTooWeak { get; init; }
+
+    public long RefindRefused => RefindAmbiguous + RefindWeak + RefindInconsistent + RefindExpired;
+
+    public long LinkMiss => LinkMissTooFew + LinkMissTooShort + LinkMissTooWeak;
 
     public static WidgetCounters Empty { get; } = new(
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, Array.Empty<(byte?, int, long)>());

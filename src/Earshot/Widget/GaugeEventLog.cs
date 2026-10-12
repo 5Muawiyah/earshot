@@ -89,6 +89,34 @@ internal static class GaugeEventLog
             Number(outcome.Code) + "), " + Number(failures) + " of " + Number(tolerance) + ").";
     }
 
+    // A verdict that has not held yet: the gauge stays as it is, and the line says what is being waited for. One line when the
+    // verdict starts and one when it lapses or settles, never one per read.
+    public static string KeptPendingHide(Rectangle bounds, string what, TimeSpan window) =>
+        "Gauge kept at " + Rect(bounds) + ": " + what + " on one read; it hides if that lasts " + Seconds(window) + " s.";
+
+    public static string KeptPendingMove(Rectangle bounds, Rectangle target, TimeSpan window) =>
+        "Gauge kept at " + Rect(bounds) + ": a move to " + Rect(target) + " on one read; it moves if that lasts " + Seconds(window) + " s.";
+
+    public static string HeldBackShow(TimeSpan window) =>
+        "Gauge stays hidden: room on one read; it is shown if that lasts " + Seconds(window) + " s.";
+
+    // hidden: the gauge that stays is the hidden one (a room verdict that did not last), not the shown one.
+    public static string PendingLapsed(string what, int reads, TimeSpan span, bool hidden) =>
+        what + " lasted " + Number(reads) + (reads == 1 ? " read" : " reads") + " over " +
+        span.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + " s; the gauge stays" + (hidden ? " hidden." : ".");
+
+    // The gauges on other displays. what: why the taskbar was not found (TaskbarMissing), or null when the display itself was not.
+    public static string TaskbarNotSeen(string display, TaskbarMissing? what, TimeSpan window) =>
+        what is { } missing
+            ? "Gauge: " + display + "'s taskbar was not seen (" + missing + "); its gauge is removed if that lasts " + Seconds(window) + " s."
+            : "Gauge: " + display + " was not seen; its gauge is removed if that lasts " + Seconds(window) + " s.";
+
+    public static string TaskbarBack(string display, TimeSpan after, bool displayItself) =>
+        "Gauge: " + display + (displayItself ? " is back after " : "'s taskbar is back after ") +
+        after.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + " s; its gauge stays.";
+
+    private static string Seconds(TimeSpan span) => span.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture);
+
     public static string RaisedAfterForegroundChange(WindowIdentity? over, string foregroundClass) =>
         "Gauge raised: " + Describe(over) + " was over it after a foreground change to " + Token(foregroundClass) + ".";
 

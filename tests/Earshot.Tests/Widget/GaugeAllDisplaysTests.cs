@@ -520,6 +520,10 @@ public sealed class GaugeAllDisplaysTests
             var changed = Message.Create(rig.Tray.Context.Window.Handle, 0x007E, 0, 0);
             rig.Tray.Context.Window.Dispatch(ref changed);
 
+            // A display that is not seen is not removed on the first look: its gauge goes once the absence has held ten seconds
+            // (the clock here is the tray's own, moved a second at a time while the reads and the signal's follow-ups come in).
+            Assert.IsFalse(second.IsDisposed, "One look at a missing display removes nothing.");
+            TrayHarness.PumpUntil(() => { rig.Tray.Time.Advance(TimeSpan.FromSeconds(1)); return second.IsDisposed; }, "The removed display's gauge window was not disposed. " + Why(rig));
             Assert.IsTrue(second.IsDisposed, "The removed display's gauge window is disposed.");
             Assert.AreEqual(0, rig.Tray.Context.SecondaryGaugeCountForTest);
             Assert.IsFalse(rig.ShownOn(Left1080)!.IsDisposed, "The main display's gauge is left alone.");
@@ -545,7 +549,10 @@ public sealed class GaugeAllDisplaysTests
 
             // The owner turns the taskbar off on the other displays' own settings page for Display 3 only.
             rig.Taskbars.Set(BarOn(Two, 0x5000));
-            TrayHarness.PumpUntil(() => third.IsDisposed, "The gauge of a display that no longer shows a taskbar stayed.");
+            Assert.IsFalse(third.IsDisposed, "A taskbar not seen once is not a taskbar gone.");
+            TrayHarness.PumpUntil(
+                () => { rig.Tray.Time.Advance(TimeSpan.FromSeconds(1)); return third.IsDisposed; },
+                "The gauge of a display that no longer shows a taskbar stayed.");
             Assert.AreEqual(1, rig.Tray.Context.SecondaryGaugeCountForTest);
 
             rig.Taskbars.Set(BarOn(Two, 0x5000), BarOn(Three, 0x5001));
@@ -1093,8 +1100,8 @@ public sealed class GaugeAllDisplaysTests
         Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
         FeedSecondary(rig, Two);
         TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null && rig.ShownOn(Right1080) is not null, "The gauges were never shown.");
-        rig.Tray.TaskbarReaders[0].SetNextResult(
-            ITaskbarReader.Result.Fail(new TaskbarReadFailure(TaskbarReadFailureStep.NoTaskbar, new StepOutcome("fake", false, 0, "S_OK", null))));
+        // The bar covered by a full-screen window: a hide that is made on the read, where a missing taskbar is waited out.
+        rig.Tray.TaskbarReaders[0].SetNextResult(ITaskbarReader.Result.Ok(BarLayout(One, secondary: false) with { Covered = true }));
         TrayHarness.PumpUntil(() => rig.Tray.Context.WidgetGaugeStateForTest is GaugeState.Hidden, "The main gauge never hid.");
         rig.Tray.Time.Advance(TimeSpan.FromSeconds(3));
         rig.Tray.PumpUntilIdle();

@@ -87,6 +87,24 @@ public sealed class ProximityParserTests
         Assert.IsNull(parse.Message);
     }
 
+    // A 25-byte item whose first byte is 0x07 and whose model bytes are the documented position's is still not the documented
+    // message: the notes give the first byte as 0x01 and describe no layout for any other value, so it is counted by shape
+    // and never decoded.
+    [TestMethod]
+    public void ATwentyFiveByteItemWithFirstByteZeroSevenIsUnknownFormNotAMessage()
+    {
+        byte[] value = WidgetFixtures.ProximityValue();
+        value[0] = 0x07;
+        byte[] data = WidgetFixtures.Item(0x07, value);
+
+        ProximityParse parse = ProximityParser.Parse(Apple, data);
+
+        Assert.AreEqual(ProximityParseStatus.UnknownForm, parse.Status);
+        Assert.AreEqual((byte)0x07, parse.Prefix);
+        Assert.AreEqual(25, parse.Length);
+        Assert.IsNull(parse.Message);
+    }
+
     [TestMethod]
     public void ALongerZeroOneFormIsUnknownForm()
     {
