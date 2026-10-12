@@ -1,0 +1,334 @@
+using Earshot.Boot;
+using Earshot.Boot.Gate;
+using Earshot.Contracts;
+using Earshot.Repair;
+using Earshot.Tests.Phase4;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+namespace Earshot.Tests.Repair;
+
+// Every way a Fix run can end, with Earshot installed or not. With Earshot installed and Block at boot on, a run that changed
+// anything ends with the normal block, and the block is the last request the gate gets.
+[TestClass]
+public sealed class FixExitPathTests
+{
+    private static FixRig Arranged(bool happy = true)
+    {
+        var rig = new FixRig();
+        rig.LeaveAirPodsBlocked();
+        FixRePairTests.ArrangeHappyPairing(rig, newDeviceIsAirPods: happy);
+
+        // The elevated side runs in this process, over the same fake table.
+        rig.Elevator.Result = (path, sha) =>
+        {
+            FixApplyResult applied = FixApply.Run(new FixApplyRequest(path, sha), new FixApplyDeps
+            {
+                Nodes = rig.Gate.Nodes,
+                Store = rig.Gate.Store,
+                Folders = rig.Gate.Folders,
+                RunLock = NoGateRunLock.Instance,
+                Log = rig.Gate.Log,
+                LeftoversReader = rig.Leftovers,
+                Wait = _ => true,
+                LockWait = TimeSpan.FromSeconds(1),
+            });
+            return new ElevatedRun((int)applied.Outcome, StepOutcomes.FromWin32("runas", 0));
+        };
+        return rig;
+    }
+
+    private static void SayBothOk(FixRig rig)
+    {
+        rig.Prompter.SayOk();
+        rig.Prompter.SayOk();
+    }
+
+    private static void Uninstall(FixRig rig)
+    {
+        File.Delete(rig.Gate.Store.DeviceFile);
+        File.Delete(rig.Gate.Store.ConfigFile);
+    }
+
+    private static async Task<FixResult> RunAsync(FixRig rig, CancellationToken ct = default) =>
+        await FixConnection.RunAsync([], rig.Host(), ct);
+
+    [TestMethod]
+    public async Task ASuccessfulRunAdoptsTheNewPairInOneGateRunWhichBlocksIt()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Done, result.Outcome, string.Join("; ", result.Lines));
+        Expect.Same(rig.GateFake.Calls, "adopt:" + FixRig.NewAirPodsAddress);
+        Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
+        // The nodes of the old pair were enabled before the second question.
+        Assert.IsNotEmpty(rig.Gate.Nodes.Calls.Where(c => c.Kind is "enable" or "clear-flag").ToList());
+        Assert.AreEqual(1, rig.Elevator.Calls.Count);
+    }
+
+    [TestMethod]
+    public async Task ADeclinedSecondOkEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Prompter.SayCancel();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+        Expect.Same(rig.GateFake.Calls, "block");
+        Assert.IsEmpty(rig.Pairing.Calls, "Nothing was unpaired or scanned.");
+        Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
+    }
+
+    [TestMethod]
+    public async Task ASecondOkThatTimesOutEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Prompter.SayTimedOut();
+
+        await RunAsync(rig);
+
+        Expect.Same(rig.GateFake.Calls, "block");
+        Assert.IsEmpty(rig.Pairing.Calls);
+    }
+
+    [TestMethod]
+    public async Task ADeclinedFirstOkChangesNothingAndSendsNoBlock()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayCancel();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+        Assert.IsEmpty(rig.GateFake.Calls);
+        Assert.IsEmpty(rig.Elevator.Calls);
+        Assert.IsEmpty(rig.Gate.Nodes.Calls);
+        Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
+    }
+
+    [TestMethod]
+    public async Task ADeclinedAdministratorPromptChangesNothingAndSendsNoBlock()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Elevator.Result = (_, _) => new ElevatedRun(null, StepOutcomes.FromWin32("runas", 1223));
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        Assert.IsEmpty(rig.GateFake.Calls);
+        Assert.IsEmpty(rig.Pairing.Calls);
+        Assert.IsEmpty(rig.Gate.Nodes.Calls);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("1223", StringComparison.Ordinal) || l.Contains("ERROR_CANCELLED", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task AnEmptyPlanSkipsElevationAndTheFirstQuestion()
+    {
+        using var rig = new FixRig();
+        FixRePairTests.ArrangeHappyPairing(rig);
+        rig.Prompter.SayOk();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.IsEmpty(rig.Elevator.Calls);
+        Assert.HasCount(1, rig.Prompter.Asked, "Only the re-pair question was asked.");
+        Assert.IsTrue(rig.Prompter.Asked[0].Heading.Contains("pair", StringComparison.OrdinalIgnoreCase));
+        Assert.AreEqual(FixOutcome.Done, result.Outcome, string.Join("; ", result.Lines));
+    }
+
+    [TestMethod]
+    public async Task AFailedUnpairEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        rig.Pairing.UnpairResult = new PairingCallResult("Failed", 2, false, null);
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        Assert.AreEqual("block", rig.GateFake.Calls[^1]);
+        Assert.DoesNotContain("adopt:" + FixRig.NewAirPodsAddress, rig.GateFake.Calls);
+    }
+
+    [TestMethod]
+    public async Task NoDeviceAppearingEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        rig.Pairing.Events.RemoveAll(e => e.Device?.Id == FixRePairTests.NewId);
+
+        await RunAsync(rig);
+
+        Assert.AreEqual("block", rig.GateFake.Calls[^1]);
+        Assert.AreEqual(1, rig.GateFake.Calls.Count);
+    }
+
+    [TestMethod]
+    public async Task APickTheOwnerCancelsEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        rig.Ui.Pick = -1;
+
+        await RunAsync(rig);
+
+        Assert.AreEqual("block", rig.GateFake.Calls[^1]);
+    }
+
+    [TestMethod]
+    public async Task AFailedPairingEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        rig.Pairing.PairResult = new PairingCallResult("AuthenticationFailure", 5, false, null);
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual("block", rig.GateFake.Calls[^1]);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("AuthenticationFailure", StringComparison.Ordinal) && l.Contains('5', StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task AnExceptionInThePairingApiEndsInTheBlockAndIsReported()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        rig.Pairing.ThrowOnPair = new InvalidOperationException("the pairing API failed");
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        Assert.AreEqual("block", rig.GateFake.Calls[^1]);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("InvalidOperationException", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task APostPairIdentityFailureAdoptsNothingAndEndsInTheBlock()
+    {
+        using FixRig rig = Arranged(happy: false);
+        SayBothOk(rig);
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        Assert.DoesNotContain("adopt:" + FixRig.NewAirPodsAddress, rig.GateFake.Calls);
+        Assert.AreEqual("block", rig.GateFake.Calls[^1]);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("stays paired", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public async Task AFailedAdoptionIsFollowedByTheBlock()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        rig.GateFake.AdoptResult = _ => new FixGateResult(false, "Could not adopt", [], 8);
+
+        FixResult result = await RunAsync(rig);
+
+        Expect.Same(rig.GateFake.Calls, "adopt:" + FixRig.NewAirPodsAddress, "block");
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+    }
+
+    [TestMethod]
+    public async Task ACancelledAdoptionIsFollowedByTheBlockThatIsNotCancelled()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        using var cts = new CancellationTokenSource();
+        rig.GateFake.OnCall = call =>
+        {
+            if (call == "adopt")
+            {
+                cts.Cancel();
+            }
+        };
+
+        FixResult result = await RunAsync(rig, cts.Token);
+
+        Expect.Same(rig.GateFake.Calls, "adopt:" + FixRig.NewAirPodsAddress, "block");
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+    }
+
+    [TestMethod]
+    public async Task WithEarshotNotInstalledNothingIsAdoptedAndNoBlockIsSent()
+    {
+        using FixRig rig = Arranged();
+        Uninstall(rig);
+        SayBothOk(rig);
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Done, result.Outcome, string.Join("; ", result.Lines));
+        Assert.IsEmpty(rig.GateFake.Calls);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("not installed", StringComparison.OrdinalIgnoreCase) && l.Contains("adopt", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public async Task WithEarshotNotInstalledADeclinedSecondOkSendsNoBlock()
+    {
+        using FixRig rig = Arranged();
+        Uninstall(rig);
+
+        // With no record of Earshot there is nothing to undo, so the only question is the second one.
+        rig.Prompter.SayCancel();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+        Assert.HasCount(1, rig.Prompter.Asked);
+        Assert.IsEmpty(rig.Pairing.Calls);
+        Assert.IsEmpty(rig.GateFake.Calls);
+    }
+
+    [TestMethod]
+    public async Task WithBlockAtBootOffNoBlockIsSent()
+    {
+        using FixRig rig = Arranged();
+        Assert.IsTrue(rig.Gate.Store.WriteConfig(new GateConfig { BlockAtBoot = false }).Ok);
+        rig.Prompter.SayOk();
+        rig.Prompter.SayCancel();
+
+        await RunAsync(rig);
+
+        Assert.IsEmpty(rig.GateFake.Calls);
+    }
+
+    [TestMethod]
+    public async Task ABlockThatFailsLeavesTheMarkerForTheNextStart()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Prompter.SayCancel();
+        rig.GateFake.BlockResult = () => new FixGateResult(false, "Could not block", [], 3);
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        Assert.AreNotEqual(FixRecoveryState.None, rig.Recovery.Read().State);
+    }
+
+    [TestMethod]
+    public async Task TheMarkerIsWrittenBeforeTheFirstChangeNotAfter()
+    {
+        using FixRig rig = Arranged();
+        SayBothOk(rig);
+        FixRecoveryState? atElevation = null;
+        FakeElevator elevator = rig.Elevator;
+        Func<string, string, ElevatedRun> inner = elevator.Result;
+        elevator.Result = (p, s) =>
+        {
+            atElevation = rig.Recovery.Read().State;
+            return inner(p, s);
+        };
+
+        await RunAsync(rig);
+
+        Assert.AreEqual(FixRecoveryState.WindowOpen, atElevation);
+    }
+}
