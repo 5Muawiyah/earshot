@@ -400,7 +400,8 @@ shown wherever it is. A part's value is one of three kinds:
   (tertiary ink) with its age, until a newer reading is heard.
 - *Estimated*: a last reading of a part that was charging, grown at its rate
   (`ChargeEstimator`), drawn like a last reading with "≈" before the value and the
-  age of the reading it grew from; the tooltip says "Estimated".
+  age of the reading it grew from; the tooltip says "Estimated". Only while the
+  AirPods are not on this PC: with them on it, the last reading is shown as it was read.
 
 From the linked set Earshot reads the left bud, the right bud and the case, each in
 steps of 10% (that is what the message carries), and the charging bits. Each fresh
@@ -426,8 +427,10 @@ the charging flag and the time. Never a last reading, an estimate or Windows' fi
 and the file's shape has no member for an address, a name or a model. One sample per
 part per minute at most, 7 days kept, and the same load and write rules as above.
 
-*The estimate.* A part charging at its last reading rises from it at its rate until
-100, then stops. Buds charge only in the case, so a bud that was not charging, and a
+*The estimate.* It is for a pair that is away from this PC, where nothing is heard of it
+and it may have been charging since; with the AirPods on this PC a last reading is
+shown as it was read, never grown. A part charging at its last reading rises from it
+at its rate until 100, then stops. Buds charge only in the case, so a bud that was not charging, and a
 case that was not itself charging, keep their value. A clock behind the read time
 gives no rise, and the service hands in the latest time it has worked anything out
 at. An estimate is also never shown lower than one already shown for the same
@@ -445,8 +448,8 @@ within two minutes of the reading before it, the last below 100%, 15 minutes to
 There is no case estimate until a charge of the case has been learned. The buds of
 one model have a seed from the fast-charge figure on Apple's AirPods Pro 3 tech specs page (https://support.apple.com/en-us/125135): about one hour of listening, of up to eight, in five minutes, worked out as 150 points an hour. The wording was confirmed against that page on 12 October 2026, and the seed is on (`ChargeRates.UseAppleBudSeed`).
 
-*The gauge.* On this PC its number is the lower bud, live or else last or estimated
-in tertiary ink, or Windows' own figure while that is current and no bud is live.
+*The gauge.* On this PC its number is the lower bud, live or else last in tertiary
+ink (never an estimate), or Windows' own figure while that is current and no bud is live.
 Not on this PC, a case mark (our own shape, never in the accent colour) takes the
 earbud mark's place, and the ring and the number are the case's last or estimated
 value in tertiary ink, with the bolt if the case was charging; with no case value

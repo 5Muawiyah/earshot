@@ -100,17 +100,19 @@ public sealed class AwayGaugeTests
         Assert.AreEqual("AirPods 60%\r\nL 70%   R 60%\r\nLast read 3 h ago", c.Tooltip);
     }
 
+    // An estimate is for a pair away from this PC. On this PC a bud that was charging when last read is shown as it was read:
+    // the same book and rate that would grow it to 70 away give 40 here.
     [TestMethod]
-    public void OnThisPcAnEstimatedBudIsMarkedInTheNumberAndTheTooltip()
+    public void OnThisPcAChargingBudsLastReadingIsNotGrownIntoAnEstimate()
     {
         WidgetSnapshot snapshot = Snapshot(AirPodsWhere.ThisPc, Book(Saved(40, true), Saved(90, false), null, Rate(ChargePart.Bud, 30)));
 
         GaugeContent c = GaugeContent.From(snapshot, ReadAt + TimeSpan.FromHours(1), Settings);
 
-        Assert.AreEqual(70, c.Percent);
-        Assert.IsTrue(c.Estimated);
+        Assert.AreEqual(40, c.Percent);
+        Assert.IsFalse(c.Estimated);
         Assert.IsTrue(c.Tertiary);
-        Assert.AreEqual("AirPods ≈70%, charging\r\nL ≈70%   R 90%\r\nEstimated, read 1 h ago", c.Tooltip);
+        Assert.AreEqual("AirPods 40%, charging\r\nL 40%   R 90%\r\nLast read 1 h ago", c.Tooltip);
     }
 
     [TestMethod]
@@ -199,7 +201,7 @@ public sealed class AwayGaugeTests
 
         WidgetSnapshot estimated = Snapshot(AirPodsWhere.ThisPc, Book(Saved(5, true), null, null, Rate(ChargePart.Bud, 6)));
         GaugeContent e = GaugeContent.From(estimated, ReadAt + TimeSpan.FromHours(1), new GaugeDisplaySettings(20, "iPhone"));
-        Assert.AreEqual(11, e.Percent);
+        Assert.AreEqual(5, e.Percent, "On this PC a charging bud is shown as it was read, not grown.");
         Assert.IsFalse(e.Low);
         Assert.IsFalse(e.Tooltip.StartsWith("Low battery", StringComparison.Ordinal), e.Tooltip);
 
