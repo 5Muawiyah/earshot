@@ -321,11 +321,16 @@ internal sealed class TaskSchedulerGate
         return new TaskVerification(taskName, problems.Count == 0 ? TaskHealth.Ready : TaskHealth.NeedsRepair, problems, steps, task);
     }
 
+    // address is the one extra argument a verb can carry: the 12 hex address for set-device and adopt-device, the nonce of the
+    // allow to put back for undo-allow, and nothing for every other verb.
     public GateRunResult Run(string taskName, string verb, string nonce, string? address, TimeSpan timeout, CancellationToken ct)
     {
+        bool takesAddress = verb is GateVerbs.SetDevice or GateVerbs.AdoptDevice;
+        bool takesAllowNonce = verb == GateVerbs.UndoAllow;
         if (!GateVerbs.All.Contains(verb) || verb is GateVerbs.Boot or GateVerbs.Preshutdown || !BoundaryValidation.IsNonce(nonce) ||
-            (verb == GateVerbs.SetDevice) != (address is not null) ||
-            (address is not null && !BoundaryValidation.IsAddress12(address)))
+            (takesAddress || takesAllowNonce) != (address is not null) ||
+            (takesAddress && !BoundaryValidation.IsAddress12(address)) ||
+            (takesAllowNonce && !BoundaryValidation.IsNonce(address)))
         {
             throw new ArgumentException("Not a request the tray sends: " + verb + ".", nameof(verb));
         }
