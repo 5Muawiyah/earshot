@@ -85,9 +85,9 @@ public sealed class WidgetCardScrollTests
             int bottom = page.Card.Bounds.Bottom;
             page.OpenSettings(capped: false);
 
-            // Windows cuts a window taller than the screen to the screen, so a page that fits the work area but not this screen
-            // cannot show its full height here; that is the screen the tests run on, not the card.
-            // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.systeminformation.maxwindowtracksize
+            // Windows' default maximum tracking size is the largest a window may be made, so a page that fits the work area but is
+            // taller than that cannot show its full height on this screen; that is the screen the tests run on, not the card.
+            // https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-minmaxinfo
             if (page.Card.CurrentSettingsLayout!.Frame.Height > SystemInformation.MaxWindowTrackSize.Height)
             {
                 Assert.Inconclusive("The settings page is " + page.Card.CurrentSettingsLayout.Frame.Height + " px tall and this screen allows a window of " +

@@ -18,6 +18,9 @@ public sealed class TrayFixMenuTests
         StaThread.Run(() =>
         {
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
+
+            // The tray's own handler runs too: a stand-in launcher, so no process is started.
+            tray.Context.FixLauncher = new Earshot.Tests.Integration.Coordinator.FakeFixLauncher();
             TrayMenu menu = tray.Context.Menu;
             menu.Refresh();
             ToolStripMenuItem fix = menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.FixConnection);
