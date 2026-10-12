@@ -388,4 +388,22 @@ public sealed class SetupPartsTests
 
         throw new AssertFailedException("Earshot.slnx was not found above " + AppContext.BaseDirectory + ".");
     }
+
+    // The one execution of the real session lookup that Setup's refusal rests on (exit 9 when the elevated account is not the
+    // person signed in). Read-only: in the tests' own session, run as the person signed in, the account the session names is
+    // this process's own. A session with no signed-in user (a service session, as on a hosted runner) cannot show it.
+    [TestMethod]
+    public void TheRealSignedInAccountIsThisProcesssOwnInTheTestsSession()
+    {
+        var host = new WindowsSetupHost();
+
+        string? signedIn = host.SignedInUserSid;
+
+        if (signedIn is null && host.SignedInUserProblem.Length == 0)
+        {
+            Assert.Inconclusive("This session names no signed-in user, so the lookup cannot be compared with this process's account here.");
+        }
+
+        Assert.AreEqual(host.OwnUserSid, signedIn, host.SignedInUserProblem);
+    }
 }
