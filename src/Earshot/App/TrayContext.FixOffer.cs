@@ -43,6 +43,51 @@ internal sealed partial class TrayContext
         }
     }
 
+    // The failure card again, with the same words and Connect in Windows under them. Pressing it allows the AirPods and opens
+    // Windows' Bluetooth settings page; the coordinator shows its own card for the result and then leaves a connection made
+    // there alone.
+    private void ShowConnectInWindowsOffer(Guid container, string title, string reason, CardPlace place)
+    {
+        if (_closing || _closed)
+        {
+            return;
+        }
+
+        var content = new CardContent(title, reason, new CardAction(ConnectInWindowsOffer.ButtonLabel, () => _ = ConnectInWindowsAsync(container, title, place)));
+        if (place.ClickPoint is { } point)
+        {
+            _registry.Cards.Show(content, place.Anchor, point);
+        }
+        else
+        {
+            _registry.Cards.Show(content, place.Anchor);
+        }
+    }
+
+    private async Task ConnectInWindowsAsync(Guid container, string title, CardPlace place)
+    {
+        if (_closing)
+        {
+            return;
+        }
+
+        _log.Info("Connect in Windows: started from the card.");
+        try
+        {
+            ToggleReport report = await _coordinator.ConnectInWindowsAsync(new ToggleRequest(true, container, title, place), _lifetime.Token);
+            _log.Write(report.IsSuccess || report.Cancelled ? LogLevel.Info : LogLevel.Warn,
+                TrayReport.Describe("connect in windows", report.Status, report.UserMessage, report.Steps));
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            _log.Info("Connect in Windows: cancelled because Earshot is closing.");
+        }
+        catch (Exception ex)
+        {
+            ReportUnexpected("connect in windows", ex, place);
+        }
+    }
+
     private void StartFixConnection()
     {
         if (_closing)

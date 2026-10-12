@@ -57,6 +57,19 @@ internal static class FixOffer
     }
 }
 
+// Connect in Windows on a failed Connect's card: the connect says when (any failure it could class), and Fix connection, when it
+// is due, takes the card's one button instead. Pressing it allows the AirPods and opens Windows' Bluetooth settings page.
+internal static class ConnectInWindowsOffer
+{
+    public const string ButtonLabel = "Connect in Windows";
+
+    public static bool ShouldOffer(ToggleReport report, bool cancelled, bool wasConnect, bool fixOffered)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        return wasConnect && !cancelled && !fixOffered && !report.IsSuccess && report.OfferConnectInWindows;
+    }
+}
+
 // Starts Fix connection. The fix runs as its own mode of this program (the "fix" verb), which asks for the person's two
 // confirmations itself and raises its own administrator prompt; this only starts it.
 internal interface IFixLauncher

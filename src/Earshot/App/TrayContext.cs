@@ -971,9 +971,14 @@ internal sealed partial class TrayContext : ApplicationContext
                 report.Steps);
             _log.Write(report.IsSuccess || cancelled ? LogLevel.Info : LogLevel.Warn, text);
             LogSwitch(_log, report);
-            if (FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted))
+            bool fixOffered = FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);
+            if (fixOffered)
             {
                 ShowFixOffer(intent.DeviceName, report.UserMessage, place);
+            }
+            else if (ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
+            {
+                ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
             }
 
             // A click sees the result on the icon; a hotkey has nothing else to show it, so it gets a
