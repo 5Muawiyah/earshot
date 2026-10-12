@@ -58,6 +58,9 @@ internal sealed class Paths
 
     public string LogFile => Path.Combine(LogFolder, "earshot.log");
 
+    // One JSON line per connect, disconnect and hand-back, kept 14 days, with no identifier in it.
+    public string ConnectHistoryFile => Path.Combine(LocalFolder, "connect-history.jsonl");
+
     public string GateConfigFile => Path.Combine(MachineFolder, "config.json");
 
     public string DeviceIdentityFile => Path.Combine(MachineFolder, "device.json");
