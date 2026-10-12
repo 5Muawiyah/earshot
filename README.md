@@ -146,6 +146,11 @@ number and charging bolt. **Display** puts the gauge on one display's taskbar,
 or on every display's taskbar at once with **All displays**. The rarer settings
 are under **More**, and Repair is on the Updates page.
 
+Earshot reads the battery from the AirPods' own Bluetooth broadcast, which gives
+each bud and the case only in steps of 10%, so a figure here can be up to 9 points
+away from the exact one your iPhone shows. A figure that is not current is shown
+greyed with its age, and one marked ≈ is an estimate for a part that was charging.
+
 What to know before you trust a number:
 
 - **Which AirPods.** You link them by opening the case next to the PC. A pair in
@@ -156,16 +161,26 @@ What to know before you trust a number:
   never linked. Earshot then follows your pair when its addresses change
   (only to a set that says the levels yours last said, within 30 seconds), and
   drops the link after two minutes without hearing it, showing the last readings,
-  greyed, until you open the case again. The link is kept in memory only, so a
-  restart, which an update does, needs the case opened once more for live
-  figures. With the AirPods connected and
-  nothing linked, the card says "Open the case to show battery".
+  greyed. It remembers the model and colour of the pair you linked, and when it was
+  last heard, in `link.json` beside `last-reading.json` (no address and no name), so
+  a restart does not forget it. While it is remembered, for up to 8 hours after it
+  was last heard, your pair is found again without opening the case when exactly one
+  set of that model and colour is heard near the PC (-70 dBm or stronger, at least
+  three messages over two seconds or more, inside a minute) and its levels are ones
+  your last reading could have led to: a bud no more than 10 points above it unless it
+  was charging, and no further below it than 25 points an hour allows. Two sets of
+  that model and colour in that minute, or buds that read higher than they could,
+  are never found again, and opening the case links them. With the AirPods connected
+  and nothing linked, the card says "Open the case to show battery".
 - **The risk that remains.** A pair of the same model that opens its case next to
   the PC more strongly than yours can be linked instead, and one whose levels
   equal yours, heard within 30 seconds of yours going quiet, can be followed as if
   it were yours. Once your pair has been unheard for more than 10 seconds (the
   case shut, or the buds out of range), any pair of the same model that opens its
   case at -70 dBm or stronger is linked at once, with no 8 dB margin to clear.
+  With your pair silent, a pair of the same model and colour that is alone near the PC
+  within those 8 hours, and whose levels are no higher than yours last read (or are
+  charging), can be found again as yours: the same risk, for longer than 30 seconds.
   I accept that risk, and you should know it is there. Saved readings, estimates
   and the case-open card all follow that link, so a pair that takes it is shown
   as mine. Opening your own case takes the link back: at least 8 dB stronger while the other pair is still heard, or at -70 dBm or stronger once it has been unheard for 10 seconds.

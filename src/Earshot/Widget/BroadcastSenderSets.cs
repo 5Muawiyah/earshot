@@ -88,6 +88,38 @@ internal static class BroadcastRules
     // checked: no second set was ever near the owner.
     public const double SwitchMarginDb = 8;
 
+    // ---- Finding the remembered pair again
+    //
+    // A pair that is out of its case sends the case level as unknown, so it never completes a link, and the link is dropped
+    // after LostLimit of silence. The pair is found again, without a case open, by a rule that is stricter than any live
+    // follow in what it asks of the levels and no looser in who may pass: see RefindRule. Each figure is a design choice.
+
+    // The messages the rule looks at. In use a pair sent about six documented messages a minute in the saved logs, too few
+    // for the 10 s window, so the rule reads a minute.
+    public static readonly TimeSpan RefindWindow = TimeSpan.FromSeconds(60);
+
+    // At least this many messages, the first and last at least RefindSpan apart: the count that is a median rather than a
+    // passer-by (MinMessages), over a span one stray message cannot fill.
+    public const int RefindMessages = 3;
+
+    public static readonly TimeSpan RefindSpan = TimeSpan.FromSeconds(2);
+
+    // How long after the pair was last heard it can still be found again. Apple states up to 8 hours of listening on one
+    // charge; past that the discharge allowance below admits any level, so the check against the last reading would prove
+    // nothing.
+    public static readonly TimeSpan RememberLimit = TimeSpan.FromHours(8);
+
+    // How far a level may have fallen, in points an hour: twice Apple's 100 points in 8 hours, a margin for a pair that
+    // was playing loud or a battery that has aged.
+    public const double DischargePerHour = 25;
+
+    // One level is a step of 10% (the nibble), and a level read a little late or early is a step out either way.
+    public const int StepAllowance = 10;
+
+    // Bound on the messages the rule keeps, so a busy neighbourhood cannot grow it without limit: four a second for a
+    // minute is 240.
+    public const int MaxRefindSamples = 600;
+
     // Bounds, so a busy neighbourhood cannot grow the selector without limit.
     public const int MaxSenders = 64;
 
