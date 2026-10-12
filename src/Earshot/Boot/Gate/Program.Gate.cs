@@ -6,6 +6,7 @@ using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Install;
 using Earshot.Service;
 
 namespace Earshot;
@@ -242,19 +243,17 @@ internal static partial class Program
             ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
             {
                 using var worker = new SystemWorker(log);
-                return worker.RunAsync(_ =>
-                    {
-                        // The report is plain words about what was put back and what was not. The elevated run has no screen, so
-                        // it goes into the log, where the caller that started it can find it.
-                        UninstallRun run = CreateUninstallActions(layout, log).RunWithReport();
-                        foreach (string line in run.Report.Lines)
-                        {
-                            log.Info("uninstall: " + line);
-                        }
-
-                        return run.Result;
-                    })
+                UninstallRun run = worker.RunAsync(_ => CreateUninstallActions(layout, log).RunWithReport())
                     .GetAwaiter().GetResult();
+
+                // The report is plain words about what was put back and what was not. The elevated run has no screen, so it
+                // goes into the log, where the caller that started it can find it.
+                foreach (string line in run.Report.Lines)
+                {
+                    log.Info("uninstall: " + line);
+                }
+
+                return UninstallActionsEntry.RemoveEntry(run.Result, RegistryUninstallRoot.Machine());
             }));
         }
         finally
@@ -270,6 +269,7 @@ internal static partial class Program
             new WindowsServiceControl())
         {
             RunLock = InstallRunLock.Create(),
+            AppsEntry = RegistryUninstallRoot.Machine(),
         };
 
     internal static UninstallActions CreateUninstallActions(InstallLayout layout, ILog log) =>

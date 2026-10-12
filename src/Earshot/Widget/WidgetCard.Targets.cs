@@ -68,6 +68,13 @@ internal sealed partial class WidgetCard
                 _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, CardControlRole.PushButton, layout.Button, null, false, false,
                 focus && _focus == WidgetCardFocus.Button, ButtonUsable, () => Press(WidgetCardFocus.Button)),
         };
+        if (!layout.SendTo.IsEmpty)
+        {
+            list.Add(new CardControl(
+                SendToCopy.CardRow, CardControlRole.PushButton, layout.SendTo, null, false, false,
+                focus && _focus == WidgetCardFocus.SendTo, true, () => Press(WidgetCardFocus.SendTo)));
+        }
+
         if (_model.ShowSwitch)
         {
             list.Add(new CardControl(

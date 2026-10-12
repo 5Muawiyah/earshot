@@ -30,6 +30,7 @@ internal sealed record MenuState(
     MenuItemState PlayFromPhone,
     IReadOnlyList<StreamingMenuItem> PlayFromPhoneItems,
     MenuItemState RefreshBattery,
+    MenuItemState SendTo,
     MenuItemState BlockAtBoot,
     MenuItemState HandBack,
     MenuItemState ProtectAudio,
@@ -105,7 +106,8 @@ internal static class MenuModel
         bool voiceKnownMissing = false,
         StreamingMenuModel? streaming = null,
         bool updateInProgress = false,
-        string? elevatedRun = null)
+        string? elevatedRun = null,
+        bool openedFromGauge = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(settings);
@@ -130,6 +132,9 @@ internal static class MenuModel
             // disabled: with the listening stopped (Bluetooth off, a failed start) a refresh makes the one immediate attempt to
             // start it, and says what it found.
             RefreshBattery: new MenuItemState(WidgetCopy.RefreshBattery, Checked: false, Enabled: true, Visible: settings.Widget.ShowOnTaskbar),
+            // Only in the menu a right-click on the gauge opens, and only while the setting for it is on. It opens the picker, which
+            // touches no device by itself, so it is never held while a switch is in flight.
+            SendTo: new MenuItemState(WithShortcut(SendToCopy.MenuItem, settings.Hotkeys, HotkeyAction.SendTo), Checked: false, Enabled: true, Visible: SendToAccess.GaugeMenuItem(settings.Widget, openedFromGauge)),
             BlockAtBoot: new MenuItemState(WithShortcut(BlockAtBoot, settings.Hotkeys, HotkeyAction.ToggleBlockAtBoot), Checked: blockAtBoot, Enabled: !busy, Visible: true, Indeterminate: blockAtBootUnknown),
             HandBack: new MenuItemState(HandBackOnShutdownAndSleep, Checked: settings.HandBackOnShutdownAndSleep, Enabled: !busy, Visible: true),
             ProtectAudio: new MenuItemState(

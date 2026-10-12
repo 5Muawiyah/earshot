@@ -466,6 +466,8 @@ internal sealed partial class WidgetCard
         SettingsRowId.MicrophoneOff => values.HandsFreeMicrophoneOff,
         SettingsRowId.CaseCard => values.CaseOpenCardOn,
         SettingsRowId.FullyCharged => values.FullyChargedNotice,
+        SettingsRowId.SendToCard => values.SendToOnCard,
+        SettingsRowId.SendToGauge => values.SendToOnGauge,
         _ => false,
     };
 
@@ -474,6 +476,7 @@ internal sealed partial class WidgetCard
         SettingsRowId.Connect => CardShortcut.Connect,
         SettingsRowId.Disconnect => CardShortcut.Disconnect,
         SettingsRowId.OpenCard => CardShortcut.OpenCard,
+        SettingsRowId.SendTo => CardShortcut.SendTo,
         _ => null,
     };
 
@@ -883,6 +886,7 @@ internal sealed partial class WidgetCard
                 case SettingsRowId.Connect:
                 case SettingsRowId.Disconnect:
                 case SettingsRowId.OpenCard:
+                case SettingsRowId.SendTo:
                     DrawShortcut(g, item, colours, values.ChordFor(item.Row), focusVisible, focus);
                     break;
                 case SettingsRowId.CopyDiagnostics:

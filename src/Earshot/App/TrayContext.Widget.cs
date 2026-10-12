@@ -159,7 +159,9 @@ internal sealed partial class TrayContext
                     "pause when a bud comes out (widget)", s => s.Widget = (s.Widget with { AutoPause = on }).WithWatcherRecomputed(), place),
                 GaugePosition: () => _registry.Settings.Current.Widget.GaugePosition,
                 RefreshBattery: RefreshBatteryForCard,
-                QueryHistory: end => _widgetStatus?.QueryHistory(end) ?? HistoryStore.Window([], end));
+                QueryHistory: end => _widgetStatus?.QueryHistory(end) ?? HistoryStore.Window([], end),
+                SendToRowOn: () => SendToAccess.CardRow(_registry.Settings.Current.Widget, noticeCard: false),
+                OpenSendTo: () => OpenSendTo(openedByKeyboard: false));
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCardOn,
@@ -205,7 +207,7 @@ internal sealed partial class TrayContext
                 requestRead: () => _taskbarWatcher?.Poke());
             controller.CardRequested += OnWidgetCardRequested;
             controller.ToggleRequested += (_, _) => StartToggle();
-            controller.MenuRequested += (_, point) => _menu.Strip.Show(point);
+            controller.MenuRequested += (_, point) => ShowGaugeMenu(point);
             _gaugeController = controller;
 
             EnsureWidgetCardPresenter();
@@ -853,6 +855,7 @@ internal sealed partial class TrayContext
         _cardPrewarm = null;
         _widgetCardPresenter?.Dispose();
         _widgetCardPresenter = null;
+        CloseSendTo();
         _caseOpenCardPresenter?.Dispose();
         _caseOpenCardPresenter = null;
         DisposeForegroundSource();

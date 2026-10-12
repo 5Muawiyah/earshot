@@ -58,6 +58,8 @@ internal sealed class FakeCardSurface : ICardSurface
 {
     public event EventHandler? Clicked;
 
+    public event EventHandler? ActionClicked;
+
     public bool IsDisposed { get; set; }
 
     public Size PreparedSize { get; set; } = new(300, 80);
@@ -107,6 +109,8 @@ internal sealed class FakeCardSurface : ICardSurface
     }
 
     public void Click() => Clicked?.Invoke(this, EventArgs.Empty);
+
+    public void PressAction() => ActionClicked?.Invoke(this, EventArgs.Empty);
 
     public void Dispose() => IsDisposed = true;
 }

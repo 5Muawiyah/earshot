@@ -61,7 +61,8 @@ jobs:
           retention-days: 14
       # A push whose commit message starts with "Release " also builds the release files from this same
       # checkout, once every step above has passed, and keeps them as a download for whoever publishes
-      # the release. Pull requests and other commits skip both steps.
+      # the release: the zip, Setup.exe (Native AOT, built on this image's C++ tools), the install script and the
+      # notes that carry the SHA-256 of all three. Pull requests and other commits skip both steps.
       - name: Release files
         if: success() && github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Release ')
         shell: pwsh
@@ -74,6 +75,9 @@ jobs:
             artifacts/Earshot-*-win-x64.zip
             artifacts/Earshot-*-win-x64.zip.sha256
             artifacts/earshot.ps1
+            artifacts/Earshot-*-Setup.exe
+            artifacts/Earshot-*-Setup.exe.sha256
+            artifacts/release-notes.md
           if-no-files-found: error
           retention-days: 30
       # The same release build draws the widget's design pictures from synthetic snapshots (safe mode, a

@@ -310,7 +310,7 @@ public sealed class WidgetAtRestTests
         {
             typeof(AppNs.CardPlace), typeof(AppNs.CoordinatorRules), typeof(AppNs.RenderState),
             typeof(AudioNs.ComRelease),
-            typeof(BootBlockStatus), typeof(CardAnchor), typeof(CardContent), typeof(DeviceSnapshot),
+            typeof(BootBlockStatus), typeof(CardAnchor), typeof(CardContent), typeof(CardAction), typeof(DeviceSnapshot),
             typeof(DeviceSnapshotEventArgs), typeof(EarshotSettings), typeof(ICardPresenter), typeof(IDeviceMonitor),
             typeof(ILog), typeof(ISettingsStore), typeof(LogExtensions), typeof(LogLevel), typeof(StepOutcome),
             typeof(StepOutcomes),

@@ -10,6 +10,7 @@ internal enum SwitchTrigger
     ShortcutToggle,
     ShortcutToPc,
     ShortcutToPhone,
+    SendTo,
 }
 
 // Which way a connect reached the AirPods. None when it did not get far enough to say.

@@ -6,6 +6,9 @@ namespace Earshot.Hotkeys;
 //
 // OpenCard opens the widget card, or closes it when it is open; it never touches the device.
 //
+// SendTo opens the send-to picker (where the AirPods are, and one choice to send them elsewhere). Opening it touches
+// nothing; only a choice in it acts, and "Other speakers" never hands the AirPods back.
+//
 // SwitchToPc and SwitchToPhone are stated directions: a press asks for that end state whatever the tray last
 // believed, unlike ToggleConnection, which does the opposite of what the tray shows. New members are only ever
 // appended, because each one's hot key id is HotkeyManager.HotkeyIdBase plus its value.
@@ -18,4 +21,5 @@ public enum HotkeyAction
     SwitchToPc,
     SwitchToPhone,
     OpenCard,
+    SendTo,
 }

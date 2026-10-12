@@ -48,6 +48,7 @@ public sealed class HotkeyManager : IDisposable
         HotkeyAction.SwitchToPc,
         HotkeyAction.SwitchToPhone,
         HotkeyAction.OpenCard,
+        HotkeyAction.SendTo,
     ];
 
     private readonly IMessageWindow _window;

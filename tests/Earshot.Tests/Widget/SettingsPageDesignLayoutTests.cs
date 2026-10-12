@@ -29,10 +29,10 @@ public sealed class SettingsPageDesignLayoutTests
     private static readonly string[] Heads = ["Taskbar", "Behaviour", "Audio", "Shortcuts", "About"];
 
     private static readonly string[] ClosedRows =
-        ["GaugeDisplay", "GaugeOrder", "CaseCard", "HandBack", "MicrophoneOff", "Connect", "Disconnect", "OpenCard", "About", "More"];
+        ["GaugeDisplay", "GaugeOrder", "CaseCard", "HandBack", "MicrophoneOff", "Connect", "Disconnect", "OpenCard", "SendTo", "About", "More"];
 
     private static readonly string[] MoreRows =
-        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "LeftClick", "History", "CopyDiagnostics"];
+        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "LeftClick", "SendToCard", "SendToGauge", "History", "CopyDiagnostics"];
 
     [TestMethod]
     public void TheGroupsAreTheOwnersAndMoreIsOneRowAfterThem()

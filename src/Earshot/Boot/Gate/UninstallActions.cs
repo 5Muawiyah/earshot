@@ -57,7 +57,7 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 //      uninstall can be run again;
 //   7. remove %ProgramFiles%\Earshot after the same kind of check, or schedule it for the next restart when
 //      it is in use (for example when uninstall runs from that copy);
-//   8. remove the Installed apps entry (RemoveInstalledAppsEntry, once the install side writes one).
+//   8. the Installed apps entry is removed by the caller (UninstallActionsEntry.RemoveEntry) once this has finished with exit code 0.
 // The gate run lock is held from before device.json is read until step 6 has finished. A gate run that was
 // already waiting for it (a block from the tray, the session-end block, the boot block or a protect verb) gets
 // in only once the records and the folder are gone, so it changes nothing, and it can never undo the restore
@@ -205,21 +205,9 @@ internal sealed partial class UninstallActions
         }
 
         complete &= RemoveInstallFolder(steps);
-        complete &= RemoveEntry(steps);
 
         _log.Info("uninstall: " + (complete ? "complete" : "partial") + ".");
         return new InstallResult(complete ? GateExitCode.Success : GateExitCode.Partial, steps);
-    }
-
-    // The Installed apps entry is removed by the part of this class that knows how it is written; the call is dropped when
-    // there is none. Any step it adds that failed makes the result partial.
-    partial void RemoveInstalledAppsEntry(IList<StepOutcome> steps);
-
-    private bool RemoveEntry(List<StepOutcome> steps)
-    {
-        int from = steps.Count;
-        RemoveInstalledAppsEntry(steps);
-        return steps.Skip(from).All(s => s.Ok);
     }
 
     // No machine folder means no device.json, but the AirPods nodes may still carry what an earlier version did to them

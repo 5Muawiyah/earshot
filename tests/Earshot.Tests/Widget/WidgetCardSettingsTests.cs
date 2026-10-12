@@ -29,11 +29,11 @@ public sealed class WidgetCardSettingsTests
             string[] expectedClosed =
             [
                 "Head:Taskbar", "GaugeDisplay", "GaugeOrder", "Head:Behaviour", "CaseCard", "HandBack", "Head:Audio", "MicrophoneOff",
-                "Head:Shortcuts", "Connect", "Disconnect", "OpenCard", "Head:About", "About", "More",
+                "Head:Shortcuts", "Connect", "Disconnect", "OpenCard", "SendTo", "Head:About", "About", "More",
             ];
             CollectionAssert.AreEqual(expectedClosed, closed);
 
-            // Open: the nine rows of More follow it, in the owner's order.
+            // Open: the eleven rows of More follow it, in the owner's order.
             CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), 96, more: true);
             string[] expectedOpen = expectedClosed.Concat(MoreRows).ToArray();
             CollectionAssert.AreEqual(expectedOpen, Shape(card));
@@ -41,9 +41,9 @@ public sealed class WidgetCardSettingsTests
             string[] labels = card.CurrentSettingsLayout!.Items.Where(i => i.Kind == SettingsItemKind.Row).Select(i => i.Label).ToArray();
             string[] expectedLabels =
             [
-                "Display", "Gauge order", "Case-open card", "Hand back", "Microphone off", "Connect", "Disconnect", "Card", "Updates", "More",
+                "Display", "Gauge order", "Case-open card", "Hand back", "Microphone off", "Connect", "Disconnect", "Card", "Send to", "Updates", "More",
                 "Gauge position", "Other device name", "Pause when a bud comes out", "Pause when AirPods leave", "Low battery alerts",
-                "Fully charged notice", "Left click connects", "Battery history", "Copy diagnostics",
+                "Fully charged notice", "Left click connects", "Send to row", "Send to menu", "Battery history", "Copy diagnostics",
             ];
             CollectionAssert.AreEqual(expectedLabels, labels);
             Assert.IsFalse(card.CurrentSettingsLayout.Items.Any(i => i.Row is SettingsRowId.Repair or SettingsRowId.CheckAutomatically), "Repair and Check automatically are on the updates page.");
@@ -51,7 +51,7 @@ public sealed class WidgetCardSettingsTests
     }
 
     private static readonly string[] MoreRows =
-        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "LeftClick", "History", "CopyDiagnostics"];
+        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "LeftClick", "SendToCard", "SendToGauge", "History", "CopyDiagnostics"];
 
     private static readonly int[] WithoutRepair = [0, 1];
 
@@ -593,7 +593,7 @@ public sealed class WidgetCardSettingsTests
             CardKit.Click(page.Card, CardKit.Part(page.Card, SettingsRowId.LeftClick, SettingsPart.Toggle));
 
             CardKit.AssertCalls(page.Host, "label:iPhone!", "leftClick:True");
-        });
+        }, workArea: TallWorkArea);
     }
 
     [TestMethod]
@@ -955,6 +955,9 @@ public sealed class WidgetCardSettingsTests
 
     // ---- Plumbing
 
+    // Room for the whole settings page at once, for a test that presses rows by their place on the page.
+    private static readonly Rectangle TallWorkArea = new(0, 0, 1920, 2600);
+
     private sealed class Page : IDisposable
     {
         public required FakeCardHost Host { get; init; }
@@ -985,13 +988,13 @@ public sealed class WidgetCardSettingsTests
     }
 
     // Opens a real card on a private desktop, on its settings page, over a fake host.
-    private static void RunSettings(Action<Page> body, Action<FakeCardHost>? setup = null)
+    private static void RunSettings(Action<Page> body, Action<FakeCardHost>? setup = null, Rectangle? workArea = null)
     {
         Phase5.CardDesktop.Run(() =>
         {
             var host = new FakeCardHost();
             setup?.Invoke(host);
-            using Page page = Page.Open(host);
+            using Page page = Page.Open(host, workArea: workArea);
             CardKit.Click(page.Card, page.Card.CurrentMainLayout.Gear);
             Assert.AreEqual(WidgetCardView.Settings, page.Presenter.ViewForTest, "The gear opened the settings page.");
             CardKit.OpenExpanders(page.Card);
