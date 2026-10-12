@@ -94,6 +94,13 @@ internal static class BroadcastRules
     // after LostLimit of silence. The pair is found again, without a case open, by a rule that is stricter than any live
     // follow in what it asks of the levels and no looser in who may pass: see RefindRule. Each figure is a design choice.
 
+    // Whether the rule is used at all. It is off: a pair of the same model and colour, alone near the PC, whose levels the
+    // last reading can lead to (after a charge, or after a few hours, any level can) would be taken for the owner's, and
+    // a stranger's pair must never be shown. The rule and its tests stay, behind this switch. The link, the remembered
+    // model and the saved readings do not depend on it: the readings stay on show, greyed with their age.
+    // A property and not a constant, so the code behind the switch is not flagged as unreachable.
+    public static bool RefindEnabled => false;
+
     // The messages the rule looks at. In use a pair sent about six documented messages a minute in the saved logs, too few
     // for the 10 s window, so the rule reads a minute.
     public static readonly TimeSpan RefindWindow = TimeSpan.FromSeconds(60);
@@ -116,8 +123,8 @@ internal static class BroadcastRules
     // One level is a step of 10% (the nibble), and a level read a little late or early is a step out either way.
     public const int StepAllowance = 10;
 
-    // Bound on the messages the rule keeps, so a busy neighbourhood cannot grow it without limit: four a second for a
-    // minute is 240.
+    // Bound on the messages the rule keeps, so a busy neighbourhood cannot grow it without limit: ten a second for a
+    // minute is 600.
     public const int MaxRefindSamples = 600;
 
     // Bounds, so a busy neighbourhood cannot grow the selector without limit.

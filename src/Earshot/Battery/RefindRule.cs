@@ -1,4 +1,3 @@
-
 namespace Earshot.Widget;
 
 // One documented-form message of the paired model and the remembered colour, as the re-find rule reads it. The tag is the

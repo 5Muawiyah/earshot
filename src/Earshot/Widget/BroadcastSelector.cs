@@ -1,4 +1,3 @@
-
 namespace Earshot.Widget;
 
 // What a documented-form message turned out to be, as far as the selection can tell.
@@ -72,9 +71,10 @@ internal readonly record struct SelectionObservation(
 //   - After LostLimit with no message from an anchor the link and the colour are dropped, and nothing is linked until the
 //     next case open or until the remembered pair is found again.
 //   - The link is also remembered (LinkMemory: model, colour, when linked, when last heard) beyond the drop and, through
-//     whoever saves it, beyond a restart. While it is remembered, a worn pair of that model and colour that RefindRule
-//     passes is linked again as the same set under new addresses, with no case open. A case open still links by its own
-//     rule and wins: a message that carries a case level is never weighed for a re-find.
+//     whoever saves it, beyond a restart. With BroadcastRules.RefindEnabled on (it ships off), a worn pair of that model
+//     and colour that RefindRule passes is linked again while the link is remembered, as the same set under new addresses,
+//     with no case open. A case open still links by its own rule and wins: a message that carries a case level is never
+//     weighed for a re-find.
 // Pure and single threaded: time comes from the messages' own timestamps and from the time handed to Expire, nothing here
 // reads a clock, and nothing is written to disk: the memory is handed out for whoever saves it.
 internal sealed class BroadcastSelector
@@ -123,6 +123,10 @@ internal sealed class BroadcastSelector
 
     // The saved last readings the re-find rule compares a worn pair with; the empty book when not given.
     public Func<LastReadingBook>? SavedBook { get; set; }
+
+    // Whether a worn pair may be found again with no case open: BroadcastRules.RefindEnabled, which ships off. Set before the
+    // first message; the re-find tests turn it on.
+    internal bool RefindEnabled { get; set; } = BroadcastRules.RefindEnabled;
 
     // Hands the remembered link in at start. The paired model is not known yet at that point, so nothing is judged here.
     public void LoadMemory(LinkMemory? memory)
@@ -298,7 +302,7 @@ internal sealed class BroadcastSelector
     // The messages of the paired model and the remembered colour in the re-find window, kept only while a link is remembered.
     private void RecordRecent(ProximityMessage message, uint tag, sbyte rssi, DateTimeOffset at)
     {
-        if (_memory is not { } memory || memory.Model != message.Model || memory.Colour != message.Colour)
+        if (!RefindEnabled || _memory is not { } memory || memory.Model != message.Model || memory.Colour != message.Colour)
         {
             return;
         }
@@ -319,7 +323,7 @@ internal sealed class BroadcastSelector
         List<BroadcastSet> sets, uint tag, ProximityMessage message, DateTimeOffset at, out RefindRefusal? refused)
     {
         refused = null;
-        if (_memory is not { } memory || memory.Model != _model || memory.Colour != message.Colour || BroadcastSenderSets.CaseKnown(message))
+        if (!RefindEnabled || _memory is not { } memory || memory.Model != _model || memory.Colour != message.Colour || BroadcastSenderSets.CaseKnown(message))
         {
             return null;
         }

@@ -34,9 +34,16 @@ internal static class BroadcastFixtures
 // Feeds a selector messages with the clock the messages carry, so a test reads as a timeline.
 internal sealed class SelectorDriver
 {
-    public SelectorDriver(ushort? model = BroadcastFixtures.PairedModel)
+    // refind: whether the selector may find a worn pair again with no case open. The re-find tests turn it on; null leaves
+    // the default (BroadcastRules.RefindEnabled).
+    public SelectorDriver(ushort? model = BroadcastFixtures.PairedModel, bool? refind = true)
     {
         Selector = new BroadcastSelector();
+        if (refind is bool on)
+        {
+            Selector.RefindEnabled = on;
+        }
+
         Selector.SetPairedModel(model);
     }
 

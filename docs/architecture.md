@@ -388,6 +388,17 @@ owner decision, not an oversight: the owner accepted that risk rather than ask f
 a set-up step to rule it out. There is no consistency check against another
 device.
 
+**Finding the pair again with no case open.** The link is remembered beyond the drop
+and a restart (`LinkMemory`: model, colour, when linked and when last heard, in
+`link.json` beside the readings, no address and no name; each write is numbered in the
+order it was taken and the store drops an older one that arrives late, as it does for the
+readings). `RefindRule` can take a worn pair of that model and colour as the same set under
+new addresses, but it is built and switched off (`BroadcastRules.RefindEnabled`) until the
+owner chooses. Its risk is this: after a link made while the buds were charging, or after a
+few hours, nearly any levels are ones the last reading could have led to, so any pair of
+that model and colour alone near the PC would qualify. With it off, only a case open links,
+and the last readings stay on show, greyed with their age.
+
 **What is shown, and for how long.** `BatteryFreshness.Shown` is the one
 definition of what the card, the gauge and its tooltip show. The owner's pair is
 shown wherever it is. A part's value is one of three kinds:
