@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Earshot.Contracts;
 
 namespace Earshot.Repair;
 
@@ -52,7 +54,7 @@ internal interface IFixPrompter
 }
 
 // What the process can see of the desktop it runs on, and the desktop that receives input.
-internal readonly record struct DesktopReading(bool UserInteractive, string? ThreadDesktop, string? InputDesktop, uint InputError);
+internal readonly record struct DesktopReading(bool UserInteractive, string? ThreadDesktop, string? InputDesktop, uint InputError, uint CloseError = 0);
 
 internal interface IInputDesktop
 {
@@ -65,17 +67,28 @@ internal sealed class FixConsentDialog
 {
     private readonly IFixPrompter _prompter;
     private readonly IInputDesktop _desktop;
+    private readonly ILog? _log;
 
-    public FixConsentDialog(IFixPrompter prompter, IInputDesktop desktop)
+    public FixConsentDialog(IFixPrompter prompter, IInputDesktop desktop, ILog? log = null)
     {
         ArgumentNullException.ThrowIfNull(prompter);
         ArgumentNullException.ThrowIfNull(desktop);
         _prompter = prompter;
         _desktop = desktop;
+        _log = log;
     }
 
     // True when a person can see a dialog: this process runs on the desktop that receives input.
-    public bool CanAsk() => FixRules.IsInteractive(_desktop.Read());
+    public bool CanAsk()
+    {
+        DesktopReading reading = _desktop.Read();
+        if (reading.CloseError != 0)
+        {
+            _log?.Warn("fix: CloseDesktop failed with Win32 error " + reading.CloseError.ToString(CultureInfo.InvariantCulture) + ".");
+        }
+
+        return FixRules.IsInteractive(reading);
+    }
 
     // The first question: every change, then OK or cancel. With several AirPods to pick from, the answer also says which.
     public FixConsentAnswer AskChanges(FixPlan plan)
@@ -265,25 +278,16 @@ internal sealed partial class WindowsInputDesktop : IInputDesktop
     public DesktopReading Read()
     {
         // The thread's desktop handle belongs to the thread and is not closed.
-        string? thread = NameOf(GetThreadDesktop(GetCurrentThreadId()), out uint threadError);
+        string? thread = NameOf(GetThreadDesktop(GetCurrentThreadId()), out _);
         nint input = OpenInputDesktop(0, false, DesktopReadObjects);
         if (input == 0)
         {
             return new DesktopReading(Environment.UserInteractive, thread, null, unchecked((uint)Marshal.GetLastPInvokeError()));
         }
 
-        try
-        {
-            string? name = NameOf(input, out uint error);
-            return new DesktopReading(Environment.UserInteractive, thread, name, name is null ? error : 0);
-        }
-        finally
-        {
-            if (!CloseDesktop(input))
-            {
-                System.Diagnostics.Trace.WriteLine("Earshot: CloseDesktop failed with Win32 error " + Marshal.GetLastPInvokeError() + " (thread desktop read " + threadError + ").");
-            }
-        }
+        string? name = NameOf(input, out uint error);
+        uint closeError = CloseDesktop(input) ? 0 : unchecked((uint)Marshal.GetLastPInvokeError());
+        return new DesktopReading(Environment.UserInteractive, thread, name, name is null ? error : 0, closeError);
     }
 
     private static unsafe string? NameOf(nint desktop, out uint error)

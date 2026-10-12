@@ -92,7 +92,7 @@ internal static class FixConnection
         FixPlan plan = planned.Plan;
         host.Output.WriteLine(FixPlanText.Describe(plan));
 
-        var dialog = new FixConsentDialog(host.Prompter, host.Desktop);
+        var dialog = new FixConsentDialog(host.Prompter, host.Desktop, host.Log);
         if (!dialog.CanAsk())
         {
             host.Output.WriteLine(PlanOnlyNote);
@@ -178,7 +178,7 @@ internal static class FixConnection
             }
             finally
             {
-                host.PlanFiles.Delete(file);
+                Record(host, steps, host.PlanFiles.Delete(file));
             }
 
             steps.Add(run.Step);
@@ -257,11 +257,37 @@ internal static class FixConnection
     // needed and did not happen, which leaves the marker for the tray's next start.
     internal const string NewPairUnprotectedLine = "The new pair is not protected yet. Run Fix connection again.";
 
+    // The marker says a run is under way. One that stays makes the tray's next start block once more, which is safe, so it is
+    // said and logged rather than treated as a failure.
+    private static void ClearMarker(FixHost host, List<string> lines, List<StepOutcome> steps)
+    {
+        StepOutcome cleared = host.Recovery.Clear();
+        if (Record(host, steps, cleared))
+        {
+            return;
+        }
+
+        lines.Add("The record of this run could not be removed (code 0x" + cleared.Code.ToString("X8", CultureInfo.InvariantCulture) +
+                  "). Earshot blocks the AirPods once more the next time it starts.");
+    }
+
+    // Adds the step; a failed one also goes to the log with its raw code.
+    private static bool Record(FixHost host, List<StepOutcome> steps, StepOutcome step)
+    {
+        steps.Add(step);
+        if (!step.Ok)
+        {
+            host.Log.Warn("fix: " + step.Step + " failed with 0x" + step.Code.ToString("X8", CultureInfo.InvariantCulture) + " (" + step.CodeName + ").");
+        }
+
+        return step.Ok;
+    }
+
     private static async Task<bool> EndAsync(FixHost host, RunState state, List<string> lines, List<StepOutcome> steps)
     {
         if (!state.Touched || state.Adopted || !state.Installed)
         {
-            steps.Add(host.Recovery.Clear());
+            ClearMarker(host, lines, steps);
             return true;
         }
 
@@ -272,7 +298,7 @@ internal static class FixConnection
             if (block.Ok)
             {
                 lines.Add(state.NewPairUnprotected ? NewPairUnprotectedLine : "Earshot blocked the AirPods again.");
-                steps.Add(host.Recovery.Clear());
+                ClearMarker(host, lines, steps);
                 return true;
             }
 
