@@ -49,15 +49,16 @@ The script and the zip come from the same release, so the checksum catches a
 damaged or cut-short download. It does not catch a compromised release or
 account, and the app is not signed.
 
-### Install with AI
-
-Paste this into any AI chat that can run commands on your PC:
+### Install, fix or manage with AI
 
 ```
-Install Earshot on this Windows PC (or update, repair or uninstall it, as I ask).
-Run exactly this in PowerShell and nothing else, with my choice as the action:
-& ([scriptblock]::Create((irm https://github.com/5Muawiyah/earshot/releases/latest/download/earshot.ps1))) -Action Install
-Tell me what it printed. If Windows asks for administrator approval, tell me to click Yes.
+Help me with Earshot, the AirPods app for Windows. I want to: <say it here,
+for example install it, fix my AirPods not connecting, or change a setting>.
+If you can run PowerShell on my PC, run exactly this first and follow the guide it prints:
+& ([scriptblock]::Create((irm https://github.com/5Muawiyah/earshot/releases/latest/download/earshot.ps1))) -Action Help
+If you can't run commands, read
+https://github.com/5Muawiyah/earshot/blob/main/docs/ai-guide.md
+and walk me through it one step at a time.
 ```
 
 ### By hand

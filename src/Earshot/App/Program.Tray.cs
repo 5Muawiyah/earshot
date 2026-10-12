@@ -353,9 +353,13 @@ internal static partial class Program
             BlockCoordinator? coordinator = null;
             RegisteredWaitHandle? showWait = null;
             IDisposable? exitSignal = null;
+            SettingsFileWatcher? settingsWatcher = null;
             try
             {
                 var settings = new JsonSettingsStore(paths.SettingsFile, log);
+
+                // A change to settings.json by another program (the settings command, an edit by hand) is taken up live.
+                settingsWatcher = new SettingsFileWatcher(settings, log);
 
                 // The frame and UI stall log: every action posted to the UI thread is timed, and a wait or a run over two
                 // refresh intervals is kept (with the card's window calls) for Copy diagnostics.
@@ -446,6 +450,7 @@ internal static partial class Program
                 }
 
                 exitSignal?.Dispose();
+                settingsWatcher?.Dispose();
 
                 // Nothing after this point may resume on the UI thread: its message loop has ended. The card
                 // window and its timer belong to this thread, so the presenter is disposed here too.
