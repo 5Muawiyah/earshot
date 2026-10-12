@@ -26,6 +26,10 @@ internal sealed record CardControl(
 
     public string? Description { get; init; }
 
+    // What hovering the control says: set only on an icon-only control, from CardTooltips. Tip stays what a screen reader
+    // reads when there is no description.
+    public string? Tooltip { get; init; }
+
     // What a choice button currently says, which a screen reader reads as the control's value (the gauge position, the display).
     public string? Value { get; init; }
 }
@@ -89,14 +93,20 @@ internal sealed partial class WidgetCard
         {
             list.Add(new CardControl(
                 WidgetCopy.TipSettings, CardControlRole.PushButton, layout.Gear, WidgetCopy.TipSettings, true, false,
-                focus && _focus == WidgetCardFocus.Gear, true, () => Press(WidgetCardFocus.Gear)));
+                focus && _focus == WidgetCardFocus.Gear, true, () => Press(WidgetCardFocus.Gear))
+            {
+                Tooltip = CardTooltips.Settings,
+            });
         }
 
         if (!layout.Refresh.IsEmpty)
         {
             list.Add(new CardControl(
                 WidgetCopy.RefreshBattery, CardControlRole.PushButton, layout.Refresh, RefreshTip, true, false,
-                focus && _focus == WidgetCardFocus.Refresh, !BluetoothOff, () => Press(WidgetCardFocus.Refresh)));
+                focus && _focus == WidgetCardFocus.Refresh, !BluetoothOff, () => Press(WidgetCardFocus.Refresh))
+            {
+                Tooltip = CardTooltips.ForRefresh(_model.Refresh is { Reading: true }),
+            });
         }
 
         if (BluetoothOff)
@@ -146,7 +156,10 @@ internal sealed partial class WidgetCard
         {
             list.Add(new CardControl(
                 WidgetCopy.TipCloseCard, CardControlRole.PushButton, layout.Gear, WidgetCopy.TipCloseCard, true, false, false, true,
-                () => Press(WidgetCardFocus.Gear)));
+                () => Press(WidgetCardFocus.Gear))
+            {
+                Tooltip = CardTooltips.Close,
+            });
         }
 
         AddColumns(list, layout);
@@ -166,7 +179,10 @@ internal sealed partial class WidgetCard
         {
             new(
                 WidgetCopy.TipBack, CardControlRole.PushButton, layout.Frame.Back, WidgetCopy.TipBack, true, false,
-                focus && _setupFocus.Kind == SetupTargetKind.Back, true, () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Back, 0))),
+                focus && _setupFocus.Kind == SetupTargetKind.Back, true, () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Back, 0)))
+            {
+                Tooltip = CardTooltips.Back,
+            },
         };
         for (int i = 0; i < setup.Buttons.Count && i < layout.Frame.Buttons.Count; i++)
         {
@@ -191,12 +207,18 @@ internal sealed partial class WidgetCard
             list.Add(new CardControl(
                 WidgetCopy.HistoryEarlier, CardControlRole.PushButton, page.DayBack, WidgetCopy.HistoryEarlier, true, false,
                 focus && _setupFocus == new SetupTarget(SetupTargetKind.Day, 0), history.CanBack,
-                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Day, 0))));
+                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Day, 0)))
+            {
+                Tooltip = CardTooltips.PreviousDay,
+            });
             list.Add(new CardControl(history.DayLabel, CardControlRole.StaticText, page.DayLabel, null, false, false, false, true, static () => { }));
             list.Add(new CardControl(
                 WidgetCopy.HistoryLater, CardControlRole.PushButton, page.DayForward, WidgetCopy.HistoryLater, true, false,
                 focus && _setupFocus == new SetupTarget(SetupTargetKind.Day, 1), history.CanForward,
-                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Day, 1))));
+                () => ActivateSetupTarget(new SetupTarget(SetupTargetKind.Day, 1)))
+            {
+                Tooltip = CardTooltips.NextDay,
+            });
             list.Add(new CardControl(
                 WidgetCopy.HistoryChartName + ", " + history.DayLabel, CardControlRole.Chart, page.Surface, null, false, false, false, true, static () => { })
             {
@@ -239,6 +261,7 @@ internal sealed partial class WidgetCard
             {
                 Expanded = stop.Part == SettingsPart.Expand ? ExpandedOf(values, stop.Row) : null,
                 Value = value,
+                Tooltip = CardTooltips.ForSettingsPart(stop.Part, stop.Index),
             });
         }
 
@@ -307,60 +330,14 @@ internal sealed partial class WidgetCard
 
     // ---- Tooltips
 
-    // The tooltip for a point on the card, and the rectangle it explains, or null. A control with a tooltip shows it;
-    // so do the read line and the update line, whose words are shorter than their meaning.
+    // The tooltip for a point on the card, and the rectangle it explains, or null. Only an icon-only control has one.
     internal (string Text, Rectangle Anchor)? TooltipAt(Point point)
     {
         foreach (CardControl target in CurrentControls())
         {
-            if (target.Tip is { Length: > 0 } tip && HitsControl(target, point))
+            if (target.Tooltip is { Length: > 0 } tip && HitsControl(target, point))
             {
                 return (tip, target.Bounds);
-            }
-        }
-
-        if (OnSettingsPage && _settingsLayout is { } settings && point.Y >= settings.Frame.Body.Y)
-        {
-            // Over a row's icon or label: the row's own tooltip. The point is on the page where the scroll has put the row.
-            var onPage = new Point(point.X, point.Y + _settingsScroll);
-            foreach (SettingsItem item in settings.Items)
-            {
-                if (item.Kind == SettingsItemKind.Row && item.Tip is { Length: > 0 } rowTip && item.Bounds.Contains(onPage))
-                {
-                    return (rowTip, Scrolled(item.LabelRect));
-                }
-            }
-        }
-
-        if (!_notice && !OnSettingsPage && _model.View == WidgetCardView.Main)
-        {
-            WidgetCardLayout.Layout layout = _mainLayout;
-            // The status row says more than its words when something is wrong: nothing heard, the case to open near this PC.
-            if (_model.Refresh is { IsProblem: true, ReadLine: { Length: > 0 } problem } && layout.WhereLine.Contains(point))
-            {
-                return (problem, layout.WhereLine);
-            }
-
-            // A column says what it holds in a sentence: "Left 70%, charging, read 4 min ago".
-            if (layout.ShowColumns)
-            {
-                ShownBattery shown = _model.ShownParts;
-                foreach ((WidgetCardLayout.ColumnLayout column, string label, ShownPart part) in new[]
-                {
-                    (layout.Left, WidgetCopy.LeftWord, shown.Left), (layout.Right, WidgetCopy.RightWord, shown.Right), (layout.Case, WidgetCopy.CaseLabel, shown.Case),
-                })
-                {
-                    Rectangle whole = Rectangle.Union(column.Label, column.ReadTime);
-                    if (whole.Contains(point) && WidgetCopy.ColumnTip(label, part, _model.Now) is { } columnTip)
-                    {
-                        return (columnTip, whole);
-                    }
-                }
-            }
-
-            if (layout.ShowUpdateLine && layout.UpdateCaption.Contains(point))
-            {
-                return (WidgetCopy.UpdateAvailable(_model.UpdateVersion ?? string.Empty), layout.UpdateCaption);
             }
         }
 
@@ -497,7 +474,7 @@ internal sealed partial class WidgetCard
             return;
         }
 
-        if (_cue.Visible && IsHandleCreated && targets[focused] is { IconOnly: true, Tip: { Length: > 0 } tip } target)
+        if (_cue.Visible && IsHandleCreated && targets[focused] is { IconOnly: true, Tooltip: { Length: > 0 } tip } target)
         {
             ShowTip(tip, target.Bounds);
         }

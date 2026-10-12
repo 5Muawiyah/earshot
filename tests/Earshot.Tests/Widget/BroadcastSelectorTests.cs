@@ -779,4 +779,276 @@ public sealed class BroadcastSelectorTests
         Assert.AreEqual(SetAOtherBud, others[0].Tag);
         Assert.IsEmpty(d.Selector.OtherChosenSenders(SetA, d.Now + TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(2)));
     }
+
+    // ---- Finding the remembered pair again
+
+    // The owner's saved last readings of the linked pair, the way the book holds them: left, right and case with one
+    // read time, as the case open that linked it recorded them.
+    private static LastReadingBook BookOf(
+        DateTimeOffset at, int left, int right, int? caseLevel = 90, bool budsCharging = false, bool caseCharging = false) =>
+        new(
+            new SavedReading(left, budsCharging, at, BroadcastFixtures.PairedModel),
+            new SavedReading(right, budsCharging, at, BroadcastFixtures.PairedModel),
+            caseLevel is int level ? new SavedReading(level, caseCharging, at, BroadcastFixtures.PairedModel) : null,
+            []);
+
+    // The owner's pair linked by a case open (right 70, left 40, case 90), with its saved readings handed to the selector,
+    // and the given time of silence after it.
+    private static SelectorDriver LinkedThenSilent(
+        double silenceSeconds, int left = 40, int right = 70, bool budsCharging = false, byte colour = WidgetFixtures.Colour)
+    {
+        SelectorDriver d = Linked(colour);
+        LastReadingBook book = BookOf(d.Now, left, right, budsCharging: budsCharging);
+        d.Selector.SavedBook = () => book;
+        d.Tick(silenceSeconds);
+        return d;
+    }
+
+    // A worn pair from addresses it did not have when it was linked: the case level unknown, the buds as given, messages
+    // from the two buds alternately spread evenly over the time, the first of them now. Every observation, in order.
+    private static List<SelectionObservation> Worn(
+        SelectorDriver d, int pairHigh, int pairLow, sbyte rssi, double seconds = 20, int messages = 3,
+        byte colour = WidgetFixtures.Colour, byte budCharging = 0)
+    {
+        var seen = new List<SelectionObservation>();
+        for (int i = 0; i < messages; i++)
+        {
+            bool one = i % 2 == 0;
+            seen.Add(d.Send(one ? SetANewAddress : SetANewOtherBud, Bud(one, colour, (byte)(budCharging | 0x0F), pairHigh, pairLow), rssi));
+            if (i < messages - 1)
+            {
+                d.Tick(seconds / (messages - 1));
+            }
+        }
+
+        return seen;
+    }
+
+    [TestMethod]
+    public void AWornPairOfTheSameModelColourAndLevelsIsFoundAgainAfterTheLinkLapsedWithNoCaseOpen()
+    {
+        SelectorDriver d = LinkedThenSilent(180);
+
+        List<SelectionObservation> seen = Worn(d, 0x7, 0x4, -60);
+
+        Assert.IsTrue(seen[0].Dropped, "The link lapsed in the three minutes.");
+        Assert.AreEqual(BroadcastClass.NotLinked, seen[0].Class, "One message is not enough to find a pair again.");
+        SelectionObservation last = seen[^1];
+        Assert.AreEqual(BroadcastClass.Chosen, last.Class);
+        Assert.IsTrue(last.Followed, "It is the same pair under new addresses: the values on show stay.");
+        Assert.IsTrue(last.Refound);
+        Assert.IsFalse(last.NewChoice, "It is not a link made on a case open.");
+        Assert.IsTrue(d.Selector.IsLinked);
+        Assert.AreEqual(BroadcastSelectionState.Linked, d.Selector.StateAt(d.Now));
+        Assert.AreEqual(WidgetFixtures.Colour, d.Selector.HeldColour);
+        Assert.AreEqual(BroadcastClass.Chosen, d.Send(SetANewAddress, Bud(true, caseNibble: 0x0F), -60).Class, "And it goes on being followed.");
+    }
+
+    [TestMethod]
+    public void TwoFieldSetsOfTheModelAndColourInTheWindowAreNeverFoundAgain()
+    {
+        SelectorDriver d = LinkedThenSilent(180);
+        var seen = new List<SelectionObservation>();
+
+        seen.Add(d.Send(SetANewAddress, InUse(true), -60));
+        d.Tick(10);
+        seen.Add(d.Send(SetANewOtherBud, InUse(false), -60));
+        d.Tick(5);
+        seen.Add(d.Send(Stranger, InUse(true, pairHigh: 0x3, pairLow: 0x1), -50));
+        d.Tick(5);
+        seen.Add(d.Send(SetANewAddress, InUse(true), -60));
+        d.Tick(5);
+        seen.Add(d.Send(SetANewOtherBud, InUse(false), -60));
+
+        Assert.IsFalse(seen.Any(o => o.Refound || o.Class == BroadcastClass.Chosen), "Whichever of the two is the owner's, it cannot be told.");
+        Assert.AreEqual(RefindRefusal.Ambiguous, seen[^1].RefindRefused);
+        Assert.IsFalse(d.Selector.IsLinked);
+    }
+
+    [TestMethod]
+    public void NewBudsAboveTheOldLevelsAreRefusedUntilACaseOpenLinksThem()
+    {
+        SelectorDriver d = LinkedThenSilent(3600, left: 40, right: 40);
+
+        List<SelectionObservation> seen = Worn(d, 0xA, 0xA, -60);
+
+        Assert.IsFalse(seen.Any(o => o.Refound), "A bud does not rise 60 points in an hour when it was not charging.");
+        Assert.AreEqual(RefindRefusal.Inconsistent, seen[^1].RefindRefused);
+        Assert.IsFalse(d.Selector.IsLinked);
+
+        d.Tick(5);
+        DateTimeOffset before = d.Now;
+        Burst(d, -60, 3, caseNibble: 0x9, pairHigh: 0xA, pairLow: 0xA);
+
+        Assert.IsTrue(d.Selector.IsLinked, "A case open next to the PC links the new pair.");
+        Assert.IsGreaterThan(before, d.Selector.Memory!.LinkedAt);
+    }
+
+    [TestMethod]
+    public void AChargingBudMayHaveRisenByWhatItsRateAllowsAndNoMore()
+    {
+        const byte BudsCharging = 0x30;
+        SelectorDriver later = LinkedThenSilent(30 * 60, left: 40, right: 40, budsCharging: true);
+        List<SelectionObservation> half = Worn(later, 0x9, 0x9, -60, budCharging: BudsCharging);
+        Assert.IsTrue(half.Any(o => o.Refound), "40 charging, 90 charging half an hour later: 40 + 10 + 75 allows it.");
+
+        SelectorDriver soon = LinkedThenSilent(5 * 60, left: 40, right: 40, budsCharging: true);
+        List<SelectionObservation> five = Worn(soon, 0x9, 0x9, -60, budCharging: BudsCharging);
+        Assert.IsFalse(five.Any(o => o.Refound), "90 five minutes after 40 is more than a charge can do.");
+        Assert.AreEqual(RefindRefusal.Inconsistent, five[^1].RefindRefused);
+    }
+
+    [TestMethod]
+    public void ABudMayHaveFallenByTheDischargeAllowanceAndNoMore()
+    {
+        SelectorDriver soon = LinkedThenSilent(10 * 60, left: 100, right: 100);
+        List<SelectionObservation> ten = Worn(soon, 0x6, 0x6, -60);
+        Assert.IsFalse(ten.Any(o => o.Refound), "40 points in ten minutes is not a pair that was not charging.");
+        Assert.AreEqual(RefindRefusal.Inconsistent, ten[^1].RefindRefused);
+
+        SelectorDriver later = LinkedThenSilent(2 * 3600, left: 100, right: 100);
+        List<SelectionObservation> two = Worn(later, 0x6, 0x6, -60);
+        Assert.IsTrue(two.Any(o => o.Refound), "40 points in two hours is within 10 + 25 an hour.");
+    }
+
+    [TestMethod]
+    public void AWeakMedianAnotherColourAndAnExpiredLinkAreNeverFoundAgain()
+    {
+        SelectorDriver weak = LinkedThenSilent(180);
+        List<SelectionObservation> far = Worn(weak, 0x7, 0x4, -80);
+        Assert.IsFalse(far.Any(o => o.Refound));
+        Assert.AreEqual(RefindRefusal.Weak, far[^1].RefindRefused);
+
+        SelectorDriver colour = LinkedThenSilent(180);
+        List<SelectionObservation> other = Worn(colour, 0x7, 0x4, -60, colour: 0x11);
+        Assert.IsFalse(other.Any(o => o.Refound || o.Class == BroadcastClass.Chosen));
+        Assert.IsFalse(colour.Selector.IsLinked);
+
+        SelectorDriver late = LinkedThenSilent(180);
+        DateTimeOffset heard = late.Selector.Memory!.LastHeardAt;
+        late.Tick((heard + BroadcastRules.RememberLimit - late.Now).TotalSeconds - 60);
+        Assert.IsTrue(Worn(late, 0x7, 0x4, -60).Any(o => o.Refound), "Inside the limit, the same pair is found.");
+
+        SelectorDriver expired = LinkedThenSilent(180);
+        expired.Tick((heard + BroadcastRules.RememberLimit - expired.Now).TotalSeconds + 1);
+        List<SelectionObservation> after = Worn(expired, 0x7, 0x4, -60);
+        Assert.IsFalse(after.Any(o => o.Refound));
+        Assert.AreEqual(RefindRefusal.Expired, after[0].RefindRefused);
+        Assert.IsNull(expired.Selector.Memory, "A link last heard longer ago than the limit is forgotten.");
+
+        expired.Tick(5);
+        Burst(expired, -60, 3);
+        Assert.IsTrue(expired.Selector.IsLinked, "A case open still links.");
+        Assert.IsNotNull(expired.Selector.Memory);
+    }
+
+    [TestMethod]
+    public void AnotherPairedModelForgetsTheLinkAndTheSameOneOrNoneKeepsIt()
+    {
+        SelectorDriver d = Linked();
+        Assert.IsNotNull(d.Selector.Memory);
+
+        d.Selector.SetPairedModel(BroadcastFixtures.PairedModel);
+        Assert.IsNotNull(d.Selector.Memory, "The same model changes nothing.");
+
+        d.Selector.SetPairedModel(null);
+        Assert.IsNotNull(d.Selector.Memory, "A pairing that is gone is not another pair.");
+        Assert.IsFalse(d.Selector.IsLinked);
+        Assert.AreEqual(BroadcastClass.NoPairedModel, d.Send(SetANewAddress, InUse(true), -50).Class, "Nothing is found again without a model.");
+
+        d.Selector.SetPairedModel(BroadcastFixtures.PairedModel);
+        Assert.IsNotNull(d.Selector.Memory, "The pair paired again is the pair remembered.");
+
+        d.Selector.SetPairedModel(0x1234);
+        Assert.IsNull(d.Selector.Memory, "Another model is another pair.");
+    }
+
+    [TestMethod]
+    public void ARememberedLinkLoadedAtStartFindsTheWornPairWithoutACaseOpen()
+    {
+        var d = new SelectorDriver(model: null);
+        d.Selector.LoadMemory(new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, d.Now - TimeSpan.FromHours(2), d.Now - TimeSpan.FromHours(1)));
+        d.Selector.SavedBook = () => BookOf(d.Now - TimeSpan.FromHours(1), 40, 70);
+        Assert.IsFalse(Worn(d, 0x7, 0x4, -60).Any(o => o.Refound), "No paired model is known yet.");
+
+        d.Selector.SetPairedModel(BroadcastFixtures.PairedModel);
+        d.Tick(5);
+        Assert.IsTrue(Worn(d, 0x7, 0x4, -60).Any(o => o.Refound));
+    }
+
+    // The 30 September capture's shape, rebuilt from invented values: two senders, the second with the status bits that
+    // swap its nibbles, the case level, the charging bits and a lid byte that changes within the open; then the pair
+    // worn, from other addresses, with the case unknown. The seventeen-byte form of another sender is interleaved.
+    [TestMethod]
+    public void TheCapturedShapeIsFoundAgainAndItsUnknownFormsChangeNothing()
+    {
+        const ushort Apple = ProximityParser.AppleCompanyId;
+        List<SelectionObservation> Run(bool withUnknownForms, out int unknown)
+        {
+            int unknownForms = 0;
+            var d = new SelectorDriver();
+            LastReadingBook? book = null;
+            d.Selector.SavedBook = () => book ?? LastReadingBook.Empty;
+            SelectionObservation? Feed(uint tag, byte[] data, sbyte rssi)
+            {
+                ProximityParse parse = ProximityParser.Parse(Apple, data);
+                if (parse.Message is ProximityMessage message)
+                {
+                    return d.Send(tag, message, rssi);
+                }
+
+                if (parse.Status == ProximityParseStatus.UnknownForm)
+                {
+                    unknownForms++;
+                }
+
+                return null;
+            }
+
+            byte[] open1 = WidgetFixtures.Proximity(status: 0x55, batteryA: 0x77, batteryB: 0x79, lid: 0x51);
+            byte[] open2 = WidgetFixtures.Proximity(status: 0x35, batteryA: 0x77, batteryB: 0x79, lid: 0x52);
+            for (int i = 0; i < 16; i++)
+            {
+                Feed(i % 2 == 0 ? SetA : SetAOtherBud, i % 2 == 0 ? open1 : open2, -58);
+                d.Tick(0.25);
+            }
+
+            Assert.IsTrue(d.Selector.IsLinked, "The case open links.");
+            book = new LastReadingBook(
+                new SavedReading(70, true, d.Now, BroadcastFixtures.PairedModel),
+                new SavedReading(70, true, d.Now, BroadcastFixtures.PairedModel),
+                new SavedReading(90, true, d.Now, BroadcastFixtures.PairedModel),
+                []);
+            d.Tick(180);
+
+            var seenAll = new List<SelectionObservation>();
+            byte[] worn1 = WidgetFixtures.Proximity(status: 0x55, batteryA: 0x77, batteryB: 0x0F, lid: 0x5A);
+            byte[] worn2 = WidgetFixtures.Proximity(status: 0x35, batteryA: 0x77, batteryB: 0x0F, lid: 0x5A);
+            for (int i = 0; i < 6; i++)
+            {
+                if (withUnknownForms)
+                {
+                    Feed(Stranger, WidgetFixtures.UnknownSeventeenByteForm(), -60);
+                }
+
+                if (Feed(i % 2 == 0 ? SetANewAddress : SetANewOtherBud, i % 2 == 0 ? worn1 : worn2, -60) is SelectionObservation observation)
+                {
+                    seenAll.Add(observation);
+                }
+
+                d.Tick(5);
+            }
+
+            unknown = unknownForms;
+            return seenAll;
+        }
+
+        List<SelectionObservation> plain = Run(withUnknownForms: false, out int none);
+        List<SelectionObservation> mixed = Run(withUnknownForms: true, out int counted);
+
+        Assert.AreEqual(0, none);
+        Assert.AreEqual(6, counted, "The unknown form is counted by shape and nothing else.");
+        Assert.IsTrue(plain.Any(o => o.Refound), "The worn pair is found again.");
+        CollectionAssert.AreEqual(plain.Select(o => (o.Class, o.Refound)).ToList(), mixed.Select(o => (o.Class, o.Refound)).ToList());
+    }
 }

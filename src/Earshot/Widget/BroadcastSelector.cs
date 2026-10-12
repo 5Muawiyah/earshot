@@ -1,3 +1,4 @@
+
 namespace Earshot.Widget;
 
 // What a documented-form message turned out to be, as far as the selection can tell.
@@ -13,6 +14,13 @@ internal enum BroadcastClass
 
 public enum BroadcastSelectionState { NoPairedModel, Listening, Linked }
 
+// Why a re-find was refused: two different field sets of the model and colour in the window, a median under the near-PC
+// level, levels the last reading cannot lead to, or a link last heard longer ago than the limit.
+internal enum RefindRefusal { Ambiguous, Weak, Inconsistent, Expired }
+
+// Why a burst of case-known messages did not link: too few of them in the link window, too short a span, or too weak.
+internal enum LinkMissReason { TooFew, TooShort, TooWeak }
+
 // What one message did to the selection.
 //   NewChoice: the linked set is not the set it was (a link made on a case open, a link moved to another pair that
 //   opened its case nearer), so whatever values were kept belonged to another pair and are to be dropped.
@@ -22,13 +30,20 @@ public enum BroadcastSelectionState { NoPairedModel, Listening, Linked }
 //   Switched: another set took the link from the linked one (it comes with NewChoice).
 //   Dropped: the linked set had been lost for longer than BroadcastRules.LostLimit before this message, so the link was
 //   dropped and whatever was kept is to be cleared. The message itself is then judged as one with no link.
+//   Refound: nothing was linked (or every sender of the linked set had been silent), and the remembered pair was found
+//   again by RefindRule, a worn pair with no case open. It comes with Followed: the values on show stay.
+//   RefindRefused: the message was weighed for a re-find and refused, and why. LinkMiss: a burst of case-known messages
+//   of the paired model that ended without a link, and why; it is reported with the first message after the burst.
 internal readonly record struct SelectionObservation(
     BroadcastClass Class,
     bool NewChoice = false,
     bool Followed = false,
     bool Switched = false,
     int SetsInRange = 0,
-    bool Dropped = false)
+    bool Dropped = false,
+    bool Refound = false,
+    RefindRefusal? RefindRefused = null,
+    LinkMissReason? LinkMiss = null)
 {
     public bool IsChosenSet => Class == BroadcastClass.Chosen;
 }
@@ -55,9 +70,13 @@ internal readonly record struct SelectionObservation(
 //     message, is followed under its new addresses. A set with other fields is never followed, however near. A case open
 //     during the loss links as it does with no link at all.
 //   - After LostLimit with no message from an anchor the link and the colour are dropped, and nothing is linked until the
-//     next case open.
+//     next case open or until the remembered pair is found again.
+//   - The link is also remembered (LinkMemory: model, colour, when linked, when last heard) beyond the drop and, through
+//     whoever saves it, beyond a restart. While it is remembered, a worn pair of that model and colour that RefindRule
+//     passes is linked again as the same set under new addresses, with no case open. A case open still links by its own
+//     rule and wins: a message that carries a case level is never weighed for a re-find.
 // Pure and single threaded: time comes from the messages' own timestamps and from the time handed to Expire, nothing here
-// reads a clock, and nothing is written to disk: the link lives in memory only.
+// reads a clock, and nothing is written to disk: the memory is handed out for whoever saves it.
 internal sealed class BroadcastSelector
 {
     private readonly Dictionary<uint, List<SenderMessage>> _senders = new();
@@ -69,7 +88,20 @@ internal sealed class BroadcastSelector
     // The senders that are in the linked set's group without being anchors, and how long they have matched.
     private readonly Dictionary<uint, MergeProgress> _merged = new();
 
+    private readonly ProximityDecodeTable _table;
+
+    // The documented messages of the paired model and the remembered colour heard in the last BroadcastRules.RefindWindow,
+    // which RefindRule reads. Separate from _senders, whose window is the short one the follow rules are built on.
+    private readonly List<RefindSample> _recent = new();
+
     private ushort? _model;
+    private LinkMemory? _memory;
+
+    // The burst of case-known messages in progress that has not linked, and why it has not: reported once, with the first
+    // message after the burst ended.
+    private bool _burstActive;
+    private DateTimeOffset _burstLastAt;
+    private LinkMissReason _burstReason;
     private byte? _colour;
     private DateTimeOffset _latest = DateTimeOffset.MinValue;
     private DateTimeOffset? _chosenLastAt;
@@ -79,7 +111,25 @@ internal sealed class BroadcastSelector
     private long _order;
     private int _setsInRange;
 
+    public BroadcastSelector(ProximityDecodeTable? table = null)
+    {
+        _table = table ?? ProximityDecodeTable.Documented;
+    }
+
     public ushort? PairedModel => _model;
+
+    // The link as it is remembered across silences and restarts, or null.
+    public LinkMemory? Memory => _memory;
+
+    // The saved last readings the re-find rule compares a worn pair with; the empty book when not given.
+    public Func<LastReadingBook>? SavedBook { get; set; }
+
+    // Hands the remembered link in at start. The paired model is not known yet at that point, so nothing is judged here.
+    public void LoadMemory(LinkMemory? memory)
+    {
+        _memory = memory;
+        _recent.Clear();
+    }
 
     // The colour learned from the linked set, or null while nothing is linked.
     public byte? HeldColour => _colour;
@@ -125,6 +175,15 @@ internal sealed class BroadcastSelector
 
         _model = model;
         Unlink();
+
+        // A pairing that cannot be read leaves the remembered link as it is; another model is another pair.
+        if (model is not null && _memory is { } remembered && remembered.Model != model)
+        {
+            _memory = null;
+        }
+
+        _recent.Clear();
+        _burstActive = false;
         return true;
     }
 
@@ -147,8 +206,14 @@ internal sealed class BroadcastSelector
             _latest = at;
         }
 
+        LinkMissReason? missed = FlushBurst(at);
         bool dropped = Expire(_latest);
         SelectionObservation seen = Judge(message, tag, rssi, at);
+        if (missed is not null)
+        {
+            seen = seen with { LinkMiss = missed };
+        }
+
         return dropped ? seen with { Dropped = true } : seen;
     }
 
@@ -169,6 +234,7 @@ internal sealed class BroadcastSelector
             return new SelectionObservation(BroadcastClass.ColourMismatch);
         }
 
+        RecordRecent(message, tag, rssi, at);
         Prune();
         if (!_senders.TryGetValue(tag, out List<SenderMessage>? own))
         {
@@ -193,8 +259,7 @@ internal sealed class BroadcastSelector
 
         if (!IsLinked)
         {
-            return TryLink(sets, tag, message, at, exclude: null, overMedian: null)
-                ?? new SelectionObservation(BroadcastClass.NotLinked, SetsInRange: _setsInRange);
+            return TryLinkOrRefind(sets, tag, message, at, fallback: BroadcastClass.NotLinked);
         }
 
         BroadcastSet? chosen = ChosenSetOf(sets);
@@ -206,9 +271,149 @@ internal sealed class BroadcastSelector
         // Every sender of the linked set has been silent for longer than the window: the addresses rotated, or the
         // case closed. The values on show stay (they grey as they age). A set that continues the last fields is the same
         // set under new addresses; a case open links as it would with no link at all; anything else is not the owner's.
-        return TryContinue(sets, tag, at)
-            ?? TryLink(sets, tag, message, at, exclude: null, overMedian: null)
-            ?? new SelectionObservation(BroadcastClass.OtherSet, SetsInRange: _setsInRange);
+        return TryContinue(sets, tag, at) ?? TryLinkOrRefind(sets, tag, message, at, fallback: BroadcastClass.OtherSet);
+    }
+
+    // Nothing is linked (or every anchor is silent and nothing continues them): a case open links, and failing that a worn
+    // pair that RefindRule passes is found again. A case-known message that does not link is part of a burst that may end
+    // without one, which is counted (LinkMiss).
+    private SelectionObservation TryLinkOrRefind(
+        List<BroadcastSet> sets, uint tag, ProximityMessage message, DateTimeOffset at, BroadcastClass fallback)
+    {
+        if (TryLink(sets, tag, message, at, exclude: null, overMedian: null) is { } linked)
+        {
+            _burstActive = false;
+            return linked;
+        }
+
+        NoteBurst(sets, tag, message, at);
+        if (TryRefind(sets, tag, message, at, out RefindRefusal? refused) is { } refound)
+        {
+            return refound;
+        }
+
+        return new SelectionObservation(fallback, SetsInRange: _setsInRange, RefindRefused: refused);
+    }
+
+    // The messages of the paired model and the remembered colour in the re-find window, kept only while a link is remembered.
+    private void RecordRecent(ProximityMessage message, uint tag, sbyte rssi, DateTimeOffset at)
+    {
+        if (_memory is not { } memory || memory.Model != message.Model || memory.Colour != message.Colour)
+        {
+            return;
+        }
+
+        _recent.Add(new RefindSample(tag, at, rssi, message));
+        DateTimeOffset cutoff = _latest - BroadcastRules.RefindWindow;
+        _recent.RemoveAll(sample => sample.At < cutoff);
+        if (_recent.Count > BroadcastRules.MaxRefindSamples)
+        {
+            _recent.RemoveRange(0, _recent.Count - BroadcastRules.MaxRefindSamples);
+        }
+    }
+
+    // The remembered pair found again: a worn pair (a message that carries a case level is a case open, which links by its
+    // own rule) that RefindRule passes becomes the linked set under its new addresses, the values on show staying. Returns
+    // null when it did not, and says in refused why when it was weighed and turned down.
+    private SelectionObservation? TryRefind(
+        List<BroadcastSet> sets, uint tag, ProximityMessage message, DateTimeOffset at, out RefindRefusal? refused)
+    {
+        refused = null;
+        if (_memory is not { } memory || memory.Model != _model || memory.Colour != message.Colour || BroadcastSenderSets.CaseKnown(message))
+        {
+            return null;
+        }
+
+        // What the linked set's own senders said before they went quiet is not evidence of a pair under new addresses: only
+        // senders that are not its anchors count, so a set that is still followed keeps the stricter follow rules first.
+        List<RefindSample> evidence = _recent.Where(sample => !_anchors.ContainsKey(sample.Tag)).ToList();
+        RefindVerdict verdict = RefindRule.Judge(evidence, memory, SavedBook?.Invoke() ?? LastReadingBook.Empty, _table, at);
+        switch (verdict)
+        {
+            case RefindVerdict.Ambiguous:
+                refused = RefindRefusal.Ambiguous;
+                return null;
+            case RefindVerdict.Weak:
+                refused = RefindRefusal.Weak;
+                return null;
+            case RefindVerdict.Inconsistent:
+                refused = RefindRefusal.Inconsistent;
+                return null;
+            case RefindVerdict.Expired:
+                // Too long ago to prove anything: forgotten, so a restart does not bring it back either.
+                refused = RefindRefusal.Expired;
+                _memory = null;
+                _recent.Clear();
+                return null;
+            case RefindVerdict.NotEnough:
+                return null;
+        }
+
+        BroadcastSet? own = sets.FirstOrDefault(set => set.Tags.Contains(tag));
+        if (own is null)
+        {
+            return null;
+        }
+
+        AdoptSet(own);
+        _colour = memory.Colour;
+        _chosenMedian = own.MedianRssi ?? Median(_recent.Select(s => (double)s.Rssi).ToList());
+        _burstActive = false;
+        Heard(at);
+        return new SelectionObservation(
+            BroadcastClass.Chosen, Followed: true, Refound: true, SetsInRange: _setsInRange);
+    }
+
+    // The linked set was heard at this time: the memory says so. A time that is not later than the one held changes nothing.
+    private void Heard(DateTimeOffset at)
+    {
+        if (_memory is { } memory && at > memory.LastHeardAt)
+        {
+            _memory = memory with { LastHeardAt = at };
+        }
+    }
+
+    // A case-known message that did not link belongs to a burst; the burst's reason is the one its newest message gave.
+    private void NoteBurst(List<BroadcastSet> sets, uint tag, ProximityMessage message, DateTimeOffset at)
+    {
+        if (!BroadcastSenderSets.CaseKnown(message) || sets.FirstOrDefault(set => set.Tags.Contains(tag)) is not { } own)
+        {
+            return;
+        }
+
+        var rssi = new List<double>();
+        DateTimeOffset first = DateTimeOffset.MaxValue;
+        DateTimeOffset last = DateTimeOffset.MinValue;
+        foreach (SenderMessage m in own.Messages)
+        {
+            if (at - m.At > BroadcastRules.LinkWindow || !BroadcastSenderSets.CaseKnown(m.Message))
+            {
+                continue;
+            }
+
+            rssi.Add(m.Rssi);
+            first = m.At < first ? m.At : first;
+            last = m.At > last ? m.At : last;
+        }
+
+        _burstActive = true;
+        _burstLastAt = at;
+        _burstReason = rssi.Count < BroadcastRules.LinkMessages
+            ? LinkMissReason.TooFew
+            : last - first < BroadcastRules.LinkSpan ? LinkMissReason.TooShort : LinkMissReason.TooWeak;
+    }
+
+    // The burst in progress has ended once nothing case-known has joined it for a link window: it did not link, and the
+    // reason of its last message is why. Reported once.
+    private LinkMissReason? FlushBurst(DateTimeOffset at)
+    {
+        if (!_burstActive || at - _burstLastAt <= BroadcastRules.LinkWindow)
+        {
+            return null;
+        }
+
+        _burstActive = false;
+        return _burstReason;
     }
 
     // A link made on a case open: of the sets that opened their case near the PC, the strongest. A message with no case
@@ -245,6 +450,12 @@ internal sealed class BroadcastSelector
         AdoptSet(winner.Set);
         _colour = winner.Set.Newest.Message.Colour;
         _chosenMedian = winner.Median;
+        if (_model is ushort pairedModel)
+        {
+            _memory = new LinkMemory(pairedModel, winner.Set.Newest.Message.Colour, at, at);
+        }
+
+        _recent.Clear();
         return new SelectionObservation(
             _anchors.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
             NewChoice: true, Switched: switched, SetsInRange: _setsInRange);
@@ -319,6 +530,7 @@ internal sealed class BroadcastSelector
 
         AdoptSet(best);
         _chosenMedian = best.MedianRssi;
+        Heard(at);
         return new SelectionObservation(
             _anchors.ContainsKey(tag) ? BroadcastClass.Chosen : BroadcastClass.OtherSet,
             Followed: true, SetsInRange: _setsInRange);
@@ -333,6 +545,7 @@ internal sealed class BroadcastSelector
         if (chosenMessage)
         {
             _lastMessage = message.Message;
+            Heard(at);
         }
 
         if (AnchorMedian(chosen) is double median)

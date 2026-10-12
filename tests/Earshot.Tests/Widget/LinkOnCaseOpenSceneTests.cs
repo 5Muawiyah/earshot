@@ -340,7 +340,7 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
     // ---- Dropping the link
 
     [TestMethod]
-    public void ALinkLostForMoreThanTwoMinutesLeavesTheLastReadingAndWaitsForTheNextCaseOpen()
+    public void ALinkLostForMoreThanTwoMinutesLeavesTheLastReadingAndTheWornPairIsFoundAgainWithNoCaseOpen()
     {
         using WidgetStatusService service = NewService();
         service.Start();
@@ -363,14 +363,15 @@ public sealed class LinkOnCaseOpenSceneTests : IDisposable
         Assert.AreEqual(100, dropped.Left.Percent);
         Assert.AreEqual(ReadingKind.Last, dropped.Left.Kind);
 
-        // The owner's own pair in use, as it was, for ten minutes: without a case open nothing links, and nothing it says
-        // is taken as live.
+        // The owner's own pair in use, as it was, for ten minutes: the link is remembered, and a worn pair of that model and
+        // colour whose levels are the last reading's is found again with no case open, and shown as live.
         WearThem(600);
-        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection);
-        Assert.AreEqual(ReadingKind.Last, Shown(service).Left.Kind, "Heard again, but no case was opened");
+        Assert.AreEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        Assert.AreEqual(ReadingKind.Live, Shown(service).Left.Kind, "Heard again, and it is the remembered pair");
+        Assert.AreEqual(1, service.Current.Counters.Refound);
 
         OpenTheCase(3);
-        Assert.AreEqual(100, Shown(service).Left.Percent, "The next case open links again.");
+        Assert.AreEqual(100, Shown(service).Left.Percent, "A case open next to the PC still links.");
         Assert.AreEqual(ReadingKind.Live, Shown(service).Left.Kind);
         Assert.AreEqual(90, Shown(service).Case.Percent);
     }
