@@ -26,6 +26,7 @@ internal static class HowToPictureGenerator
         ["start-power-sleep"] = StartPowerSleep,
         ["bluetooth-connect"] = BluetoothConnect,
         ["airpods-playing"] = AirPodsPlaying,
+        ["airpods-case-open"] = AirPodsCaseOpen,
         ["permission-box"] = PermissionBox,
         ["task-manager-end-task"] = TaskManagerEndTask,
     };
@@ -172,6 +173,27 @@ internal static class HowToPictureGenerator
 
         using Bitmap glyph = EarbudGlyph.ToBitmap(EarbudGlyph.Coverage(64, GlyphState.Connected), 64, Ink);
         g.DrawImage(glyph, 150, 70, 64, 64);
+
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] AirPodsCaseOpen()
+    {
+        const int width = 300, height = 180;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 3);
+
+        // A laptop outline, and beside it the AirPods case with its lid open, ringed to show where it goes.
+        g.DrawRectangle(pen, new Rectangle(24, 40, 136, 88));
+        g.DrawRectangle(pen, new Rectangle(12, 128, 160, 10));
+
+        var body = new Rectangle(206, 96, 64, 50);
+        g.DrawRectangle(pen, body);
+        Point[] lid = [new(body.Left, body.Top), new(body.Left + 10, body.Top - 38), new(body.Right + 10, body.Top - 38), new(body.Right, body.Top)];
+        g.DrawPolygon(pen, lid);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawEllipse(ringPen, body.Left - 20, body.Top - 56, body.Width + 50, body.Height + 74);
 
         return ToPngBytes(bitmap);
     }

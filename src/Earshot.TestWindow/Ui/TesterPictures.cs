@@ -113,10 +113,14 @@ internal static class TesterPictures
             DisplayRow disconnectRow = DisplayRow.Flatten(rows)[1];
             DisplayRow everyStateRow = DisplayRow.Flatten(rows)[2];
 
-            // Test 23's steps are placeholders, one short line each.
-            var placeholder = new HowToBlock(
-                "placeholder",
-                ["Placeholder step one.", "Placeholder step two.", "Placeholder step three."],
+            // Test 23's own steps, from wording.json: one short line each, each with its picture.
+            var caseBlock = new HowToBlock(
+                "open-the-case-next-to-this-computer",
+                ["Put both AirPods in their case.", "Close the lid and wait ten seconds.", "Open the lid next to this computer, and leave it open."],
+                "airpods-case-open");
+            var windowsBlock = new HowToBlock(
+                "connect-airpods-in-bluetooth-settings",
+                ["Click Start.", "Click Settings.", "Click Bluetooth and devices.", "Find your AirPods in the list.", "Click Connect."],
                 "bluetooth-connect");
             var iconBlock = new HowToBlock(
                 "icon",
@@ -127,17 +131,22 @@ internal static class TesterPictures
             {
                 Heading = "Before this test starts",
                 PlainLine = "Are all of those true, and are you ready to start?",
-                PlainPhysicalActions = ["Placeholder action."],
-                ScriptOwnWords = "Placeholder.",
+                PlainPhysicalActions =
+                [
+                    "Three times, connect the AirPods in Windows settings.",
+                    "Set up each state, then connect from the Earshot card, three times each.",
+                    "Restart when asked, then connect three more times.",
+                ],
+                ScriptOwnWords = "Three times, connect the AirPods through Windows: Settings, Bluetooth and devices, Connect.",
                 Buttons = [new PromptButton("Yes", "y"), new PromptButton("No", "n")],
-                HowToBlocks = [placeholder],
+                HowToBlocks = [windowsBlock, caseBlock],
             };
             var waiting = new PresentedPrompt
             {
                 Heading = "Do this:",
-                PlainLine = "Click the Earshot icon near the clock.",
+                PlainLine = "Click the Earshot icon, then Connect. Wait for the card.",
                 DetailLabel = "Have you done it?",
-                ScriptOwnWords = "Placeholder.",
+                ScriptOwnWords = "Left-click the Earshot icon, then Connect on the card. Wait until the card says the AirPods are connected or gives a reason, then come back here.",
                 Buttons = [new PromptButton("Yes", string.Empty), new PromptButton("No", string.Empty, SendsReply: false)],
                 HowToBlocks = [iconBlock],
             };

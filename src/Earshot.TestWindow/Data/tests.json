@@ -341,6 +341,29 @@
         "shutdown-was-clean",
         "service-no-error-event"
       ]
+    },
+    {
+      "number": "23",
+      "script": "23-ConnectEveryState.ps1",
+      "testId": "23-connect-every-state",
+      "kind": "power-cycle",
+      "halves": 2,
+      "name": "Connect from every state",
+      "title": "Connect from every state",
+      "proves": "Earshot connects the AirPods within 20 seconds whatever state they were in, and leaves a connection made in Windows alone.",
+      "settles": "Whether Earshot connects the AirPods within 20 seconds from each state, and whether a connection made through Windows is kept.",
+      "powerCycleRequirement": "restart",
+      "maxSilenceSeconds": 900,
+      "firstHalfOnlyCriteriaIds": [
+        "windows-connects-kept",
+        "connects-iphone",
+        "connects-case",
+        "connects-wake",
+        "restart-reached"
+      ],
+      "secondHalfOnlyCriteriaIds": [
+        "connects-restart"
+      ]
     }
   ]
 }

@@ -38,6 +38,7 @@ public sealed class ManifestNameProvesTests
         ["20"] = "Choosing Exit while the AirPods are connected lets them go and blocks them.",
         ["21"] = "This PC pauses what it is playing when the AirPods leave it, and never resumes anything.",
         ["22"] = "Even with the Earshot icon closed, the AirPods are handed back before this computer shuts down, and left alone at the next start.",
+        ["23"] = "Earshot connects the AirPods within 20 seconds whatever state they were in, and leaves a connection made in Windows alone.",
     };
 
     private static IReadOnlyList<ManifestRow> LoadManifest() =>

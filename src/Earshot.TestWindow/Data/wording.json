@@ -56,6 +56,14 @@
         "Click Connect."
       ]
     },
+    "open-the-case-next-to-this-computer": {
+      "picture": "airpods-case-open",
+      "steps": [
+        "Put both AirPods in their case.",
+        "Close the lid and wait ten seconds.",
+        "Open the lid next to this computer, and leave it open."
+      ]
+    },
     "airpods-in-and-phone-playing": {
       "picture": "airpods-playing",
       "steps": [
@@ -727,6 +735,32 @@
     { "test": "22", "kind": "check", "scriptText": "service-in-budget", "plain": "It should finish inside the time Windows gives it before this computer shuts down.", "plainMeaning": "If it took too long, Windows may have shut down before it had finished." },
     { "test": "22", "kind": "check", "scriptText": "shutdown-was-clean", "plain": "This computer should shut down cleanly, with no sign of a crash." },
     { "test": "22", "kind": "check", "scriptText": "service-no-error-event", "plain": "Windows should not have written down an error for the part of Earshot that keeps running in the background." },
-    { "test": "22", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." }
+    { "test": "22", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." },
+    { "test": "23", "kind": "precondition", "scriptText": "Earshot 1.5.0 or later is installed, set up, and running in the tray.", "plain": "Earshot 1.5.0 or later is installed, set up, and its icon is showing near the clock." },
+    { "test": "23", "kind": "precondition", "scriptText": "Block at boot is on.", "plain": "Block at boot is on." },
+    { "test": "23", "kind": "precondition", "scriptText": "The AirPods are paired with this PC and with your iPhone, and your iPhone is with you.", "plain": "The AirPods are paired with this computer and with your iPhone, and your iPhone is with you." },
+    { "test": "23", "kind": "precondition", "scriptText": "Nothing is connected to this PC through Bluetooth audio except, later, the AirPods.", "plain": "No other Bluetooth headphones or speakers are connected to this computer." },
+    { "test": "23", "kind": "action", "scriptText": "Three times, connect the AirPods through Windows: Settings, Bluetooth and devices, Connect.", "plain": "Three times, connect the AirPods in Windows settings.", "howTo": ["connect-airpods-in-bluetooth-settings"] },
+    { "test": "23", "kind": "action", "scriptText": "For each state, set it up, then connect from the Earshot card, three times: the AirPods in use on your iPhone, the case opened next to this PC, this PC just woken from sleep.", "plain": "Set up each state, then connect from the Earshot card, three times each.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "23", "kind": "action", "scriptText": "Restart this PC when asked, sign in, and run the command this half prints, for three Connects after the restart.", "plain": "Restart when asked, sign in, then open this window again, select this row and choose Carry on with the second half. You do not need to type anything.", "howTo": ["restart"] },
+    { "test": "23", "kind": "instruction", "scriptText": "Open Settings, then Bluetooth and devices. Find your AirPods and choose Connect there, not in Earshot. When they are connected, come back here.", "plain": "Connect the AirPods in Windows settings, not in Earshot.", "howTo": ["connect-airpods-in-bluetooth-settings"] },
+    { "test": "23", "kind": "instruction", "scriptText": "Disconnect the AirPods from this PC: left-click the Earshot icon and choose Disconnect. Then come back here.", "plain": "Disconnect the AirPods with Earshot.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "23", "kind": "question", "scriptText": "Can you set this up now: the AirPods in your ears and playing from your iPhone?", "plain": "Can you set this up now: the AirPods in your ears, playing from your iPhone?", "howTo": ["airpods-in-and-phone-playing"] },
+    { "test": "23", "kind": "instruction", "scriptText": "Put the AirPods in your ears and play something on your iPhone, so your iPhone takes the AirPods from this PC. Then come back here.", "plain": "Play something on your iPhone with the AirPods in.", "howTo": ["airpods-in-and-phone-playing"] },
+    { "test": "23", "kind": "instruction", "scriptText": "Left-click the Earshot icon, then Connect on the card. Wait until the card says the AirPods are connected or gives a reason, then come back here.", "plain": "Click the Earshot icon, then Connect. Wait for the card.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "23", "kind": "question", "scriptText": "Can you set this up now: the AirPods in their case, opened next to this PC?", "plain": "Can you set this up now: the AirPods in their case, opened next to this computer?", "howTo": ["open-the-case-next-to-this-computer"] },
+    { "test": "23", "kind": "instruction", "scriptText": "Put both AirPods in the case and close the lid. Wait ten seconds, then open the lid next to this PC and leave it open. Then come back here.", "plain": "Close the case, wait ten seconds, then open it next to this computer.", "howTo": ["open-the-case-next-to-this-computer"] },
+    { "test": "23", "kind": "question", "scriptText": "Can you set this up now: this PC put to sleep and woken three times?", "plain": "Can you put this computer to sleep and wake it, three times?", "howTo": ["put-this-computer-to-sleep"] },
+    { "test": "23", "kind": "instruction", "scriptText": "Put this computer to sleep from Start, Power, Sleep. Wake it, sign in, and come back here.", "plain": "Put this computer to sleep, then wake it.", "howTo": ["put-this-computer-to-sleep"] },
+    { "test": "23", "kind": "question", "scriptText": "Do you want to restart now, for the three Connects after a restart?", "plain": "Do you want to restart now, for the last three connects?", "howTo": ["restart"] },
+    { "test": "23", "kind": "question", "scriptText": "Did you restart this PC and sign in before running this?", "plain": "Did you restart this computer and sign in before this?", "howTo": ["restart"] },
+    { "test": "23", "kind": "instruction", "scriptText": "Do not connect the AirPods yet. If they are connected to this PC, choose Disconnect on the Earshot card first. Then come back here.", "plain": "Make sure the AirPods are not connected to this computer.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "23", "kind": "check", "scriptText": "windows-connects-kept", "plain": "A connection made in Windows settings should still be there two minutes later." },
+    { "test": "23", "kind": "check", "scriptText": "connects-iphone", "plain": "From your iPhone, all three connects should finish within 20 seconds." },
+    { "test": "23", "kind": "check", "scriptText": "connects-case", "plain": "With the case just opened, all three connects should finish within 20 seconds." },
+    { "test": "23", "kind": "check", "scriptText": "connects-wake", "plain": "After waking, all three connects should finish within 20 seconds." },
+    { "test": "23", "kind": "check", "scriptText": "connects-restart", "plain": "After a restart, all three connects should finish within 20 seconds." },
+    { "test": "23", "kind": "check", "scriptText": "restart-reached", "plain": "This computer should have been restarted for the last three connects." },
+    { "test": "23", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." }
   ]
 }

@@ -15,7 +15,7 @@ internal sealed record RunAllItem(string RowNumber, int? Variant)
 //
 // The order follows the owner's decisions: 17 sits beside 09, with the other two hand-back tests
 // (20, Exit, and 22, the background part) straight after it, and the fast switch test (16) comes
-// after 15 with the pause test (21) straight after it. 18 stays at the end.
+// after 15 with the pause test (21) straight after it. Connect from every state (23) comes before 15. 18 stays at the end.
 internal static class RunAllOrder
 {
     internal static readonly IReadOnlyList<RunAllItem> Items = BuildOrder();
@@ -33,7 +33,7 @@ internal static class RunAllOrder
             items.Add(new RunAllItem("10", variant));
         }
 
-        foreach (string number in new[] { "11", "12", "13", "14", "15", "16", "21", "18" })
+        foreach (string number in new[] { "11", "12", "13", "14", "23", "15", "16", "21", "18" })
         {
             items.Add(new RunAllItem(number, null));
         }
