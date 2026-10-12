@@ -18,9 +18,6 @@ namespace Earshot;
 // part both name. A refused or malformed request changes nothing.
 internal static partial class Program
 {
-    // The dispatcher declares this hook; this line repeats it so the file builds on its own.
-    static partial void TryRunFixApply(RunContext ctx);
-
     static partial void TryRunFixApply(RunContext ctx)
     {
         Paths paths = Paths.Current;

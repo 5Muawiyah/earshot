@@ -21,9 +21,6 @@ namespace Earshot;
 // ExitCodes.PlanOnly. In safe mode it never counts anyone as present, so it only prints.
 internal static partial class Program
 {
-    // The dispatcher declares this hook; this line repeats it so the file builds on its own.
-    static partial void TryRunFix(RunContext ctx);
-
     static partial void TryRunFix(RunContext ctx)
     {
         Paths paths = Paths.Current;
