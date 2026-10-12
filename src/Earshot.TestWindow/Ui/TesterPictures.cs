@@ -1,7 +1,5 @@
 using System.Drawing.Imaging;
 using System.Globalization;
-using System.Runtime.InteropServices;
-using System.Text;
 using Earshot.TestWindow.Core;
 
 namespace Earshot.TestWindow.Ui;
@@ -16,9 +14,8 @@ internal static class TesterPictures
 
     private const int WindowWidth = 1150;
     private const int WindowHeight = 800;
-    private const int UoiName = 2;
-    private const string RunDesktopPrefix = "EarshotRun-";
-    private const string TestDesktopPrefix = "EarshotCardTest-";
+    // Set by whoever starts the exe on a desktop that is not the one in use (the private-desktop launcher).
+    internal const string PrivateDesktopVariable = "EARSHOT_RENDER_ON_PRIVATE_DESKTOP";
 
     internal static readonly (string Name, MainForm.PictureView View)[] Views =
     [
@@ -40,19 +37,17 @@ internal static class TesterPictures
     internal static string FileName(string view, string theme, int scalePercent) =>
         view + "-" + theme + "-" + scalePercent.ToString(CultureInfo.InvariantCulture) + "pct.png";
 
-    // True on a desktop this suite or the private-desktop launcher made; anything else, the owner's own included, is refused.
-    // https://learn.microsoft.com/en-us/windows/win32/winstation/desktops
-    internal static bool OnPrivateDesktop()
-    {
-        string name = CurrentDesktopName();
-        return name.StartsWith(RunDesktopPrefix, StringComparison.OrdinalIgnoreCase) || name.StartsWith(TestDesktopPrefix, StringComparison.OrdinalIgnoreCase);
-    }
+    // Whether the caller has said this process runs on a desktop that is not the one in use. A process cannot read which desktop it is on
+    // without a native call, which this assembly never makes, so the decision is the caller's: the test supplies its own check, and the
+    // exe takes it from PrivateDesktopVariable.
+    internal static bool CallerSaysPrivateDesktop() => Environment.GetEnvironmentVariable(PrivateDesktopVariable) == "1";
 
     // Draws every view, in both themes at both scales, into outDir. Returns the files written.
-    internal static IReadOnlyList<string> RenderAll(string outDir)
+    internal static IReadOnlyList<string> RenderAll(string outDir, Func<bool> onPrivateDesktop)
     {
         ArgumentException.ThrowIfNullOrEmpty(outDir);
-        if (!OnPrivateDesktop())
+        ArgumentNullException.ThrowIfNull(onPrivateDesktop);
+        if (!onPrivateDesktop())
         {
             throw new InvalidOperationException("Pictures are drawn on a private desktop only, never on the desktop in use.");
         }
@@ -70,7 +65,7 @@ internal static class TesterPictures
                 {
                     using var form = new MainForm(sandbox, data.Rows, Array.Empty<WordingEntry>(), new SandboxOptions { Folder = sandbox }, @"C:\Example\Earshot.exe");
                     form.Size = new Size(WindowWidth, WindowHeight);
-                    form.ShowOffScreenForPictures(() => !OnPrivateDesktop());
+                    form.ShowOffScreenForPictures(() => !onPrivateDesktop());
                     var look = new Look(form, percent / 100f, theme == "dark");
                     foreach ((string name, MainForm.PictureView view) in Views)
                     {
@@ -299,11 +294,6 @@ internal static class TesterPictures
                 case ListView list:
                     list.BackColor = DarkField;
                     list.ForeColor = DarkText;
-                    if (list.IsHandleCreated)
-                    {
-                        _ = SetWindowTheme(list.Handle, "DarkMode_Explorer", null);
-                    }
-
                     foreach (ListViewItem item in list.Items)
                     {
                         item.ForeColor = Map(item.ForeColor);
@@ -356,38 +346,4 @@ internal static class TesterPictures
             return argb == Color.Black.ToArgb() ? DarkText : color;
         }
     }
-
-    private static string CurrentDesktopName()
-    {
-        nint desktop = GetThreadDesktop(GetCurrentThreadId());
-        if (desktop == 0)
-        {
-            throw new InvalidOperationException("GetThreadDesktop failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture) + ".");
-        }
-
-        var buffer = new byte[512];
-        if (!GetUserObjectInformationW(desktop, UoiName, buffer, buffer.Length, out int needed))
-        {
-            throw new InvalidOperationException("GetUserObjectInformationW failed with Win32 error " + Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture) + ".");
-        }
-
-        return Encoding.Unicode.GetString(buffer, 0, Math.Max(0, needed - 2));
-    }
-
-    [DllImport("kernel32.dll")]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern uint GetCurrentThreadId();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern nint GetThreadDesktop(uint dwThreadId);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetUserObjectInformationW(nint hObj, int nIndex, byte[] pvInfo, int nLength, out int lpnLengthNeeded);
-
-    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    private static extern int SetWindowTheme(nint hwnd, string? subAppName, string? subIdList);
 }

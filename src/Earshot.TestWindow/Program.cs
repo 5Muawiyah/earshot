@@ -15,7 +15,7 @@ internal static class Program
         ApplicationConfiguration.Initialize();
 
         // --render <folder>: draws the window's views to PNG files from made-up data and exits. It starts no test and reads
-        // no device, and it refuses any desktop that is not a private one.
+        // no device, and it refuses to run unless the caller says it is on a private desktop (EARSHOT_RENDER_ON_PRIVATE_DESKTOP=1).
         int renderAt = Array.IndexOf(args, TesterPictures.FlagName);
         if (renderAt >= 0)
         {
@@ -71,7 +71,7 @@ internal static class Program
     // for either: a box shown on the desktop in use is what the refusal exists to prevent.
     private static int RenderPictures(string? folder)
     {
-        if (!TesterPictures.OnPrivateDesktop())
+        if (!TesterPictures.CallerSaysPrivateDesktop())
         {
             return 2;
         }
@@ -81,7 +81,7 @@ internal static class Program
             return 1;
         }
 
-        TesterPictures.RenderAll(folder);
+        TesterPictures.RenderAll(folder, TesterPictures.CallerSaysPrivateDesktop);
         return 0;
     }
 

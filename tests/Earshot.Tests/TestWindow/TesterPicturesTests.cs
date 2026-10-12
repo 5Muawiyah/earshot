@@ -40,7 +40,7 @@ public sealed class TesterPicturesTests
     {
         using var folder = new TempFolder();
         var written = new List<string>();
-        Phase5.CardDesktop.Run(() => written.AddRange(TesterPictures.RenderAll(folder.Path)), TimeSpan.FromMinutes(4));
+        Phase5.CardDesktop.Run(() => written.AddRange(TesterPictures.RenderAll(folder.Path, () => !TestDesktop.IsOwnersDesktop())), TimeSpan.FromMinutes(4));
 
         Assert.HasCount(ViewNames.Length * 2 * 2, written);
         var luminance = new Dictionary<string, double>();
