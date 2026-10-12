@@ -306,6 +306,20 @@ internal static partial class Program
         }
     }
 
+    // What the tray's coordinator is given beyond its controllers. The widget is built later than the coordinator, so it is
+    // reached through widget() when a hint is wanted.
+    internal static CoordinatorServices CreateCoordinatorServices(
+        ISettingsStore settings, ILog log, ConnectHistory? history, TimeProvider time, Func<Widget.IWidgetStatus?> widget) =>
+        new()
+        {
+            Link = new NodeLinkProbe(new CfgMgr32NodeReader(), settings, log),
+            Session = new WtsSessionState(log),
+            Launcher = new ShellSettingsLauncher(),
+            Hints = BroadcastDeviceHints.For(widget, time),
+            History = history,
+            FixOffer = history is null ? new FixOfferTracker() : FixOfferTracker.Replay(history.Read()),
+        };
+
     private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon, out string? startAfterExit, out StartAfterExitKind startKind)
     {
         startAfterExit = null;
@@ -376,14 +390,7 @@ internal static partial class Program
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon),
-                    new CoordinatorServices
-                    {
-                        Link = new NodeLinkProbe(new CfgMgr32NodeReader(), registry.Settings, log),
-                        Session = new WtsSessionState(log),
-                        Launcher = new ShellSettingsLauncher(),
-                        History = history,
-                        FixOffer = history is null ? new FixOfferTracker() : FixOfferTracker.Replay(history.Read()),
-                    });
+                    CreateCoordinatorServices(registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus));
 
                 // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
                 // constructed below): the toast route's AppUserModelID must be set before a window or a toast

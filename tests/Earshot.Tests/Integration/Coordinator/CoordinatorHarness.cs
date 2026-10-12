@@ -22,7 +22,7 @@ internal sealed class CoordinatorHarness : IDisposable
 {
     private readonly SynchronizationContext? _previous;
 
-    public CoordinatorHarness(bool safeMode = false, bool startedAtLogon = false, bool protectAudio = false)
+    public CoordinatorHarness(bool safeMode = false, bool startedAtLogon = false, bool protectAudio = false, IDeviceHints? hints = null)
     {
         _previous = SynchronizationContext.Current;
         Ui = new ManualUiContext();
@@ -47,7 +47,7 @@ internal sealed class CoordinatorHarness : IDisposable
 
         Coordinator = new BlockCoordinator(Monitor, Connection, Block, Protection, Settings, Cards, Log, Time,
             new CoordinatorOptions(safeMode, startedAtLogon),
-            new CoordinatorServices { Link = Link, Session = Session, Hints = Hints, Launcher = Launcher, History = History, FixOffer = FixOffer });
+            new CoordinatorServices { Link = Link, Session = Session, Hints = hints ?? Hints, Launcher = Launcher, History = History, FixOffer = FixOffer });
     }
 
     private readonly string _historyFolder;
