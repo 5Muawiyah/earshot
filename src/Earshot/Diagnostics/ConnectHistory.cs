@@ -227,14 +227,16 @@ internal sealed class ConnectHistory
         using (var w = new Utf8JsonWriter(buffer))
         {
             w.WriteStartObject();
-            w.WriteString("at", e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
-            w.WriteString("action", Safe(e.Action));
+            // time, step, outcome, code, attempt, durationMs and reason are the plain tokens the doctor report keeps from a line.
+            w.WriteString("time", e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
+            w.WriteString("step", Safe(e.Action));
+            w.WriteString("outcome", Safe(e.Outcome));
+            w.WriteString("code", Safe(e.Steps.FirstOrDefault(st => st.Code != 0)?.CodeName ?? "S_OK"));
+            w.WriteNumber("attempt", e.Retry ? 2 : 1);
+            w.WriteNumber("durationMs", e.DurationMs);
+            w.WriteString("reason", Safe(e.FailureClass.Length == 0 ? "None" : e.FailureClass));
             w.WriteString("start", Safe(e.StartState));
             w.WriteString("path", Safe(e.Path));
-            w.WriteBoolean("retry", e.Retry);
-            w.WriteString("outcome", Safe(e.Outcome));
-            w.WriteString("class", Safe(e.FailureClass));
-            w.WriteNumber("ms", e.DurationMs);
             w.WriteStartArray("steps");
             foreach (HistoryStep s in e.Steps.Take(MaxStepsPerEntry))
             {
@@ -260,7 +262,7 @@ internal sealed class ConnectHistory
             using JsonDocument doc = JsonDocument.Parse(line);
             JsonElement r = doc.RootElement;
             if (r.ValueKind != JsonValueKind.Object ||
-                !DateTimeOffset.TryParseExact(r.GetProperty("at").GetString(), "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture,
+                !DateTimeOffset.TryParseExact(r.GetProperty("time").GetString(), "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture,
                     DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset at))
             {
                 return false;
@@ -273,9 +275,9 @@ internal sealed class ConnectHistory
             }
 
             entry = new ConnectHistoryEntry(
-                at, r.GetProperty("action").GetString() ?? "", r.GetProperty("start").GetString() ?? "", r.GetProperty("path").GetString() ?? "",
-                steps, r.GetProperty("retry").GetBoolean(), r.GetProperty("outcome").GetString() ?? "", r.GetProperty("class").GetString() ?? "",
-                r.GetProperty("ms").GetInt64());
+                at, r.GetProperty("step").GetString() ?? "", r.GetProperty("start").GetString() ?? "", r.GetProperty("path").GetString() ?? "",
+                steps, r.GetProperty("attempt").GetInt32() > 1, r.GetProperty("outcome").GetString() ?? "", r.GetProperty("reason").GetString() ?? "",
+                r.GetProperty("durationMs").GetInt64());
             return true;
         }
         catch (JsonException)

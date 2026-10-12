@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Earshot.App;
+using Earshot.Boot;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Diagnostics;
@@ -366,10 +367,23 @@ internal static partial class Program
                 (TimeSpan refreshInterval, string refreshSource) = RefreshInterval.Read();
                 var stallLog = new UiStallMonitor(TimeProvider.System, refreshInterval, refreshSource);
                 registry = CompositionRoot.Build(log, settings, action => ui.Post(static state => ((Action)state!)(), stallLog.Wrap(action)), paths.IsSafeMode);
+
+                // Safe mode against the real data folder writes nothing, the connect history included.
+                ConnectHistory? history = paths.IsSafeMode && !paths.IsRedirected
+                    ? null
+                    : new ConnectHistory(paths.ConnectHistoryFile, TimeProvider.System, log);
                 coordinator = new BlockCoordinator(
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
-                    new CoordinatorOptions(paths.IsSafeMode, startedAtLogon));
+                    new CoordinatorOptions(paths.IsSafeMode, startedAtLogon),
+                    new CoordinatorServices
+                    {
+                        Link = new NodeLinkProbe(new CfgMgr32NodeReader(), registry.Settings, log),
+                        Session = new WtsSessionState(log),
+                        Launcher = new ShellSettingsLauncher(),
+                        History = history,
+                        FixOffer = history is null ? new FixOfferTracker() : FixOfferTracker.Replay(history.Read()),
+                    });
 
                 // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
                 // constructed below): the toast route's AppUserModelID must be set before a window or a toast
