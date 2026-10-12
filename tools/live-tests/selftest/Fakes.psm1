@@ -161,6 +161,8 @@ $script:StartStates = @{
     '21-pause-on-leave|first'            = @{ NodeState = 'Allowed'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '22-service-handback|first'          = @{ NodeState = 'Allowed'; Render = 'Active'; Protection = 'Protected'; SetUp = $true }
     '22-service-handback|resume'         = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '23-connect-every-state|first'       = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '23-connect-every-state|resume'      = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
 }
 
 # The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
@@ -211,6 +213,8 @@ $script:Answers = [ordered]@{
     'were devices that are not present now shown'      = 'yes'
     'did the first half install earshot again'         = 'yes'
     'had this pc gone to sleep since earshot was installed'   = 'no'
+    'can you set this up now'                          = 'yes'
+    'did you restart this pc and sign in'              = 'yes'
 
     # test 19: the widget.
     'is the gauge at the right end of the taskbar'                           = 'yes'
@@ -292,6 +296,8 @@ $script:CaseItemCounts = @{
     'handback-cut-short' = 0; 'handback-not-reached' = 0; 'no-sleep-event' = 1; 'repaged-at-wake' = 1
     'exit-cut-short' = 0; 'pause-declined' = 0; 'chosen-rising' = 0
     'switch-timed-out' = 0; 'switch-not-at-rest' = 1; 'switch-rejected' = 1; 'switch-unparsable' = 0
+    # test 23: the owner can set up none of the states and does not restart, so every state reads "not reached".
+    'not-reached' = 1
 
     # test 17 and test 22: the hand-back service's own cases. Each looks like the shared "one" for every log line and
     # list, and differs only in the status file the service wrote (Write-FakeStatusFiles below).
@@ -328,7 +334,7 @@ function Initialize-FakeMachine
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -390,7 +396,7 @@ function New-FakeSandbox
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -1308,6 +1314,13 @@ function Get-FakeAnswer
     )
 
     $lower = $Question.ToLowerInvariant()
+
+    # test 23, not-reached: the owner can set up none of the states, does not restart, and says so after the restart too.
+    if ((Get-FakeContext).Case -eq 'not-reached' -and ($Options -contains 'no') -and
+        ($lower.Contains('can you set this up now') -or $lower.Contains('do you want to restart now') -or $lower.Contains('did you restart this pc and sign in')))
+    {
+        return 'no'
+    }
 
     # test 16, switch-rejected: the owner says no to every "was that wait acceptable", blind, before any figure.
     if ((Get-FakeContext).Case -eq 'switch-rejected' -and $lower.Contains('was that wait acceptable') -and ($Options -contains 'no'))

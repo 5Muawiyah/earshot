@@ -931,4 +931,37 @@
             FindingsInclude = @{ 'test17Result' = 'unreadable' }
             ExpectedErrors = 1 }
     }
+    # ------------------------------------------------------ 23 connect from every state
+    # The fake world connects on every Connect, from Settings or the card, and keeps a Windows connection, so the
+    # Windows leg passes in every case. Each Connect from the card is read from the log since it was asked for: no line
+    # fails, one line (the click shape, 1719 ms by the allow-first path) passes, two lines cannot be told apart. not-reached
+    # sets up no state and does not restart, so each state reads "not reached" and the run is inconclusive, never a pass.
+    '23-connect-every-state|first' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'windows-connects-kept' = 'pass'; 'connects-iphone' = 'fail'; 'connects-case' = 'fail'; 'connects-wake' = 'fail'
+                'restart-reached' = 'pass' }
+            FindingsInclude = @{ 'iphoneReached' = 'reached'; 'iphoneConnect1Ms' = $null; 'wakeConnect3Ms' = $null } }
+        one  = @{ Overall = 'pass'; Criteria = @{
+                'windows-connects-kept' = 'pass'; 'connects-iphone' = 'pass'; 'connects-case' = 'pass'; 'connects-wake' = 'pass'
+                'restart-reached' = 'pass' }
+            FindingsInclude = @{ 'iphoneConnect1Ms' = 1719; 'caseConnect2Ms' = 1719; 'wakeConnect3Ms' = 1719 } }
+        two  = @{ Overall = 'inconclusive'; Criteria = @{
+                'windows-connects-kept' = 'pass'; 'connects-iphone' = 'inconclusive'; 'connects-case' = 'inconclusive'; 'connects-wake' = 'inconclusive'
+                'restart-reached' = 'pass' }
+            FindingsInclude = @{ 'iphoneConnect1Ms' = $null } }
+        'not-reached' = @{ Overall = 'inconclusive'; Criteria = @{
+                'windows-connects-kept' = 'pass'; 'connects-iphone' = 'inconclusive'; 'connects-case' = 'inconclusive'; 'connects-wake' = 'inconclusive'
+                'restart-reached' = 'inconclusive' }
+            FindingsInclude = @{ 'iphoneReached' = 'not reached'; 'caseReached' = 'not reached'; 'wakeReached' = 'not reached'; 'restartReached' = 'not reached' } }
+    }
+
+    '23-connect-every-state|resume' = @{
+        none = @{ Overall = 'fail'; Criteria = @{ 'connects-restart' = 'fail' }
+            FindingsInclude = @{ 'restartReached' = 'reached'; 'restartConnect1Ms' = $null } }
+        one  = @{ Overall = 'pass'; Criteria = @{ 'connects-restart' = 'pass' }
+            FindingsInclude = @{ 'restartConnect1Ms' = 1719; 'restartConnect3Ms' = 1719 } }
+        two  = @{ Overall = 'inconclusive'; Criteria = @{ 'connects-restart' = 'inconclusive' } }
+        'not-reached' = @{ Overall = 'inconclusive'; Criteria = @{ 'connects-restart' = 'inconclusive' }
+            FindingsInclude = @{ 'restartReached' = 'not reached' } }
+    }
 }
