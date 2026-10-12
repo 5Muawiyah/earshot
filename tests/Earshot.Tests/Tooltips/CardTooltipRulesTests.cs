@@ -51,7 +51,7 @@ public sealed class CardTooltipRulesTests
         var all = new List<(string, CardControl?, string)>();
         DateTimeOffset now = DateTimeOffset.UtcNow;
         WidgetCardModel plain = CardKit.MainModel();
-        WidgetCardModel full = CardKit.MainModel(CardKit.Snapshot(readAt: now - TimeSpan.FromMinutes(2)), updateVersion: "1.4.0") with { Now = now, ShowSwitch = true, AutoPauseOn = true };
+        WidgetCardModel full = CardKit.MainModel(CardKit.Snapshot(readAt: now - TimeSpan.FromMinutes(2)), updateVersion: "1.4.0") with { Now = now, ShowSwitch = true, AutoPauseOn = true, ShowSendTo = true };
         foreach ((string name, WidgetCardModel model, bool notice) in new (string, WidgetCardModel, bool)[]
         {
             ("main", plain, false),

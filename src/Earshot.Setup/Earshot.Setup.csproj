@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- TargetFramework and the supported Windows version come from Directory.Build.props, the one place they are
+         written. -->
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Earshot.Setup</AssemblyName>
+    <RootNamespace>Earshot.Setup</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <StartupHookSupport>false</StartupHookSupport>
+    <Copyright>Copyright (c) 2026 5Muawiyah. MIT licence.</Copyright>
+    <!-- Not part of a plain publish of the solution: tools\build-release.ps1 publishes it by path, once the release zip
+         exists, with the zip and its version on the command line. Native AOT is set there too (-p:PublishAot=true),
+         the way ReadyToRun is for the application: it needs a runtime identifier and the AOT compiler package, and the
+         build and the tests need neither. -->
+    <IsPublishable>false</IsPublishable>
+    <!-- Supplied by the release script. Empty in an ordinary build, which then has no payload and refuses to install. -->
+    <EarshotPayload Condition="'$(EarshotPayload)' == ''"></EarshotPayload>
+    <EarshotPayloadVersion Condition="'$(EarshotPayloadVersion)' == ''"></EarshotPayloadVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(EarshotPayloadVersion)' != ''">
+    <Version>$(EarshotPayloadVersion)</Version>
+    <AssemblyVersion>$(EarshotPayloadVersion).0</AssemblyVersion>
+    <FileVersion>$(EarshotPayloadVersion).0</FileVersion>
+    <InformationalVersion>$(EarshotPayloadVersion)</InformationalVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Earshot.Tests" />
+  </ItemGroup>
+  <!-- The release zip is the program's payload. Its SHA-256 is worked out here, from the file that is embedded, and
+       compiled in as a constant, so the check Setup makes at run time is against the hash of exactly these bytes. -->
+  <ItemGroup Condition="'$(EarshotPayload)' != ''">
+    <EmbeddedResource Include="$(EarshotPayload)" LogicalName="payload.zip" />
+  </ItemGroup>
+  <!-- Load only from System32 once the program is running. SetDefaultDllDirectories does the same from the first
+       statement of Main; this flag covers the loads that happen before Main (the import table), which is what a Native
+       AOT executable resolves at start.
+       https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag
+       https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-setdefaultdlldirectories -->
+  <ItemGroup>
+    <LinkerArg Include="/DEPENDENTLOADFLAG:0x800" />
+  </ItemGroup>
+  <Target Name="WriteEarshotPayloadConstants" BeforeTargets="CoreCompile;GenerateMSBuildEditorConfigFile">
+    <PropertyGroup>
+      <EarshotPayloadConstantsFile>$(IntermediateOutputPath)PayloadConstants.g.cs</EarshotPayloadConstantsFile>
+    </PropertyGroup>
+    <GetFileHash Condition="'$(EarshotPayload)' != ''" Files="$(EarshotPayload)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Hash" PropertyName="EarshotPayloadHash" />
+    </GetFileHash>
+    <PropertyGroup>
+      <EarshotPayloadHash Condition="'$(EarshotPayloadHash)' == ''"></EarshotPayloadHash>
+      <EarshotPayloadEmbedded Condition="'$(EarshotPayload)' != ''">true</EarshotPayloadEmbedded>
+      <EarshotPayloadEmbedded Condition="'$(EarshotPayload)' == ''">false</EarshotPayloadEmbedded>
+      <EarshotPayloadHashLower>$(EarshotPayloadHash.ToLowerInvariant())</EarshotPayloadHashLower>
+      <EarshotPayloadText>namespace Earshot.Setup%3B%0D%0A%0D%0Ainternal static class PayloadConstants%0D%0A{%0D%0A    public const bool Embedded = $(EarshotPayloadEmbedded)%3B%0D%0A    public const string Sha256 = "$(EarshotPayloadHashLower)"%3B%0D%0A    public const string Version = "$(EarshotPayloadVersion)"%3B%0D%0A}%0D%0A</EarshotPayloadText>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(EarshotPayloadConstantsFile)" Lines="$(EarshotPayloadText)" Overwrite="true" WriteOnlyWhenDifferent="true" Encoding="UTF-8" />
+    <ItemGroup>
+      <Compile Include="$(EarshotPayloadConstantsFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -82,6 +82,13 @@ public sealed record WidgetSettings
 
     public bool LeftClickConnects { get; set; }                // false: a left click opens the card
 
+    // The ways in to the send-to picker that can be turned off. The card's Send to row, and the Send to item in the menu a
+    // right-click on the gauge opens: on by default, for a new install and an existing one alike (a file that never held them
+    // reads as on). The third way in, the shortcut, is turned off by clearing it (HotkeySettings.SendTo).
+    public bool SendToOnCard { get; set; } = true;
+
+    public bool SendToOnGauge { get; set; } = true;
+
     // Where the gauge sits on the taskbar: the right-hand end (the default) or next to the app buttons.
     // Written as its number; a number that names neither position is read as RightEnd (Clamped records it).
     public GaugePosition GaugePosition { get; set; } = GaugePosition.RightEnd;

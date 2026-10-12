@@ -6,6 +6,7 @@ using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Install;
 using Earshot.Service;
 
 namespace Earshot;
@@ -242,8 +243,9 @@ internal static partial class Program
             ctx.ExitCode = (int)Guarded(log, "uninstall", () => RunUninstall(ctx.Args, WindowsProcessToken.Current(), log, () =>
             {
                 using var worker = new SystemWorker(log);
-                return worker.RunAsync(_ => CreateUninstallActions(layout, log).Run())
+                InstallResult uninstalled = worker.RunAsync(_ => CreateUninstallActions(layout, log).Run())
                     .GetAwaiter().GetResult();
+                return UninstallActionsEntry.RemoveEntry(uninstalled, RegistryUninstallRoot.Machine());
             }));
         }
         finally
@@ -259,6 +261,7 @@ internal static partial class Program
             new WindowsServiceControl())
         {
             RunLock = InstallRunLock.Create(),
+            AppsEntry = RegistryUninstallRoot.Machine(),
         };
 
     internal static UninstallActions CreateUninstallActions(InstallLayout layout, ILog log) =>

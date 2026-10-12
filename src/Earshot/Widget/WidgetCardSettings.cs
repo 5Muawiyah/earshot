@@ -47,12 +47,23 @@ internal sealed record CardSettingsValues(
 
     public string? OpenCardFailure { get; init; }
 
+    // The Send to shortcut and why it is not registered, or null; and the two switches for the other ways in to the picker (the
+    // card's row and the Send to item in the menu a right-click on the gauge opens), both on unless the person turned them off.
+    public string SendToChord { get; init; } = string.Empty;
+
+    public string? SendToFailure { get; init; }
+
+    public bool SendToOnCard { get; init; } = true;
+
+    public bool SendToOnGauge { get; init; } = true;
+
     // The chord a shortcut row holds, "" when none.
     public string ChordFor(SettingsRowId row) => row switch
     {
         SettingsRowId.Connect => ConnectChord,
         SettingsRowId.Disconnect => DisconnectChord,
         SettingsRowId.OpenCard => OpenCardChord,
+        SettingsRowId.SendTo => SendToChord,
         _ => string.Empty,
     };
 
@@ -149,6 +160,11 @@ internal interface IWidgetCardHost
     // Sets the fully charged notice (WidgetSettings.FullyChargedNotice).
     void SetFullyChargedNotice(bool on, CardPlace place);
 
+    // The Send to row on the card, and the Send to item in the gauge's menu: each on or off by itself.
+    void SetSendToOnCard(bool on, CardPlace place);
+
+    void SetSendToOnGauge(bool on, CardPlace place);
+
     // Opens Windows' Bluetooth settings (the card's Bluetooth off row) and the release notes page (the updates page's What's new).
     void OpenBluetoothSettings(CardPlace place);
 
@@ -201,7 +217,7 @@ internal interface IWidgetCardHost
 }
 
 // The shortcuts the settings page edits.
-internal enum CardShortcut { Connect, Disconnect, OpenCard }
+internal enum CardShortcut { Connect, Disconnect, OpenCard, SendTo }
 
 internal enum SettingsRowId
 {
@@ -218,6 +234,9 @@ internal enum SettingsRowId
     Connect,
     Disconnect,
     OpenCard,
+    SendTo,            // the Send to shortcut
+    SendToCard,        // in More: the card's Send to row
+    SendToGauge,       // in More: the Send to item in the gauge's menu
     Repair,
     CheckAutomatically,
     MicrophoneOff,
@@ -779,6 +798,7 @@ internal static class SettingsPageLayout
         ShortcutRow(SettingsRowId.Connect, WidgetCopy.Connect, values.ConnectChord, values.ConnectFailure);
         ShortcutRow(SettingsRowId.Disconnect, WidgetCopy.Disconnect, values.DisconnectChord, values.DisconnectFailure);
         ShortcutRow(SettingsRowId.OpenCard, ShortcutCopy.Card, values.OpenCardChord, values.OpenCardFailure);
+        ShortcutRow(SettingsRowId.SendTo, SendToCopy.ShortcutLabel, values.SendToChord, values.SendToFailure);
 
         // ---- About
 
@@ -828,6 +848,8 @@ internal static class SettingsPageLayout
 
             ToggleRow(SettingsRowId.FullyCharged, WidgetCopy.SettingsFullyCharged, null);
             ToggleRow(SettingsRowId.LeftClick, WidgetCopy.SettingsLeftClick, null);
+            ToggleRow(SettingsRowId.SendToCard, SendToCopy.SettingCardRow, null);
+            ToggleRow(SettingsRowId.SendToGauge, SendToCopy.SettingGaugeMenu, null);
             NavigationRow(SettingsRowId.History, WidgetCopy.SettingsHistory, null);
 
             int copyW = ButtonWidth(WidgetCopy.CopyButton, glyph: false);

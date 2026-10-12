@@ -50,6 +50,7 @@ internal static class SwitchTimelineText
         SwitchTrigger.ShortcutToggle => "shortcut-toggle",
         SwitchTrigger.ShortcutToPc => "shortcut-to-pc",
         SwitchTrigger.ShortcutToPhone => "shortcut-to-phone",
+        SwitchTrigger.SendTo => "send-to",
         _ => throw new ArgumentOutOfRangeException(nameof(trigger), trigger, "Unknown trigger."),
     };
 

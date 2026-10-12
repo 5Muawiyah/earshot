@@ -25,6 +25,10 @@ namespace Earshot.Hotkeys;
 // shortcut stays cleared once the file is saved. It does not infer Enabled: a file that already has the switch
 // members was written by a build that expressed the owner's wish for it. A typed chord the same as the default
 // keeps it and the default steps aside, as above.
+//
+// SendTo (Ctrl+Alt+Shift+S) follows the same rule as OpenCard: a file without it takes the default, a file with it,
+// empty included, keeps what the owner left, and a chord the owner already typed for any other command (the card
+// shortcut included) is never replaced.
 public sealed class HotkeySettings : IJsonOnDeserialized
 {
     public const string DefaultSwitchToPc = "Ctrl+Alt+Shift+A";
@@ -34,10 +38,14 @@ public sealed class HotkeySettings : IJsonOnDeserialized
     private string _switchToPc = DefaultSwitchToPc;
     public const string DefaultOpenCard = "Ctrl+Alt+Shift+E";
 
+    public const string DefaultSendTo = "Ctrl+Alt+Shift+S";
+
     private string _switchToPhone = DefaultSwitchToPhone;
     private string _openCard = DefaultOpenCard;
+    private string _sendTo = DefaultSendTo;
     private bool _newMembersInFile;
     private bool _openCardInFile;
+    private bool _sendToInFile;
 
     public bool Enabled { get; set; } = true;
 
@@ -79,6 +87,16 @@ public sealed class HotkeySettings : IJsonOnDeserialized
         }
     }
 
+    public string SendTo
+    {
+        get => _sendTo;
+        set
+        {
+            _sendTo = value;
+            _sendToInFile = true;
+        }
+    }
+
     public static HotkeySettings Defaults => new();
 
     // The text for an action, or an empty string. Never null.
@@ -91,6 +109,7 @@ public sealed class HotkeySettings : IJsonOnDeserialized
         HotkeyAction.SwitchToPc => SwitchToPc,
         HotkeyAction.SwitchToPhone => SwitchToPhone,
         HotkeyAction.OpenCard => OpenCard,
+        HotkeyAction.SendTo => SendTo,
         _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown hotkey action."),
     };
 
@@ -121,6 +140,9 @@ public sealed class HotkeySettings : IJsonOnDeserialized
             case HotkeyAction.OpenCard:
                 OpenCard = text;
                 break;
+            case HotkeyAction.SendTo:
+                SendTo = text;
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown hotkey action.");
         }
@@ -137,24 +159,42 @@ public sealed class HotkeySettings : IJsonOnDeserialized
 
         if (!_openCardInFile &&
             HotkeyText.TryParse(_openCard, out HotkeyCombination card, out _) &&
-            HeldByAnother(card))
+            HeldByAnother(card, includeOpenCard: false))
         {
             _openCard = string.Empty;
+        }
+
+        if (!_sendToInFile &&
+            HotkeyText.TryParse(_sendTo, out HotkeyCombination sendTo, out _) &&
+            HeldByAnother(sendTo, includeOpenCard: true))
+        {
+            _sendTo = string.Empty;
         }
     }
 
     // True when another command, as read, already holds the combination.
-    private bool HeldByAnother(HotkeyCombination combination)
+    private bool HeldByAnother(HotkeyCombination combination, bool includeOpenCard)
     {
-        HotkeyAction[] others =
-        [
-            HotkeyAction.ToggleConnection,
-            HotkeyAction.ToggleAudioProtection,
-            HotkeyAction.ToggleBlockAtBoot,
-            HotkeyAction.SpeakStatus,
-            HotkeyAction.SwitchToPc,
-            HotkeyAction.SwitchToPhone,
-        ];
+        HotkeyAction[] others = includeOpenCard
+            ?
+            [
+                HotkeyAction.ToggleConnection,
+                HotkeyAction.ToggleAudioProtection,
+                HotkeyAction.ToggleBlockAtBoot,
+                HotkeyAction.SpeakStatus,
+                HotkeyAction.SwitchToPc,
+                HotkeyAction.SwitchToPhone,
+                HotkeyAction.OpenCard,
+            ]
+            :
+            [
+                HotkeyAction.ToggleConnection,
+                HotkeyAction.ToggleAudioProtection,
+                HotkeyAction.ToggleBlockAtBoot,
+                HotkeyAction.SpeakStatus,
+                HotkeyAction.SwitchToPc,
+                HotkeyAction.SwitchToPhone,
+            ];
         foreach (HotkeyAction action in others)
         {
             if (HotkeyText.TryParse(TextFor(action), out HotkeyCombination held, out _) && held == combination)

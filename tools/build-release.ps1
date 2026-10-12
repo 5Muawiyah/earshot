@@ -21,7 +21,12 @@
          plain ASCII (Windows PowerShell 5.1 does not decode an octet-stream download as UTF-8, so any
          other byte would be mangled before it ran), and records its SHA-256, in lower-case hex, as
          script_sha256 beside zip_sha256, so the release notes can carry both;
-      8. prints the zip size and its SHA-256.
+      8. publishes src\Earshot.Setup as Native AOT with the zip embedded, reads the executable (never runs it) to check
+         that it limits DLL loading to System32, imports nothing outside System32 and was built from this zip and this
+         version, copies it to artifacts\Earshot-<version>-Setup.exe and writes Earshot-<version>-Setup.exe.sha256 beside
+         it, in the same form as the zip's;
+      9. writes artifacts\release-notes.md, which carries the SHA-256 of the zip, of Setup.exe and of earshot.ps1;
+     10. prints the zip size and its SHA-256.
 
     Full output goes to the log folder. The summary is JSON on stdout. Any failure
     exits non-zero and nothing is left in artifacts.
@@ -56,6 +61,66 @@ function Stop-Release {
     $result.ok = $false
     $result | ConvertTo-Json -Depth 4
     exit 1
+}
+
+# What a 64-bit Windows executable says about itself, read from the file and never by running it: the DLLs it imports
+# and the dependent load flag in its load configuration (what /DEPENDENTLOADFLAG sets).
+# https://learn.microsoft.com/en-us/windows/win32/debug/pe-format
+function Get-PeFacts {
+    param([string]$Path)
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    try {
+        $reader = New-Object System.IO.BinaryReader($stream)
+        $stream.Position = 0x3C
+        $pe = $reader.ReadInt32()
+        $stream.Position = $pe
+        if ($reader.ReadUInt32() -ne 0x4550) { throw "$Path is not a PE file." }
+        $stream.Position = $pe + 6
+        $sections = $reader.ReadUInt16()
+        $stream.Position = $pe + 20
+        $optionalSize = $reader.ReadUInt16()
+        $optional = $pe + 24
+        $stream.Position = $optional
+        if ($reader.ReadUInt16() -ne 0x20B) { throw "$Path is not a 64-bit PE file." }
+        $directories = $optional + 112
+        $table = $optional + $optionalSize
+        $map = @()
+        for ($i = 0; $i -lt $sections; $i++) {
+            $stream.Position = $table + 40 * $i + 8
+            $virtualSize = $reader.ReadUInt32(); $virtualAddress = $reader.ReadUInt32(); $rawSize = $reader.ReadUInt32(); $rawPointer = $reader.ReadUInt32()
+            $map += , @($virtualAddress, [Math]::Max($virtualSize, $rawSize), $rawPointer)
+        }
+        $toOffset = {
+            param([uint32]$rva)
+            foreach ($s in $map) { if ($rva -ge $s[0] -and $rva -lt ($s[0] + $s[1])) { return [long]($s[2] + ($rva - $s[0])) } }
+            throw "RVA 0x$($rva.ToString('X')) is in no section of $Path."
+        }
+        $stream.Position = $directories + 8
+        $importRva = $reader.ReadUInt32()
+        $stream.Position = $directories + 80
+        $configRva = $reader.ReadUInt32()
+        $flags = -1
+        if ($configRva -ne 0) {
+            $stream.Position = (& $toOffset $configRva) + 78
+            $flags = [int]$reader.ReadUInt16()
+        }
+        $imports = New-Object System.Collections.Generic.List[string]
+        if ($importRva -ne 0) {
+            $descriptor = & $toOffset $importRva
+            while ($true) {
+                $stream.Position = $descriptor
+                $fields = 1..5 | ForEach-Object { $reader.ReadUInt32() }
+                if (($fields | Measure-Object -Sum).Sum -eq 0) { break }
+                $stream.Position = & $toOffset $fields[3]
+                $bytes = New-Object System.Collections.Generic.List[byte]
+                while (($b = $reader.ReadByte()) -ne 0) { $bytes.Add($b) }
+                $imports.Add([System.Text.Encoding]::ASCII.GetString($bytes.ToArray()))
+                $descriptor += 20
+            }
+        }
+        return [pscustomobject]@{ DependentLoadFlags = $flags; Imports = @($imports) }
+    }
+    finally { $stream.Dispose() }
 }
 
 $project = Join-Path $Root 'src\Earshot\Earshot.csproj'
@@ -206,6 +271,91 @@ catch {
     Remove-Item -Force $zipPath, $checksumPath, $scriptPath -ErrorAction SilentlyContinue
     Stop-Release ("The install script could not be copied: " + $_.Exception.Message)
 }
+
+# Setup.exe: the zip just written, embedded in a Native AOT executable that is elevated itself. The project is built here, once
+# the zip exists, with the zip and its version on the command line; it needs a runtime identifier and the AOT compiler package,
+# so they are given here and not in the project file. The linker finds Visual Studio through vswhere, which is not on the PATH
+# of every shell, so the Installer folder is added for this run.
+$setupProject = Join-Path $Root 'src\Earshot.Setup\Earshot.Setup.csproj'
+$setupPublish = Join-Path $Root 'publish\Setup'
+$setupPath = Join-Path $artifactsDir ("Earshot-$version-Setup.exe")
+$setupChecksumPath = $setupPath + '.sha256'
+$notesPath = Join-Path $artifactsDir 'release-notes.md'
+$result.setup = $setupPath; $result.setup_bytes = 0; $result.setup_sha256 = ''; $result.setup_checksum_file = $setupChecksumPath
+$result.notes = $notesPath
+$result.setup_log = (Join-Path $LogDir 'setup-publish.log')
+$result.setup_checks = @()
+
+function Stop-Setup {
+    param([string]$Problem)
+    Remove-Item -Force $zipPath, $checksumPath, $scriptPath, $setupPath, $setupChecksumPath, $notesPath -ErrorAction SilentlyContinue
+    Stop-Release $Problem
+}
+
+if (-not (Test-Path $setupProject)) { Stop-Setup "Project not found: $setupProject" }
+try {
+    if (Test-Path $setupPublish) { Remove-Item -Recurse -Force $setupPublish }
+    New-Item -ItemType Directory -Force -Path $setupPublish | Out-Null
+}
+catch { Stop-Setup ("Could not clear the Setup publish folder: " + $_.Exception.Message) }
+
+$installerTools = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+if ((Test-Path $installerTools) -and ($env:PATH -notlike "*$installerTools*")) { $env:PATH = $installerTools + ';' + $env:PATH }
+& dotnet publish $setupProject -c Release -r win-x64 -p:PublishAot=true -p:IsPublishable=true "-p:EarshotPayload=$zipPath" "-p:EarshotPayloadVersion=$version" -o $setupPublish *> $result.setup_log
+$setupExit = $LASTEXITCODE
+$setupWarn = @(Select-String -Path $result.setup_log -Pattern ': warning [A-Z]+[0-9]+' | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique)
+$setupErr = @(Select-String -Path $result.setup_log -Pattern ': error [A-Z]+[0-9]+|error MSB|error NETSDK' | ForEach-Object { $_.Line.Trim() } | Sort-Object -Unique)
+if ($setupWarn.Count) { $result.problems += ($setupWarn | Select-Object -First 25) }
+if ($setupErr.Count) { $result.problems += ($setupErr | Select-Object -First 40) }
+if ($setupExit -ne 0 -or $setupErr.Count -or $setupWarn.Count) { Stop-Setup "dotnet publish of Setup did not finish clean. Full output: $($result.setup_log)" }
+$builtSetup = Join-Path $setupPublish 'Earshot.Setup.exe'
+if (-not (Test-Path $builtSetup -PathType Leaf)) { Stop-Setup "The Setup publish wrote no Earshot.Setup.exe in $setupPublish." }
+
+# The executable is read, never run: its imports and its load flag are read from the file, and the hash it will check at run
+# time is read from the constants file the build wrote beside it.
+$facts = Get-PeFacts -Path $builtSetup
+if ($facts.DependentLoadFlags -ne 0x800) {
+    Stop-Setup ("Setup.exe does not limit DLL loading to System32: its dependent load flag is 0x{0:X}, not 0x800." -f $facts.DependentLoadFlags)
+}
+$system32 = [Environment]::SystemDirectory
+$foreign = @($facts.Imports | Where-Object { $_ -notlike 'api-ms-win-*' -and $_ -notlike 'ext-ms-win-*' -and -not (Test-Path (Join-Path $system32 $_)) })
+if ($foreign.Count) { Stop-Setup ("Setup.exe imports DLLs that are not in System32: " + ($foreign -join ', ')) }
+$result.setup_checks = @("dependent load flag 0x800", ("imports: " + ($facts.Imports -join ', ')))
+
+$constants = Get-ChildItem -Path (Join-Path $Root 'src\Earshot.Setup\obj') -Recurse -Filter 'PayloadConstants.g.cs' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$constantsText = if ($constants) { Get-Content $constants.FullName -Raw } else { '' }
+if ($constantsText -notmatch ('Sha256 = "' + $result.zip_sha256.ToLowerInvariant() + '"')) {
+    Stop-Setup "Setup.exe was built with a payload hash that is not the hash of $zipPath."
+}
+if ($constantsText -notmatch ('Version = "' + [regex]::Escape($version) + '"')) {
+    Stop-Setup "Setup.exe was built for a version that is not $version."
+}
+if ((Get-Item $builtSetup).Length -lt $result.zip_bytes) { Stop-Setup "Setup.exe is smaller than the zip it should carry." }
+
+try {
+    Copy-Item -Path $builtSetup -Destination $setupPath -Force
+    $result.setup_bytes = (Get-Item $setupPath).Length
+    $result.setup_sha256 = (Get-FileHash -Algorithm SHA256 -Path $setupPath).Hash.ToLowerInvariant()
+    $setupLine = $result.setup_sha256 + '  ' + (Split-Path -Leaf $setupPath) + "`n"
+    [System.IO.File]::WriteAllText($setupChecksumPath, $setupLine, (New-Object System.Text.UTF8Encoding($false)))
+
+    # The notes carry all three hashes, in lower-case hex, for the release page.
+    $notes = @(
+        "Earshot $version"
+        ''
+        'SHA-256'
+        ''
+        ('- ' + (Split-Path -Leaf $zipPath) + ': ' + $result.zip_sha256.ToLowerInvariant())
+        ('- ' + (Split-Path -Leaf $setupPath) + ': ' + $result.setup_sha256)
+        ('- earshot.ps1: ' + $result.script_sha256)
+        ''
+        'A hash shows a download arrived whole. It does not show the file is the one published, so check it against this page.'
+    )
+    [System.IO.File]::WriteAllText($notesPath, (($notes -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding($false)))
+}
+catch { Stop-Setup ("Setup.exe could not be copied or its checksum written: " + $_.Exception.Message) }
+
 $result.ok = $true
 $result | ConvertTo-Json -Depth 4
 exit 0

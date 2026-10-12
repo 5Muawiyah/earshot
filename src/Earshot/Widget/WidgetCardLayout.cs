@@ -23,6 +23,9 @@ internal static class WidgetCardLayout
     public const int ColumnGapAt96 = 8;
     public const int SectionGapAt96 = 12;
     public const int ColumnInnerGapAt96 = 6;
+
+    // Between the Connect button and the Send to row under it.
+    public const int SendToGapAt96 = 4;
     public const int MarkWidthAt96 = 36;
     public const int MarkHeightAt96 = 32;
     public const int ValueHeightAt96 = 28;
@@ -111,7 +114,8 @@ internal static class WidgetCardLayout
         Rectangle UpdateLine = default,
         Rectangle UpdateCaption = default,
         Rectangle UpdateButton = default,
-        Rectangle Refresh = default);
+        Rectangle Refresh = default,
+        Rectangle SendTo = default);
 
     // showGear: the view has a button at the title row's end, the settings gear (the case-open card has its close button
     // there instead, in the same place). showRefresh: the view has the battery
@@ -120,7 +124,7 @@ internal static class WidgetCardLayout
     // least width the design gives it.
     public static Layout Compute(
         int dpi, bool showSwitch, bool showGear = true, bool showUpdateLine = false, int updateButtonWidth = 0, bool showRefresh = true,
-        double textScale = 1.0)
+        double textScale = 1.0, bool showSendTo = false)
     {
         int width = WidthFor(dpi);
         int pad = CardPlacement.Scale(PaddingAt96, dpi);
@@ -185,18 +189,27 @@ internal static class WidgetCardLayout
 
         var button = new Rectangle(pad, buttonY, contentWidth, rowHeight);
 
+        // The Send to row, a row high, under the button with the inner gap between them.
+        Rectangle sendTo = Rectangle.Empty;
+        int belowButton = button.Bottom;
+        if (showSendTo)
+        {
+            sendTo = new Rectangle(pad, button.Bottom + CardPlacement.Scale(SendToGapAt96, dpi), contentWidth, rowHeight);
+            belowButton = sendTo.Bottom;
+        }
+
         Rectangle switchRect = Rectangle.Empty;
-        int bottom = button.Bottom + pad;
+        int bottom = belowButton + pad;
         if (showSwitch)
         {
-            switchRect = new Rectangle(pad, button.Bottom + section, contentWidth, switchHeight);
+            switchRect = new Rectangle(pad, belowButton + section, contentWidth, switchHeight);
             bottom = switchRect.Bottom + pad;
         }
 
         return new Layout(
             width, bottom, ShowColumns: true, left, right, box, whereLine, button,
             showSwitch, switchRect,
-            title, gear, showUpdateLine, updateLine, updateCaption, updateButton, refresh);
+            title, gear, showUpdateLine, updateLine, updateCaption, updateButton, refresh, sendTo);
     }
 
     private static ColumnLayout Column(

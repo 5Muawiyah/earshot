@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using Earshot.AudioProtection;
 using Earshot.Contracts;
+using Earshot.Install;
 using Earshot.Interop;
 using Earshot.Service;
 
@@ -418,6 +419,12 @@ internal sealed class InstallActions
     // How long the run waits for the lock before it refuses.
     internal TimeSpan LockWait { get; init; } = InstallRunLock.WaitBeforeRefusing;
 
+    // Where the Installed apps entry is written. Null: none is (the tests that are not about it).
+    internal IUninstallRegistry? AppsEntry { get; init; }
+
+    // For tests: the clock the entry's install date is read from.
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
+
     // For tests: the wait between polls of the service's state. Returning false stops waiting at once.
     internal Func<TimeSpan, bool> ServicePoll { get; init; } = DeviceChangeLock.SleepAndContinue;
 
@@ -528,6 +535,10 @@ internal sealed class InstallActions
             return new InstallResult(GateExitCode.Failed, steps);
         }
 
+        // The entry is how Settings lists and removes Earshot. It says nothing the boot block depends on, so a write that
+        // fails leaves the tasks and the service in place and makes the result partial, with the raw code in the step.
+        bool entryWritten = WriteInstalledAppsEntry(steps);
+
         // The boot block is set up and verified by now. The service is the backstop for a shut down with the tray gone, so
         // when it cannot be set up the result says so and the tasks stay: Partial, never a setup that undoes the block.
         if (!RegisterService(steps))
@@ -535,7 +546,19 @@ internal sealed class InstallActions
             return new InstallResult(GateExitCode.Partial, steps);
         }
 
-        return new InstallResult(GateExitCode.Success, steps);
+        return new InstallResult(entryWritten ? GateExitCode.Success : GateExitCode.Partial, steps);
+    }
+
+    private bool WriteInstalledAppsEntry(List<StepOutcome> steps)
+    {
+        if (AppsEntry is null)
+        {
+            return true;
+        }
+
+        StepOutcome step = InstalledAppsEntry.Write(AppsEntry, _layout.InstallFolder, Time);
+        steps.Add(step);
+        return step.Ok;
     }
 
     // The rule set-device applies, plus the container the tray passed: the address's device node must be in it. A

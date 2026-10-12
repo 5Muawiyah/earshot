@@ -14,5 +14,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Earshot\Earshot.csproj" />
     <ProjectReference Include="..\..\src\Earshot.TestWindow\Earshot.TestWindow.csproj" />
+    <ProjectReference Include="..\..\src\Earshot.Setup\Earshot.Setup.csproj" />
   </ItemGroup>
 </Project>
