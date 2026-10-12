@@ -313,6 +313,7 @@ internal sealed record HistoryPageLayout(
     public const int PlotHeightAt96 = 120;
     public const int SurfacePaddingAt96 = 12;
     public const int YLabelWidthAt96 = 28;
+    public const int XLabelWidthAt96 = 40;
     public const int YLabelGapAt96 = 4;
     public const int AxisGapAt96 = 4;
     public const int LegendGapAt96 = 12;
@@ -338,7 +339,7 @@ internal sealed record HistoryPageLayout(
         y = back.Bottom + CardPlacement.Scale(DayGapAt96, dpi);
 
         int plotHeight = CardPlacement.Scale(PlotHeightAt96, dpi);
-        int yLabelWidth = CardPlacement.Scale(YLabelWidthAt96, dpi);
+        int yLabelWidth = TextFit.Grow(YLabelWidthAt96, dpi, textScale);
         int yLabelGap = CardPlacement.Scale(YLabelGapAt96, dpi);
         int axisGap = CardPlacement.Scale(AxisGapAt96, dpi);
         int legendGap = CardPlacement.Scale(LegendGapAt96, dpi);

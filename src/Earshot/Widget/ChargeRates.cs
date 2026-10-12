@@ -1,24 +1,22 @@
 namespace Earshot.Widget;
 
 // How fast a part charges, for ChargeEstimator: a rate learned from the owner's own live readings, or for the buds of one
-// model a seed from Apple's published figure, which is off until the owner confirms its wording.
+// model a seed from Apple's published figure.
 //
-// The seed. Apple's tech specs page for AirPods Pro 3 (https://support.apple.com/en-us/125135) is said to read "5 minutes
-// in the case provides around 1 hour of listening time", against "up to 8 hours" of listening on one charge with noise
-// cancellation. One hour of eight is 12.5% of a full charge in 5 minutes, which is 150 percentage points an hour. That
-// figure describes the quick start of a charge from low; a charge slows as it nears full, so a bud estimate seeded from it
-// can run ahead of the truth near the top until a learned rate replaces it. The wording could not be fetched from the
-// build machine (support.apple.com was not reachable), so it has not been confirmed: UseAppleBudSeed stays false, and no
-// bud is estimated until a rate is learned. The owner sets it true after reading the page and finding that wording.
-// AppleBudSeedModel is the product id the owner's own pair reports (PairedModel); that it is AirPods Pro 3 is the owner's
-// word, not a published fact, and is to be confirmed at the same time. No other model has a seed, and the case never has
-// one: the case is estimated only once a charge of it has been seen and a rate learned from it.
+// The seed. Apple's tech specs page for AirPods Pro 3 (https://support.apple.com/en-us/125135) reads "5 minutes in the
+// case provides around 1 hour of listening time", against "Up to 8 hours of listening time on a single charge with Active
+// Noise Cancellation enabled". Both were confirmed against that page on 12 October 2026. One hour of eight is 12.5% of a
+// full charge in 5 minutes, which is 150 percentage points an hour. That figure describes the quick start of a charge from
+// low; a charge slows as it nears full, so a bud estimate seeded from it can run ahead of the truth near the top until a
+// learned rate replaces it. AppleBudSeedModel is the product id the owner's own pair reports (PairedModel); that it is
+// AirPods Pro 3 is the owner's word, not a published fact. No other model has a seed, and the case never has one: the case
+// is estimated only once a charge of it has been seen and a rate learned from it.
 //
 // A learned rate replaces the seed for its model and part as soon as there is one.
 internal static class ChargeRates
 {
-    // Off until the owner has confirmed Apple's wording (above). The one switch for the seed.
-    public const bool UseAppleBudSeed = false;
+    // The one switch for the seed (above).
+    public const bool UseAppleBudSeed = true;
 
     // The product id the seed is for (see above).
     public const ushort AppleBudSeedModel = 0x2027;

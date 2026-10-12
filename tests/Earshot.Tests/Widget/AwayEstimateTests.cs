@@ -5,7 +5,7 @@ namespace Earshot.Tests.Widget;
 
 // Away from this PC, the estimate: a part charging at its last reading rises from it at its rate until 100 and stops, a
 // part that was not charging never rises, a clock behind the read time gives no rise, nothing falls, the case is never
-// estimated before a charge of it has been seen, and the buds are never estimated from the seed while it is off. All
+// estimated before a charge of it has been seen, and the buds are estimated from the seed, never the case, until a rate is learned. All
 // through BatteryFreshness.Shown, the one definition every surface reads, with the saved book handed in.
 [TestClass]
 public sealed class AwayEstimateTests
@@ -91,21 +91,41 @@ public sealed class AwayEstimateTests
     }
 
     [TestMethod]
-    public void TheAppleSeedOffGivesNoBudEstimateBeforeARateIsLearned()
+    public void TheAppleSeedIsOnByDefaultAndItsRateIsOneHourOfEightInFiveMinutes()
+    {
+        Assert.AreEqual(150.0, ChargeRates.For(Book(),ChargeRates.AppleBudSeedModel, ChargePart.Bud));
+    }
+
+    // Before any rate is learned, a bud charging at its last reading rises at the seed: ten minutes at 150 an hour is 25.
+    [TestMethod]
+    public void ABudChargingAtTheLastReadingRisesAtTheSeedBeforeARateIsLearned()
     {
         LastReadingBook book = Book(left: Saved(20, charging: true, model: ChargeRates.AppleBudSeedModel));
 
-        ShownPart off = BatteryFreshness.Shown(
+        ShownPart shown = BatteryFreshness.Shown(
             PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, false, false, ReadAt + TimeSpan.FromMinutes(10),
             new SavedBattery(book, ChargeRates.AppleBudSeedModel, null)).Left;
 
-        Assert.AreEqual(ReadingKind.Last, off.Kind);
-        Assert.AreEqual(20, off.Percent);
-        Assert.IsNull(ChargeRates.For(book, ChargeRates.AppleBudSeedModel, ChargePart.Bud), "The seed ships off until the owner confirms Apple's wording.");
+        Assert.AreEqual(ReadingKind.Estimated, shown.Kind);
+        Assert.AreEqual(45, shown.Percent);
     }
 
-    // What the switch would do once flipped: 150 points an hour (one hour of eight in five minutes), for that model's
-    // buds only. A learned rate replaces it.
+    // The case is never given the seed: with no case rate learned it stays at its last reading however long it has been.
+    [TestMethod]
+    public void TheCaseGetsNoEstimateFromTheSeedUntilAChargeOfItHasBeenSeen()
+    {
+        LastReadingBook book = Book(box: Saved(60, charging: true, model: ChargeRates.AppleBudSeedModel));
+
+        ShownPart shown = BatteryFreshness.Shown(
+            PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown, false, false, ReadAt + TimeSpan.FromHours(5),
+            new SavedBattery(book, ChargeRates.AppleBudSeedModel, null)).Case;
+
+        Assert.AreEqual(ReadingKind.Last, shown.Kind);
+        Assert.AreEqual(60, shown.Percent);
+        Assert.IsNull(ChargeRates.For(book, ChargeRates.AppleBudSeedModel, ChargePart.Case));
+    }
+
+    // 150 points an hour (one hour of eight in five minutes), for that model's buds only. A learned rate replaces it.
     [TestMethod]
     public void TheAppleSeedOnlyEverAppliesToItsModelsBudsAndALearnedRateReplacesIt()
     {
@@ -113,6 +133,7 @@ public sealed class AwayEstimateTests
         Assert.AreEqual(150.0, ChargeRates.For(book, ChargeRates.AppleBudSeedModel, ChargePart.Bud, useAppleBudSeed: true));
         Assert.IsNull(ChargeRates.For(book, ChargeRates.AppleBudSeedModel, ChargePart.Case, useAppleBudSeed: true));
         Assert.IsNull(ChargeRates.For(book, Model, ChargePart.Bud, useAppleBudSeed: true), "No other model gets a seed.");
+        Assert.IsNull(ChargeRates.For(book, ChargeRates.AppleBudSeedModel, ChargePart.Bud, useAppleBudSeed: false));
 
         LastReadingBook learned = Book(rates: Rate(ChargePart.Bud, 45, ChargeRates.AppleBudSeedModel));
         Assert.AreEqual(45.0, ChargeRates.For(learned, ChargeRates.AppleBudSeedModel, ChargePart.Bud, useAppleBudSeed: true));
