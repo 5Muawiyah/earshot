@@ -291,6 +291,33 @@ public sealed class ConnectEveryStateTests
         Assert.IsLessThanOrEqualTo(Limit + TimeSpan.FromSeconds(1), elapsed);
     }
 
+    // The budget cuts the wait for the gate's run after the run was started (a task-run step and no end), so the allow may still
+    // enable the nodes after the clean-up has read them Blocked. The clean-up sends the block anyway, to run behind the allow.
+    [TestMethod]
+    public void AnAllowCutByTheBudgetAfterItsRunStartedIsBlockedBehindWhateverTheNodesRead()
+    {
+        using var h = NodesBlockedAndAway();
+        h.Block.OnAllow = async ct =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMinutes(1), h.Time, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return ControllerResult.Fail("Stopped waiting for the gate", [StepOutcomes.FromHResult(CoordinatorRules.TaskRunStepPrefix + "allow", 0)]);
+            }
+
+            return ControllerResult.Ok("Allowed");
+        };
+
+        ToggleReport report = Await(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)), out _, within: TimeSpan.FromMinutes(2));
+
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        Assert.IsTrue(h.Coordinator.AllowMayLand, "The cut run may still enable the nodes.");
+        Assert.AreEqual("block", h.Block.Calls.LastOrDefault(), "The clean-up left a possibly landing allow unanswered: " + string.Join(", ", h.Block.Calls));
+    }
+
     [TestMethod]
     public void AStatusReadThatStallsIsCutByTheBudgetNotByItsOwnLongerOne()
     {

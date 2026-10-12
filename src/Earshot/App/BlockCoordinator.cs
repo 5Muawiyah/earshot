@@ -24,15 +24,18 @@ namespace Earshot.App;
 // block waits for the one in flight. Cancelling an operation cancels its waits for the device and for reads,
 // never a request already sent, and its task completes only after its clean-up (a re-block included) has finished.
 //
-// Gate changes are waited for. An allow, block, protect-on, protect-off or set-device is never cancelled once
-// sent: the gate runs it whatever the tray does, a node read taken before it ends can say Blocked just before an
+// Gate changes are waited for. A block, protect-on, protect-off or set-device is never cancelled once sent, and
+// neither is an allow by a caller's cancel; only a connect's own 20 second budget ends the wait for its allow. The
+// gate runs a request whatever the tray does, a node read taken before it ends can say Blocked just before an
 // allow lands, and a block sent while a protect verb still runs would disable the nodes under a Bluetooth service
 // change, which the order below forbids. A cancellation is acted on at the next step. A result that does not show
-// the run ended (the gate's wait ran out, or a state read failed while it was polled) may still run for
+// the run ended (the gate's wait ran out or was cut, or a state read failed while it was polled) may still run for
 // UnsettledGateWindow: no block is sent while a protect verb may still run, no block or allow is sent while a
 // set-device may still move the pin (the gate acts on whichever device it pins when the request runs), the pin
 // does not move while any change may still run, a Block at boot setting read as off is not taken as settled while
-// a change to it may still land, and the state is read again until the window has passed.
+// a change to it may still land, and the state is read again until the window has passed. A connect's clean-up and
+// the block before closing do not wait for an allow that may still land: they send the block anyway, and the
+// gate's task runs it after the allow (MultipleInstances Queue).
 //
 // Connect.
 //   1. ConnectAsync. Confirmed: the AirPods are in use, the nodes stay enabled, protection is checked again.
@@ -2182,12 +2185,16 @@ internal sealed partial class BlockCoordinator : IDisposable
 
             if (status?.State == BlockState.Blocked)
             {
-                if (AllowMayLand)
+                // An allow whose run was started and whose end was not seen (a wait the budget cut, say) may still enable the
+                // nodes after this read. The block is sent anyway: the gate's task queues it behind the allow (MultipleInstances
+                // Queue), so it runs after it, and nothing is left for the read again to find.
+                if (!(cleanup.AllowIssued && AllowMayLand))
                 {
-                    _log.Warn("connect clean-up: the nodes read Blocked, but the allow may still enable them, so they are read again until " + Utc(_allowSettlesAt) + ".");
+                    return ConnectCleanUpOutcome.Blocked;
                 }
 
-                return ConnectCleanUpOutcome.Blocked;
+                _log.Warn("connect clean-up: the nodes read Blocked, but this connect's allow may still enable them until " + Utc(_allowSettlesAt) +
+                    ", so the block is sent to run behind it.");
             }
 
             // Only an allow this operation issued is undone without a good node read.
@@ -2198,7 +2205,8 @@ internal sealed partial class BlockCoordinator : IDisposable
             }
 
             _log.Info("connect clean-up: blocking the nodes again.");
-            ProtectionRun run = await RunBlockSequenceAsync(BlockReason.ConnectCleanUp, request.Container, request.Place, CancellationToken.None, cleanup.AllowNonce);
+            ProtectionRun run = await RunBlockSequenceAsync(BlockReason.ConnectCleanUp, request.Container, request.Place, CancellationToken.None, cleanup.AllowNonce,
+                behindAllow: cleanup.AllowIssued && AllowMayLand);
             steps.AddRange(run.Steps);
             if (run.Skipped is { } why)
             {
@@ -2428,8 +2436,11 @@ internal sealed partial class BlockCoordinator : IDisposable
 
     // Block goal: protection first while the nodes are enabled, then the nodes, with the checks for why the
     // block is being issued made again just before it is sent.
-    private Task<ProtectionRun> RunBlockSequenceAsync(BlockReason reason, Guid container, CardPlace place, CancellationToken ct, string? allowNonce = null) =>
-        RunProtectionAsync(ProtectionGoal.Block, Settings.ProtectAudioQuality, place, notice: true, ct, new BlockCheck(reason, container, allowNonce));
+    // behindAllow: an allow this tray sent may still land, so nodes that read Blocked are blocked anyway, once, for the gate's
+    // task to run the block after the allow (MultipleInstances Queue).
+    private Task<ProtectionRun> RunBlockSequenceAsync(BlockReason reason, Guid container, CardPlace place, CancellationToken ct, string? allowNonce = null,
+        bool behindAllow = false) =>
+        RunProtectionAsync(ProtectionGoal.Block, Settings.ProtectAudioQuality, place, notice: true, ct, new BlockCheck(reason, container, allowNonce, behindAllow));
 
     // Steps ProtectionPolicy for goal until it is done, running each action and refreshing the facts after it.
     // Every gate change is waited for (see the class comment).
@@ -2477,7 +2488,14 @@ internal sealed partial class BlockCoordinator : IDisposable
                 ct.ThrowIfCancellationRequested();
             }
 
-            var facts = new ProtectionFacts(CoordinatorRules.PhaseOf(run.Status), run.Services?.State ?? AudioProtectionState.Unknown, protect, intentPending);
+            NodePhase nodes = CoordinatorRules.PhaseOf(run.Status);
+            if (check is { BehindAllow: true } && nodes == NodePhase.Blocked && !progress.NodeChangeTried)
+            {
+                // Nodes that read Blocked under an allow that may still land may be enabled at any moment: blocked once more.
+                nodes = NodePhase.Mixed;
+            }
+
+            var facts = new ProtectionFacts(nodes, run.Services?.State ?? AudioProtectionState.Unknown, protect, intentPending);
             ProtectionAction action = ProtectionPolicy.Next(goal, facts, progress);
             if (blockGoal && (_closing || _sessionEnding || _handingBack || ct.IsCancellationRequested) && action is ProtectionAction.ReadServices or ProtectionAction.ProtectOn)
             {
@@ -2606,8 +2624,9 @@ internal sealed partial class BlockCoordinator : IDisposable
         return run;
     }
 
-    // Sends the allow and waits for its result, never cancelled (see the class comment). An allow whose end was not
-    // seen may still enable the nodes, so the state is read again until UnsettledGateWindow has passed.
+    // Sends the allow and waits for its result, never cancelled by a caller (see the class comment); a connect's budget may end
+    // the wait. An allow whose end was not seen may still enable the nodes, so the state is read again until
+    // UnsettledGateWindow has passed, and a connect's clean-up blocks behind it.
     //
     // Every allow goes through here, and none is sent once a session end is in progress, whatever the caller checked
     // before: an operation that was already past its own checks (a status read still running when
@@ -2758,7 +2777,7 @@ internal sealed partial class BlockCoordinator : IDisposable
             return new BlockDecision("the node state is not known");
         }
 
-        if (automatic && !CoordinatorRules.NodesEnabled(status))
+        if (automatic && !CoordinatorRules.NodesEnabled(status) && !(check.BehindAllow && AllowMayLand))
         {
             return new BlockDecision("the nodes are not known to be enabled");
         }
@@ -3723,15 +3742,12 @@ internal sealed partial class BlockCoordinator : IDisposable
             return false;
         }
 
-        if (!status.BlockAtBoot || !CoordinatorRules.NodesEnabled(status))
+        // An allow this tray sent that may still land is blocked behind, whatever the nodes read: the gate's task queues the block
+        // after the allow, so Earshot does not close leaving nodes that may be enabled with nothing to block them until it runs again.
+        bool allowMayLand = status.BlockAtBoot && AllowMayLand;
+        if (!status.BlockAtBoot || (!CoordinatorRules.NodesEnabled(status) && !allowMayLand))
         {
-            if (status.BlockAtBoot && AllowMayLand)
-            {
-                _log.Warn("Closing: the nodes read " + status.State + ", but an allow this tray sent may still enable them until " + Utc(_allowSettlesAt) +
-                    ", and nothing blocks them again until Earshot runs again or the BootBlock task runs.");
-                ClosingNotice = ClosedBeforeChangeEndedMessage;
-            }
-            else if (!status.BlockAtBoot && BootSettingMayChange && CoordinatorRules.NodesEnabled(status))
+            if (!status.BlockAtBoot && BootSettingMayChange && CoordinatorRules.NodesEnabled(status))
             {
                 _log.Warn("Closing: Block at boot reads " + (status.BlockAtBootKnown ? "off" : "not known") + ", but the change to it this tray sent may still turn it on until " +
                     Utc(_bootSettingSettlesAt) + ", and the nodes read " + status.State + ". Nothing blocks them again until Earshot runs again or the BootBlock task runs.");
@@ -3740,6 +3756,12 @@ internal sealed partial class BlockCoordinator : IDisposable
 
             _log.Info("Closing: nothing to block (" + Describe(status) + ").");
             return false;
+        }
+
+        if (!CoordinatorRules.NodesEnabled(status))
+        {
+            _log.Warn("Closing: the nodes read " + status.State + ", but an allow this tray sent may still enable them until " + Utc(_allowSettlesAt) +
+                ", so the block is sent to run behind it.");
         }
 
         Guid container = WatchedContainer();
@@ -3767,7 +3789,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         _log.Info("Closing: the nodes are enabled and the AirPods are not in use. Blocking before Earshot closes (" + Utc(_time.GetUtcNow()) + ").");
-        ProtectionRun run = await RunBlockSequenceAsync(BlockReason.Closing, container, CardPlace.NearTray, ct);
+        ProtectionRun run = await RunBlockSequenceAsync(BlockReason.Closing, container, CardPlace.NearTray, ct, behindAllow: allowMayLand);
         if (run.Skipped is { } skipped)
         {
             if (skipped is ProtectMayRunReason or PinMayMoveReason)
@@ -3897,7 +3919,7 @@ internal sealed partial class BlockCoordinator : IDisposable
     }
 
     // Why a Block sequence runs and which device its render check watches.
-    private readonly record struct BlockCheck(BlockReason Reason, Guid Container, string? AllowNonce = null);
+    private readonly record struct BlockCheck(BlockReason Reason, Guid Container, string? AllowNonce = null, bool BehindAllow = false);
 
     // What the last look before a block decided: Skip says why no block is sent; Plain says the block is the plain one, which
     // does not refuse a link (the idle block's refusal was judged stuck or has run out of time); Notice is what the card says

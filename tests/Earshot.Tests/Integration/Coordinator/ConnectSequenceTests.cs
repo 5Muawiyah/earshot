@@ -12,6 +12,7 @@ public sealed class ConnectSequenceTests
 {
     private static readonly string[] Allow = ["allow"];
     private static readonly string[] AllowThenBlock = ["allow", "block"];
+    private static readonly string[] AllowThenBlockTwice = ["allow", "block", "block"];
     private static readonly string[] BlockOnly = ["block"];
     private static readonly string[] ConnectingThenConnected = ["Connecting", "Connected"];
     private static readonly string[] ConnectingAllowingConnected =
@@ -195,7 +196,8 @@ public sealed class ConnectSequenceTests
         ToggleReport report = h.Toggle(connect: true);
 
         Assert.AreEqual(OpStatus.Failed, report.Status);
-        CollectionAssert.AreEqual(Allow, h.Block.Calls, "The nodes read Blocked after the allow, so there is nothing to block yet.");
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls,
+            "The nodes read Blocked, but the connect's own allow may still land, so the clean-up sends the block to run behind it in the gate's queue.");
         Assert.IsTrue(h.Coordinator.AllowMayLand);
         Assert.IsTrue(h.Coordinator.RecheckRunning, "Nothing reads the nodes again for an allow that may still land.");
 
@@ -203,9 +205,10 @@ public sealed class ConnectSequenceTests
         Task<ControllerResult> pin = h.Coordinator.ChangeDeviceAsync(Devices.Address);
         h.Pump();
         Assert.AreEqual(BlockCoordinator.ChangeStillRunningMessage, pin.GetAwaiter().GetResult().UserMessage);
-        CollectionAssert.AreEqual(Allow, h.Block.Calls);
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
 
-        // The gate enables the nodes a little later, with no notification for the tray.
+        // The gate enables the nodes a little later, with no notification for the tray (as if the queued block had not taken):
+        // the read again still blocks them.
         h.Advance(TimeSpan.FromSeconds(20));
         h.Block.Status = Statuses.Allowed();
         h.Monitor.Set(Devices.Idle(7));
@@ -213,7 +216,7 @@ public sealed class ConnectSequenceTests
         Assert.IsTrue(h.Coordinator.IdleWaitRunning, "The read after the allow landed did not start the idle rule.");
         h.Advance(BlockCoordinator.IdleGrace);
 
-        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
+        CollectionAssert.AreEqual(AllowThenBlockTwice, h.Block.Calls);
         Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
 
         // Once the window has passed, the device can be changed again and nothing is read again.
@@ -222,6 +225,30 @@ public sealed class ConnectSequenceTests
         pin = h.Coordinator.ChangeDeviceAsync(Devices.Address);
         h.Pump();
         Assert.AreEqual(OpStatus.Success, pin.GetAwaiter().GetResult().Status);
+    }
+
+    // Exit straight after a connect whose allow may still land: the nodes read Blocked, but the closing block is sent anyway, to
+    // run behind the allow in the gate's queue, rather than closing with the nodes free to be enabled until the next start.
+    [TestMethod]
+    public void ExitWhileAnAllowMayStillLandBlocksBehindItRatherThanClosingUnblocked()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.NotPresent(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
+        h.Block.OnAllow = _ => Task.FromResult(Results.GateWaitRanOut("Gate", "The boot block did not finish in time. Try again."));
+        h.Toggle(connect: true);
+        Assert.IsTrue(h.Coordinator.AllowMayLand);
+        int before = h.Block.Calls.Count;
+
+        h.Coordinator.BeginShutdown();
+        Task idle = h.Coordinator.WhenIdleAsync();
+        h.Pump();
+
+        Assert.IsTrue(idle.IsCompleted);
+        Assert.AreEqual("block", h.Block.Calls.Skip(before).LastOrDefault(), "Exit closed without a block while the allow could still land: " + string.Join(", ", h.Block.Calls));
+        Assert.AreNotEqual(BlockCoordinator.ClosedBeforeChangeEndedMessage, h.Coordinator.ClosingNotice);
     }
 
     [TestMethod]
