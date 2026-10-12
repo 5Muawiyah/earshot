@@ -3216,8 +3216,9 @@ internal sealed partial class BlockCoordinator : IDisposable
             return ("an operation is in flight", IdleVerdict.Held);
         }
 
-        // The owner is connecting in Windows' settings; the idle rule starts again when the window ends.
-        if (WindowsConnectOpen)
+        // The owner is connecting in Windows' settings; the idle rule starts again when the window ends. A link known to be
+        // foreign (it formed while the session was locked or unreadable) is not held for the window: it is checked below.
+        if (WindowsConnectOpen && !IsForeignLink())
         {
             return ("a Connect in Windows window is open", IdleVerdict.Held);
         }
