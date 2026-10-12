@@ -12,7 +12,8 @@ internal sealed partial class BlockCoordinator
     private HashSet<Guid>? _knownGroups;
     private bool _newDeviceCheckPending;
 
-    // A pair made in Windows' settings, or by a Fix run started from Setup or the install script, arrives as a new device group.
+    // A pair made in Windows' settings, or by a Fix run started from Setup or the install script, is expected to arrive as a new
+    // device group (reasoned from how pairing adds a device container; no live run has shown it).
     // The check for AirPods Earshot does not protect then runs again, after NewDeviceSettle, instead of waiting for the next
     // sign-in. The card about them keeps its once-per-run rule. UI thread only.
     private void NoteNewDeviceGroups(DeviceSnapshot snapshot)
@@ -39,6 +40,13 @@ internal sealed partial class BlockCoordinator
             await Task.Delay(NewDeviceSettle, _time, CancellationToken.None);
             if (_closing || _disposed)
             {
+                return;
+            }
+
+            // A Fix connection run pairing the AirPods again makes the new group itself; it adopts the pair or says it could not.
+            if (_services.RePair.IsOpen)
+            {
+                _log.Info("A new device appeared while a Fix connection run is pairing the AirPods again; that run answers for it.");
                 return;
             }
 

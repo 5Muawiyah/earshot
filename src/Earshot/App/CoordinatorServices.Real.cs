@@ -37,6 +37,10 @@ internal sealed class WtsSessionState : ISessionState
                 {
                     _log.Warn("The session lock state could not be read: " + read.Step + ", code " + read.Code + ", flags " + read.Flags + ". It counts as locked.");
                 }
+                else if (read.Step.Length > 0)
+                {
+                    _log.Info("The session counts as locked: " + read.Step + ", code " + read.Code + ", flags " + read.Flags + ".");
+                }
             }
 
             return state;

@@ -88,6 +88,23 @@ public sealed class FixExitPathTests
         Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
     }
 
+    // The first step's administrator run ended with a failure code, so its changes may be only partly made: a no at the second
+    // question then is a failed fix, not "the changes you agreed to were made".
+    [TestMethod]
+    public async Task ADeclinedSecondOkAfterAFirstRunThatFailedIsAFailureNotAClaimOfChanges()
+    {
+        using FixRig rig = Arranged();
+        rig.Elevator.Result = (_, _) => new ElevatedRun(5, StepOutcomes.FromWin32("runas", 0));
+        rig.Prompter.SayOk();
+        rig.Prompter.SayCancel();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome, string.Join("; ", result.Lines));
+        Assert.IsFalse(result.Lines.Any(l => l.Contains("were made", StringComparison.Ordinal)), string.Join("; ", result.Lines));
+        Expect.Same(rig.GateFake.Calls, "block");
+    }
+
     [TestMethod]
     public async Task ASecondOkThatTimesOutEndsInTheBlock()
     {

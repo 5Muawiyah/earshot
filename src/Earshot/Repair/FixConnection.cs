@@ -112,6 +112,9 @@ internal static class FixConnection
     {
         public bool Touched { get; set; }
 
+        // The first question's administrator run ended with exit code 0, so the changes it listed were made.
+        public bool FirstRunSucceeded { get; set; }
+
         public bool Adopted { get; set; }
 
         // A new pair was paired and offered for adoption, and the adoption has not succeeded. The closing block can only reach
@@ -192,6 +195,7 @@ internal static class FixConnection
             }
 
             state.Touched = true;
+            state.FirstRunSucceeded = exit == 0;
             string exitName = GateExitCodes.NameOf(exit) ?? "unknown";
             lines.Add("The administrator run ended: " + exitName + " (" + exit.ToString(CultureInfo.InvariantCulture) + ").");
             AddChangeLines(lines, host, file.Sha256);
@@ -217,10 +221,18 @@ internal static class FixConnection
         FixConsent? second = dialog.AskRePair(target is null ? [] : [target.Name], removeFirst: target is not null);
         if (second is null)
         {
-            if (state.Touched)
+            if (state.Touched && state.FirstRunSucceeded)
             {
                 lines.Add("Declined. The changes you agreed to first were made. The AirPods were not removed or paired again.");
                 return FixOutcome.DeclinedAfterChanges;
+            }
+
+            if (state.Touched)
+            {
+                // The first step's run did not end well, so some of its changes may not have been made: not a declined fix but a
+                // failed one, whose result lines above say how far it got.
+                lines.Add("Declined. The first step did not finish, so its changes may be only partly made. The AirPods were not removed or paired again.");
+                return FixOutcome.Failed;
             }
 
             lines.Add("Declined. The AirPods were left as they are.");

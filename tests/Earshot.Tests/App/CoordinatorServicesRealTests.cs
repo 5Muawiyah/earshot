@@ -68,6 +68,13 @@ public sealed class CoordinatorServicesRealTests
     {
         WtsSession.Reading read = WtsSession.Read();
 
+        // A session that is not active (a service session, as a hosted runner's may be) reads locked by its state; the read
+        // itself worked, but whether an active, unlocked session reads unlocked cannot be seen in it.
+        if (read.Step.StartsWith("SessionState is not WTSActive", StringComparison.Ordinal))
+        {
+            Assert.Inconclusive("This session is not active (state " + read.Code + "), so it reads locked by its state.");
+        }
+
         Assert.AreEqual(string.Empty, read.Step, "The read stopped at " + read.Step + " with code " + read.Code);
         Assert.IsNotNull(read.Locked, "SessionFlags was " + read.Flags);
     }
