@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Widget;
@@ -21,9 +22,20 @@ internal sealed class FakeUiaElement : IUIAutomationElement
     private readonly string? _className;
     private readonly int _boundingRectangleHResult;
     private readonly int _classNameHResult;
+    private readonly int? _processId;
+    private readonly int _processIdHResult;
 
-    public FakeUiaElement(Rectangle? bounds, bool offscreen = false, string? automationId = null, int boundingRectangleHResult = 0, string? className = null, int classNameHResult = 0)
+    // UIA_ProcessIdPropertyId, from UIAutomationClient.h (the Windows SDK 10.0.26100.0 header on this machine and Microsoft Learn's
+    // "Automation Element Property Identifiers" agree on 30002). Written here on purpose, so a wrong value in the product's own
+    // constant is caught by the test that compares the two.
+    internal const int ProcessIdPropertyId = 30002;
+
+    public FakeUiaElement(
+        Rectangle? bounds, bool offscreen = false, string? automationId = null, int boundingRectangleHResult = 0, string? className = null, int classNameHResult = 0,
+        int? processId = null, int processIdHResult = 0)
     {
+        _processId = processId;
+        _processIdHResult = processIdHResult;
         _bounds = bounds;
         _offscreen = offscreen;
         _automationId = automationId;
@@ -80,6 +92,12 @@ internal sealed class FakeUiaElement : IUIAutomationElement
         {
             value = _classNameHResult < 0 ? null : _className;
             return _classNameHResult;
+        }
+
+        if (propertyId == ProcessIdPropertyId)
+        {
+            value = _processIdHResult < 0 ? null : _processId;
+            return _processIdHResult;
         }
 
         value = null;
@@ -456,6 +474,160 @@ public sealed class UiaTaskbarReaderTests
         // successful read, before any per-element releases TryReadElements adds on top.
         Assert.IsGreaterThanOrEqualTo(4, releaseCalls,
             "TryReadOccupants must release every one of its own four per-read COM objects, not just tolerate a fake tolerating zero.");
+    }
+
+    // ----- Elements of this process are never occupants -----
+
+    private const int Own = 4001;
+
+    [TestMethod]
+    public void AnElementOfTheGivenProcessIsNotAnOccupantAndAnotherProcessesElementIs()
+    {
+        var gauge = new FakeUiaElement(new Rectangle(1596, 1036, 74, 40), className: "WindowsForms10.Window.8.app.0.1_r1_ad1", processId: Own);
+        var button = new FakeUiaElement(new Rectangle(807, 1032, 44, 48), processId: 5000);
+        var noProcess = new FakeUiaElement(new Rectangle(851, 1032, 44, 48));
+        var array = new FakeUiaElementArray([gauge, button, noProcess]);
+
+        bool ok = UiaTaskbarReader.TryReadElements(array, Rectangle.Empty, NoRelease, Own, out List<Rectangle> occupied, out _, out _, out StepOutcome? failure);
+
+        Assert.IsTrue(ok, failure?.CodeName);
+        CollectionAssert.AreEqual(new[] { new Rectangle(807, 1032, 44, 48), new Rectangle(851, 1032, 44, 48) }, occupied, "An element with no process id is not known to be ours.");
+    }
+
+    [TestMethod]
+    public void AnElementOfTheGivenProcessIsNeitherTheStartButtonNorPartOfTheNotificationArea()
+    {
+        var ownStart = new FakeUiaElement(new Rectangle(0, 0, 40, 40), automationId: "StartButton", processId: Own);
+        var ownTray = new FakeUiaElement(new Rectangle(1000, 0, 40, 40), className: "SystemTray.NormalButton", processId: Own);
+        var tray = new FakeUiaElement(new Rectangle(1800, 0, 40, 40), className: "SystemTray.NormalButton", processId: 5000);
+
+        bool ok = UiaTaskbarReader.TryReadElements(
+            new FakeUiaElementArray([ownStart, ownTray, tray]), Rectangle.Empty, NoRelease, Own, out _, out Rectangle? start, out Rectangle? area, out _);
+
+        Assert.IsTrue(ok);
+        Assert.IsNull(start);
+        Assert.AreEqual(new Rectangle(1800, 0, 40, 40), area);
+    }
+
+    // The overloads production calls name no process: they mean this one.
+    [TestMethod]
+    public void TheReadWithNoProcessGivenSkipsTheElementsOfThisProcess()
+    {
+        var gauge = new FakeUiaElement(new Rectangle(1596, 1036, 74, 40), processId: Environment.ProcessId);
+        var button = new FakeUiaElement(new Rectangle(807, 1032, 44, 48), processId: 5000);
+
+        bool ok = UiaTaskbarReader.TryReadElements(new FakeUiaElementArray([gauge, button]), Rectangle.Empty, NoRelease, out List<Rectangle> occupied, out _, out _);
+
+        Assert.IsTrue(ok);
+        CollectionAssert.AreEqual(new[] { new Rectangle(807, 1032, 44, 48) }, occupied);
+    }
+
+    [TestMethod]
+    public void AProcessIdThatCannotBeReadFailsTheWholeRead()
+    {
+        const int EFail = unchecked((int)0x80004005);
+        var element = new FakeUiaElement(new Rectangle(1774, 1032, 24, 48), processIdHResult: EFail);
+
+        bool ok = UiaTaskbarReader.TryReadElements(new FakeUiaElementArray([element]), Rectangle.Empty, NoRelease, Own, out _, out _, out _, out StepOutcome? failure);
+
+        Assert.IsFalse(ok, "An element whose process is not known to be ours is not known to be free space either.");
+        Assert.AreEqual("uia:get-cached-property:process-id", failure!.Step);
+        Assert.AreEqual(EFail, failure.Code);
+    }
+
+    // Read through reflection for the reason AutomationElementModeFullMatchesTheHeaderValue gives.
+    [TestMethod]
+    public void TheProcessIdPropertyMatchesTheHeaderValue()
+    {
+        FieldInfo field = typeof(Earshot.Interop.UiAutomation).GetField("UIA_ProcessIdPropertyId", BindingFlags.NonPublic | BindingFlags.Static)!;
+        Assert.AreEqual(FakeUiaElement.ProcessIdPropertyId, field.GetRawConstantValue());
+    }
+
+    // The boundary itself, with real windows: a window owned by another is listed among its owner's descendants by UI Automation,
+    // which is how the gauge (the taskbar's owned window) came to be read as an occupant of the bar it sits on. Two forms of this
+    // process on a private desktop, the second owned by the first the way the gauge is owned; the real reader reads the first
+    // several times. Told no process is its own it finds the owned form's rectangle; told this one it does not.
+    [TestMethod]
+    public void TheRealReaderFindsAnOwnedWindowAmongItsOwnersDescendantsUnlessItIsToldTheWindowIsItsOwn()
+    {
+        Phase5.CardDesktop.Run(desktop =>
+        {
+            using var owner = new Form { Text = "stability-owner", StartPosition = FormStartPosition.Manual, Bounds = new Rectangle(100, 100, 600, 300), ShowInTaskbar = false };
+            using var owned = new Form
+            {
+                Text = "stability-owned", FormBorderStyle = FormBorderStyle.None, ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
+                Bounds = new Rectangle(300, 200, 74, 40),
+            };
+            owner.Show();
+            owned.Show();
+            _ = NativeMethods.SetWindowLongPtrW(owned.Handle, NativeMethods.GWLP_HWNDPARENT, owner.Handle);
+            Application.DoEvents();
+            Assert.IsTrue(NativeMethods.GetWindowRect(owned.Handle, out RECT ownedRect));
+            Rectangle ownedBounds = Rectangle.FromLTRB(ownedRect.left, ownedRect.top, ownedRect.right, ownedRect.bottom);
+
+            List<Rectangle> unfiltered = ReadOwnerOnItsOwnThread(owner.Handle, desktop, ownProcessId: 0, out StepOutcome? unfilteredFailure);
+            Assert.IsNull(unfilteredFailure, unfilteredFailure?.CodeName + " " + unfilteredFailure?.Detail);
+            List<Rectangle> filtered = ReadOwnerOnItsOwnThread(owner.Handle, desktop, Environment.ProcessId, out StepOutcome? filteredFailure);
+            Assert.IsNull(filteredFailure, filteredFailure?.CodeName + " " + filteredFailure?.Detail);
+
+            Assert.IsTrue(
+                unfiltered.Any(r => Near(r, ownedBounds)),
+                "Before the filter the owned form is listed among the owner's descendants: " + string.Join(" ", unfiltered) + " owned=" + ownedBounds);
+            Assert.IsFalse(
+                filtered.Any(r => Near(r, ownedBounds)),
+                "Told this process's windows are its own, the reader does not count the owned form: " + string.Join(" ", filtered));
+            Assert.IsLessThan(unfiltered.Count, filtered.Count);
+
+            owned.Hide();
+            Application.DoEvents();
+            List<Rectangle> hidden = ReadOwnerOnItsOwnThread(owner.Handle, desktop, ownProcessId: 0, out _);
+            Assert.IsFalse(hidden.Any(r => Near(r, ownedBounds)), "A hidden owned window is not listed, which is what made the gauge flip.");
+        });
+    }
+
+    private static bool Near(Rectangle a, Rectangle b) =>
+        Math.Abs(a.X - b.X) <= 2 && Math.Abs(a.Y - b.Y) <= 2 && Math.Abs(a.Width - b.Width) <= 2 && Math.Abs(a.Height - b.Height) <= 2;
+
+    // The real reader on a thread of its own (UI Automation must be called from a thread that owns no window), bound to the
+    // desktop the forms are on, while this thread keeps pumping so the forms answer UI Automation.
+    private static List<Rectangle> ReadOwnerOnItsOwnThread(nint ownerHandle, nint desktop, int ownProcessId, out StepOutcome? failure)
+    {
+        List<Rectangle>? occupied = null;
+        StepOutcome? readFailure = null;
+        ExceptionDispatchInfo? thrown = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                Phase5.CardDesktop.BindCurrentThread(desktop);
+                var reader = new UiaTaskbarReader();
+                WidgetRealSurfaceGuardTests.AllowRealConstruction(WidgetRealSurfaceGuardTests.RealWidgetSurface.TaskbarReader);
+                bool ok = reader.TryReadOccupants(
+                    ownerHandle, Rectangle.Empty, Earshot.Audio.ComRelease.Rcw, ownProcessId, out List<Rectangle> found, out _, out _, out StepOutcome? problem);
+                occupied = ok ? found : null;
+                readFailure = problem;
+            }
+            catch (Exception ex)
+            {
+                thrown = ExceptionDispatchInfo.Capture(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Earshot UIA owned-window test",
+        };
+        thread.SetApartmentState(ApartmentState.MTA);
+        thread.Start();
+        var watch = Stopwatch.StartNew();
+        while (!thread.Join(10))
+        {
+            Application.DoEvents();
+            Assert.IsLessThan(20_000, watch.ElapsedMilliseconds, "The reader did not finish in time.");
+        }
+
+        thrown?.Throw();
+        failure = readFailure;
+        return occupied ?? [];
     }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

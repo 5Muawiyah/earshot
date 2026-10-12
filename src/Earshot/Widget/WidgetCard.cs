@@ -430,7 +430,9 @@ internal sealed partial class WidgetCard : Form
                 actionWidth = new GraphicsTextMeasure(measure, _type).Width(setup.Buttons[0].Label, CardPlacement.Scale(14, _dpi)) + (2 * CardPlacement.Scale(SettingsPageLayout.ButtonPaddingAt96, _dpi));
             }
 
-            int captionWidth = Math.Max(1, surfaceWidth - padding - CardPlacement.Scale(WidgetCardLayout.UpdatesTileAt96, _dpi) - (3 * gap) - actionWidth);
+            // While a check runs there is no action; the turning arc takes its place, and the words stop short of it.
+            int spinnerWidth = setup.Buttons.Count != 1 && setup.Icon == SetupIcon.Spinner ? CardPlacement.Scale(WidgetCardLayout.StatusIconAt96, _dpi) : 0;
+            int captionWidth = Math.Max(1, surfaceWidth - padding - CardPlacement.Scale(WidgetCardLayout.UpdatesTileAt96, _dpi) - (3 * gap) - actionWidth - spinnerWidth);
             subLines = CardPaint.Lines(measure, UpdatesCaptionText(setup), captionWidth, _type, CardPlacement.Scale(12, _dpi), bold: false);
         }
 
@@ -440,7 +442,8 @@ internal sealed partial class WidgetCard : Form
             int titlePadding = CardPlacement.Scale(SettingsPageLayout.RowPadLeftAt96 + SettingsPageLayout.RowPadRightAt96, _dpi);
             int titleGap = CardPlacement.Scale(WidgetCardLayout.StatusIconGapAt96, _dpi);
             int titleSurface = CardPlacement.Scale(SubPageFrame.WidthAt96, _dpi) - (2 * CardPlacement.Scale(SettingsPageLayout.BodySideAt96, _dpi));
-            int titleWidth = Math.Max(1, titleSurface - titlePadding - CardPlacement.Scale(WidgetCardLayout.UpdatesTileAt96, _dpi) - (3 * titleGap) - actionWidth);
+            int titleWidth = Math.Max(1, titleSurface - titlePadding - CardPlacement.Scale(WidgetCardLayout.UpdatesTileAt96, _dpi) - (3 * titleGap) - actionWidth
+                - (setup.Buttons.Count != 1 && setup.Icon == SetupIcon.Spinner ? CardPlacement.Scale(WidgetCardLayout.StatusIconAt96, _dpi) : 0));
             titleLines = CardPaint.Lines(measure, UpdatesTitleText(updateRows), titleWidth, _type, CardPlacement.Scale(14, _dpi), bold: true);
         }
 
@@ -1208,8 +1211,9 @@ internal sealed partial class WidgetCard : Form
         CardColours colours = Colours;
         if (shown.Percent is not { } percent)
         {
-            // Words, not a number: in the body size, which at a large text size gives way to the column's width where the number's would not.
-            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Body, StringAlignment.Center);
+            // Words, not a number: in the body size. Where the column is too narrow for them on one line they wrap to the two lines
+            // it has room for before the size gives way.
+            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Body, StringAlignment.Center, wrap: true);
             return;
         }
 
@@ -1367,9 +1371,9 @@ internal sealed partial class WidgetCard : Form
         && (_model.Refresh?.Outcome == BatteryRefreshOutcome.BluetoothOff
             || (_model.Snapshot.Watcher == WidgetWatcherState.Stopped && _model.Snapshot.WatcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode));
 
-    private void DrawText(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role, StringAlignment horizontal)
+    private void DrawText(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role, StringAlignment horizontal, bool wrap = false)
     {
-        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = horizontal, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+        using var format = new StringFormat(wrap ? 0 : StringFormatFlags.NoWrap) { Alignment = horizontal, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
         using Font font = FittingRoleFont(g, text, bounds, role, format);
         using var brush = new SolidBrush(colour);
         g.DrawString(text, font, brush, bounds, format);

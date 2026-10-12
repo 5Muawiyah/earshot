@@ -38,6 +38,15 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // Where the owner's pair's last readings and learned rates are kept between runs, or null to keep them in memory only.
     private readonly ILastReadingStore? _lastReadingStore;
 
+    // Where the link to the owner's pair is remembered between runs (LinkMemory), or null to keep it in memory only. Given,
+    // or the file beside the last readings' when those are kept in a LastReadingStore (link.json in the same folder).
+    private readonly ILinkMemoryStore? _linkMemoryStore;
+
+    // What was last written of the memory and when, so a heard time alone is written at most every
+    // LastReadingStore.ReadTimeWriteInterval. Touched holding _gate.
+    private LinkMemory? _savedMemory;
+    private DateTimeOffset? _memorySavedAt;
+
     // The same store as the one for the fully charged notice's spent marks (SpentMark): one object holds the file, so the two
     // never write over each other. Null when the readings are kept in memory only.
     internal ISpentStore? SpentStore => _lastReadingStore as ISpentStore;
@@ -54,7 +63,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
-    private readonly BroadcastSelector _selector = new();
+    private readonly BroadcastSelector _selector;
     private readonly ChargeRateLearner _learner = new();
 
     // Rebuilding the shapes list is skipped unless _unknownForms actually changed since the last build: most
@@ -95,6 +104,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private long _okForm, _truncated, _unknownForm;
     private long _modelMismatch, _colourMismatch, _otherSet, _chosen, _noPairedModel;
     private long _budOrderDisagree, _switches, _links, _followed, _drops;
+    private long _refound, _refindAmbiguous, _refindWeak, _refindInconsistent, _refindExpired;
+    private long _linkMissTooFew, _linkMissTooShort, _linkMissTooWeak;
     private int _setsInRange;
 
     // One line per run, not per message: a form that drifted, and two senders of the chosen set disagreeing on
@@ -187,7 +198,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         ProximityDecodeTable table,
         Action<Action>? runInBackground = null,
         ILastReadingStore? lastReadings = null,
-        IHistoryStore? history = null)
+        IHistoryStore? history = null,
+        ILinkMemoryStore? linkMemory = null)
     {
         ArgumentNullException.ThrowIfNull(sourceFactory);
         ArgumentNullException.ThrowIfNull(settings);
@@ -210,15 +222,25 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _handsFree = handsFree;
         _runInBackground = runInBackground ?? (static work => _ = Task.Run(work));
         _table = table;
+        _selector = new BroadcastSelector(table);
 
         // The last readings are read once, at start, and shown from then on until newer ones are heard.
         _lastReadingStore = lastReadings;
         _history = history;
         _book = lastReadings?.Load() ?? LastReadingBook.Empty;
         _savedBook = _book;
+        _linkMemoryStore = linkMemory ?? BesideTheReadings(lastReadings, log);
+        _selector.SavedBook = () => _book;
+        _selector.LoadMemory(_linkMemoryStore?.Load());
+        _savedMemory = _selector.Memory;
         _highWater = new EstimateHighWater(_book.Marks);
         _savedMarksVersion = _highWater.Version;
     }
+
+    private static LinkMemoryStore? BesideTheReadings(ILastReadingStore? lastReadings, ILog log) =>
+        lastReadings is LastReadingStore store && Path.GetDirectoryName(store.FilePath) is { } folder
+            ? new LinkMemoryStore(Path.Combine(folder, "link.json"), log)
+            : null;
 
     public event EventHandler? Changed;
 
@@ -374,6 +396,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         IAdvertisementSource? sourceToStop;
         LastReadingBook? bookToSave = null;
+        MemorySave memoryToSave;
         lock (_gate)
         {
             if (_closed)
@@ -408,11 +431,18 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 bookToSave = TakeForSaveLocked(_book);
                 _savedBook = _book;
             }
+
+            memoryToSave = TakeMemoryToSaveLocked(_timeProvider.GetUtcNow(), force: true);
         }
 
         if (bookToSave is not null)
         {
             _lastReadingStore!.Save(bookToSave);
+        }
+
+        if (memoryToSave.Due)
+        {
+            _linkMemoryStore?.Save(memoryToSave.Memory);
         }
 
         if (sourceToStop is not null)
@@ -1021,6 +1051,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
         PairedModelRead read = _pairedModel.Read(container, address);
         bool reset;
+        MemorySave memoryToSave;
         lock (_gate)
         {
             if (_closed)
@@ -1033,6 +1064,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             {
                 ResetReadingsLocked();
             }
+
+            memoryToSave = TakeMemoryToSaveLocked(_timeProvider.GetUtcNow(), force: true);
+        }
+
+        if (memoryToSave.Due)
+        {
+            _linkMemoryStore?.Save(memoryToSave.Memory);
         }
 
         foreach (StepOutcome step in read.Steps.Where(s => !s.Ok))
@@ -1174,6 +1212,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         long generation = 0;
         RefreshState? heard = null;
         LastReadingBook? toSave = null;
+        MemorySave memoryToSave = default;
 
         lock (_gate)
         {
@@ -1201,6 +1240,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 _setsInRange = seen.SetsInRange;
             }
 
+            CountRefindAndMissLocked(seen);
+
             ArmLinkCheckLocked();
             if (seen.Dropped)
             {
@@ -1225,6 +1266,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                     _log.Info("Widget: linked to the AirPods whose case was opened (" + seen.SetsInRange + " in range).");
                 }
             }
+            else if (seen.Refound)
+            {
+                // The remembered pair, worn, with no case open: the same set under new addresses, so the values on show
+                // stay, greyed as they age, until this set's own messages replace them.
+                _selectionGeneration++;
+                _refound++;
+                _log.Info("Widget: the remembered AirPods were found again with no case open (" + seen.SetsInRange + " in range).");
+            }
             else if (seen.Followed)
             {
                 // The values on show stay, greyed as they age, until this set's own messages replace them. The in-ear
@@ -1234,40 +1283,52 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 _log.Info("Widget: the linked set changed address and was followed (" + seen.SetsInRange + " in range).");
             }
 
+            memoryToSave = TakeMemoryToSaveLocked(at);
+
+            bool isChosen = false;
             switch (seen.Class)
             {
                 case BroadcastClass.NoPairedModel:
                     Interlocked.Increment(ref _noPairedModel);
-                    return;
+                    break;
                 case BroadcastClass.ModelMismatch:
                     Interlocked.Increment(ref _modelMismatch);
-                    return;
+                    break;
                 case BroadcastClass.ColourMismatch:
                     Interlocked.Increment(ref _colourMismatch);
-                    return;
+                    break;
                 case BroadcastClass.NotLinked:
-                    return;
+                    break;
                 case BroadcastClass.OtherSet:
                     Interlocked.Increment(ref _otherSet);
-                    return;
+                    break;
                 default:
                     Interlocked.Increment(ref _chosen);
+                    isChosen = true;
                     break;
             }
 
-            DecodedReading reading = ProximityDecoder.Decode(message, _table, at);
-            CheckBudOrderLocked(reading, tag, at);
-            ApplyDecodedReadingLocked(reading, _table, at);
-            caseOpenedEdge = ObserveCaseLocked(tag, message, reading, at);
-            toSave = RecordLastReadingLocked(reading, message.Model, at);
-            applied = reading;
-            generation = _selectionGeneration;
-
-            // A message of the chosen set sent after the refresh restarted the listen is the answer it waits for.
-            if (_refresh is { } waiting && at >= waiting.StartedAt)
+            if (isChosen)
             {
-                heard = waiting;
+                DecodedReading reading = ProximityDecoder.Decode(message, _table, at);
+                CheckBudOrderLocked(reading, tag, at);
+                ApplyDecodedReadingLocked(reading, _table, at);
+                caseOpenedEdge = ObserveCaseLocked(tag, message, reading, at);
+                toSave = RecordLastReadingLocked(reading, message.Model, at);
+                applied = reading;
+                generation = _selectionGeneration;
+
+                // A message of the chosen set sent after the refresh restarted the listen is the answer it waits for.
+                if (_refresh is { } waiting && at >= waiting.StartedAt)
+                {
+                    heard = waiting;
+                }
             }
+        }
+
+        if (memoryToSave.Due)
+        {
+            _linkMemoryStore?.Save(memoryToSave.Memory);
         }
 
         if (toSave is not null)
@@ -1296,6 +1357,65 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _uiPost(() => ReadingApplied?.Invoke(this, new ReadingAppliedEventArgs(decoded, at, generation)));
         }
     }
+
+    // A re-find that was weighed and refused, and a burst of case-known messages that ended without a link, are counted by
+    // reason. Must be called holding _gate.
+    private void CountRefindAndMissLocked(SelectionObservation seen)
+    {
+        switch (seen.RefindRefused)
+        {
+            case RefindRefusal.Ambiguous:
+                _refindAmbiguous++;
+                break;
+            case RefindRefusal.Weak:
+                _refindWeak++;
+                break;
+            case RefindRefusal.Inconsistent:
+                _refindInconsistent++;
+                break;
+            case RefindRefusal.Expired:
+                _refindExpired++;
+                _log.Info("Widget: the remembered link was last heard more than " + (long)BroadcastRules.RememberLimit.TotalHours + " h ago, so it was forgotten.");
+                break;
+        }
+
+        switch (seen.LinkMiss)
+        {
+            case LinkMissReason.TooFew:
+                _linkMissTooFew++;
+                break;
+            case LinkMissReason.TooShort:
+                _linkMissTooShort++;
+                break;
+            case LinkMissReason.TooWeak:
+                _linkMissTooWeak++;
+                break;
+        }
+    }
+
+    // The link memory to write now, or nothing. A link made, forgotten or changed is written at once; a heard time alone at
+    // most every LastReadingStore.ReadTimeWriteInterval. Must be called holding _gate; the write happens outside it.
+    private MemorySave TakeMemoryToSaveLocked(DateTimeOffset at, bool force = false)
+    {
+        LinkMemory? current = _selector.Memory;
+        if (_linkMemoryStore is null || Equals(current, _savedMemory))
+        {
+            return default;
+        }
+
+        bool onlyHeardMoved = current is not null && _savedMemory is not null &&
+            current.Model == _savedMemory.Model && current.Colour == _savedMemory.Colour && current.LinkedAt == _savedMemory.LinkedAt;
+        if (!force && onlyHeardMoved && _memorySavedAt is DateTimeOffset last && (at - last).Duration() < LastReadingStore.ReadTimeWriteInterval)
+        {
+            return default;
+        }
+
+        _savedMemory = current;
+        _memorySavedAt = at;
+        return new MemorySave(true, current);
+    }
+
+    private readonly record struct MemorySave(bool Due, LinkMemory? Memory);
 
     // The two buds of the chosen set each send on their own address and each carry the pair swapped. Both decode to
     // the same left and right under the decode table's rule; if two of them, heard within two seconds, do not, the
@@ -1898,7 +2018,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Headset = _headset,
             Selection = _selector.StateAt(now),
             LastReadings = _book,
-            PairedModel = _selector.PairedModel,
+            PairedModel = _selector.PairedModel ?? _selector.Memory?.Model,
             EstimateClock = _estimateClock,
             HighWater = _highWater,
         };
@@ -1957,6 +2077,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Links = Interlocked.Read(ref _links),
             Followed = Interlocked.Read(ref _followed),
             Drops = Interlocked.Read(ref _drops),
+            Refound = Interlocked.Read(ref _refound),
+            RefindAmbiguous = Interlocked.Read(ref _refindAmbiguous),
+            RefindWeak = Interlocked.Read(ref _refindWeak),
+            RefindInconsistent = Interlocked.Read(ref _refindInconsistent),
+            RefindExpired = Interlocked.Read(ref _refindExpired),
+            LinkMissTooFew = Interlocked.Read(ref _linkMissTooFew),
+            LinkMissTooShort = Interlocked.Read(ref _linkMissTooShort),
+            LinkMissTooWeak = Interlocked.Read(ref _linkMissTooWeak),
         };
     }
 
@@ -2011,6 +2139,14 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         a.Links == b.Links &&
         a.Followed == b.Followed &&
         a.Drops == b.Drops &&
+        a.Refound == b.Refound &&
+        a.RefindAmbiguous == b.RefindAmbiguous &&
+        a.RefindWeak == b.RefindWeak &&
+        a.RefindInconsistent == b.RefindInconsistent &&
+        a.RefindExpired == b.RefindExpired &&
+        a.LinkMissTooFew == b.LinkMissTooFew &&
+        a.LinkMissTooShort == b.LinkMissTooShort &&
+        a.LinkMissTooWeak == b.LinkMissTooWeak &&
         a.Sets == b.Sets &&
         a.UnknownForms.SequenceEqual(b.UnknownForms);
 
@@ -2040,6 +2176,16 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             " links=" + c.Links +
             " followed=" + c.Followed +
             " drops=" + c.Drops +
+            " refound=" + c.Refound +
+            " refindRefused=" + c.RefindRefused +
+            " refindAmbiguous=" + c.RefindAmbiguous +
+            " refindWeak=" + c.RefindWeak +
+            " refindInconsistent=" + c.RefindInconsistent +
+            " refindExpired=" + c.RefindExpired +
+            " linkMiss=" + c.LinkMiss +
+            " linkMissTooFew=" + c.LinkMissTooFew +
+            " linkMissTooShort=" + c.LinkMissTooShort +
+            " linkMissTooWeak=" + c.LinkMissTooWeak +
             " sets=" + c.Sets +
             " unknownFormShapes=[" + shapes + "]";
     }

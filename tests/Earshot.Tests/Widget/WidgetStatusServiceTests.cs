@@ -1832,4 +1832,202 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     // ---- Battery set-up: completion, what is proved, and what is never shown
+
+    // ---- The link that is remembered: found again with no case open, and the saved readings that outlive a lost pairing
+
+    private string WidgetFile(string name) => _temp.File(Path.Combine("widget", name));
+
+    // The owner's saved readings, all read at the given time: left, right and case, the model the paired source reports.
+    private static LastReadingBook SavedBook(
+        DateTimeOffset at, int left, int right, int caseLevel = 90, bool budsCharging = false, IReadOnlyList<LearnedRate>? rates = null) =>
+        new(
+            new SavedReading(left, budsCharging, at, BroadcastFixtures.PairedModel),
+            new SavedReading(right, budsCharging, at, BroadcastFixtures.PairedModel),
+            new SavedReading(caseLevel, false, at, BroadcastFixtures.PairedModel),
+            rates ?? []);
+
+    // A new process: stores over the same files, read at start.
+    private WidgetStatusService NewRememberingService(LinkMemory? remembered, LastReadingBook book)
+    {
+        var links = new LinkMemoryStore(WidgetFile("link.json"), _log);
+        var readings = new LastReadingStore(WidgetFile("last-reading.json"), _log);
+        if (remembered is not null)
+        {
+            links.Save(remembered);
+        }
+
+        readings.Save(book);
+        var service = new WidgetStatusService(
+            () => _source, _settings, _deviceMonitor, () => null, _log,
+            action => { Interlocked.Increment(ref _posts); action(); }, _clock, _paired, _handsFree, ProximityDecodeTable.Documented,
+            runInBackground: work => work(), lastReadings: new LastReadingStore(WidgetFile("last-reading.json"), _log),
+            linkMemory: new LinkMemoryStore(WidgetFile("link.json"), _log));
+        service.CaseOpened += (sender, e) => { lock (_caseOpenedEvents) { _caseOpenedEvents.Add(e); } };
+        return service;
+    }
+
+    // The pair worn: the case level unknown, right 70 and left 40, a message from each bud alternately over twenty seconds.
+    private void WearThePair(int pairHigh = 0x7, int pairLow = 0x4, sbyte rssi = -60, int messages = 3, double seconds = 20)
+    {
+        for (int i = 0; i < messages; i++)
+        {
+            bool one = i % 2 == 0;
+            Raise(one ? 11u : 12u, BroadcastFixtures.Bud(one, caseNibble: 0x0F, pairHigh: pairHigh, pairLow: pairLow), rssi);
+            if (i < messages - 1)
+            {
+                Tick(seconds / (messages - 1));
+            }
+        }
+    }
+
+    [TestMethod]
+    public void ARememberedLinkAndSavedReadingsShowALiveWornPairWithNoCaseOpen()
+    {
+        DateTimeOffset heard = _clock.GetUtcNow() - TimeSpan.FromMinutes(30);
+        using WidgetStatusService service = NewRememberingService(
+            new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, heard - TimeSpan.FromMinutes(5), heard),
+            SavedBook(heard, left: 40, right: 70));
+        service.Start();
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection, "Nothing is linked until the pair is heard.");
+
+        WearThePair();
+
+        WidgetSnapshot snapshot = service.Current;
+        Assert.AreEqual(BroadcastSelectionState.Linked, snapshot.Selection);
+        ShownBattery shown = BatteryFreshness.Shown(snapshot, _clock.GetUtcNow());
+        Assert.AreEqual(40, shown.Left.Percent);
+        Assert.AreEqual(70, shown.Right.Percent);
+        Assert.AreEqual(ReadingKind.Live, shown.Left.Kind);
+        Assert.AreEqual(ReadingKind.Live, shown.Right.Kind);
+        Assert.AreEqual(1, snapshot.Counters.Refound);
+        Assert.IsEmpty(_caseOpenedEvents, "A pair found again is not a case open.");
+    }
+
+    [TestMethod]
+    public void ALinkMadeOnACaseOpenIsRememberedBesideTheReadingsAndFoundAgainAfterARestart()
+    {
+        using (WidgetStatusService first = NewRememberingService(null, LastReadingBook.Empty))
+        {
+            first.Start();
+            for (int i = 0; i <= 12; i++)
+            {
+                bool one = i % 2 == 0;
+                Raise(one ? 1u : 2u, BroadcastFixtures.Bud(one, caseNibble: 0x9, pairHigh: 0x7, pairLow: 0x4), -55);
+                Tick(0.25);
+            }
+
+            Assert.AreEqual(BroadcastSelectionState.Linked, first.Current.Selection);
+            Assert.IsTrue(File.Exists(WidgetFile("link.json")), "Written beside the readings when the link is made.");
+            string text = File.ReadAllText(WidgetFile("link.json"));
+            Assert.IsFalse(text.Contains("\"Tag\"", StringComparison.OrdinalIgnoreCase) || text.Contains("Address", StringComparison.OrdinalIgnoreCase));
+            first.Close();
+        }
+
+        Tick(15 * 60);
+        _source = new FakeAdvertisementSource();
+        using var second = new WidgetStatusService(
+            () => _source, _settings, _deviceMonitor, () => null, _log,
+            action => action(), _clock, _paired, _handsFree, ProximityDecodeTable.Documented,
+            runInBackground: work => work(), lastReadings: new LastReadingStore(WidgetFile("last-reading.json"), _log));
+        second.Start();
+
+        WearThePair();
+
+        Assert.AreEqual(BroadcastSelectionState.Linked, second.Current.Selection, "Found again from the file beside the readings, with no case open.");
+        Assert.AreEqual(1, second.Current.Counters.Refound);
+    }
+
+    [TestMethod]
+    public void ASavedReadingIsShownGreyedForTheRememberedModelWhileThePairingCannotBeRead()
+    {
+        _paired.Model = null;
+        _paired.Steps = [StepOutcomes.FromConfigRet("cm-list", CfgMgr32.CR_FAILURE, "The device list could not be read.")];
+        DateTimeOffset heard = _clock.GetUtcNow() - TimeSpan.FromHours(2);
+        using WidgetStatusService service = NewRememberingService(
+            new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, heard - TimeSpan.FromMinutes(5), heard),
+            SavedBook(heard, left: 40, right: 70, caseLevel: 90));
+
+        service.Start();
+
+        WidgetSnapshot snapshot = service.Current;
+        DateTimeOffset now = _clock.GetUtcNow();
+        Assert.AreEqual(BroadcastSelectionState.NoPairedModel, snapshot.Selection);
+        ShownBattery shown = BatteryFreshness.Shown(snapshot, now);
+        Assert.AreEqual(40, shown.Left.Percent);
+        Assert.AreEqual(70, shown.Right.Percent);
+        Assert.AreEqual(90, shown.Case.Percent);
+        Assert.AreEqual(ReadingKind.Last, shown.Left.Kind, "Greyed: it is the last reading, never live.");
+        GaugeContent gauge = GaugeContent.From(snapshot, now, GaugeDisplaySettings.Default);
+        Assert.AreEqual(GaugeMode.CaseAway, gauge.Mode);
+        StringAssert.Contains(gauge.Tooltip, "Case 90%");
+    }
+
+    [TestMethod]
+    public void AReFoundLiveReadingReplacesAnEstimateOfOneHundred()
+    {
+        DateTimeOffset heard = _clock.GetUtcNow() - TimeSpan.FromHours(2);
+        var rates = new[] { new LearnedRate(BroadcastFixtures.PairedModel, ChargePart.Bud, 60, heard - TimeSpan.FromHours(1), TimeSpan.FromMinutes(30)) };
+        using WidgetStatusService service = NewRememberingService(
+            new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, heard - TimeSpan.FromMinutes(5), heard),
+            SavedBook(heard, left: 70, right: 70, budsCharging: true, rates: rates));
+        service.Start();
+
+        ShownBattery before = BatteryFreshness.Shown(service.Current, _clock.GetUtcNow());
+        Assert.AreEqual(ReadingKind.Estimated, before.Left.Kind, "Charging at the last reading, two hours on: an estimate.");
+        Assert.AreEqual(100, before.Left.Percent);
+
+        WearThePair(pairHigh: 0x6, pairLow: 0x6);
+
+        ShownBattery after = BatteryFreshness.Shown(service.Current, _clock.GetUtcNow());
+        Assert.AreEqual(60, after.Left.Percent);
+        Assert.AreEqual(60, after.Right.Percent);
+        Assert.AreEqual(ReadingKind.Live, after.Left.Kind);
+        Assert.AreEqual(ReadingKind.Live, after.Right.Kind);
+    }
+
+    [TestMethod]
+    public void ALinkLastHeardLongerAgoThanTheLimitIsForgottenAndItsFileRemoved()
+    {
+        DateTimeOffset heard = _clock.GetUtcNow() - BroadcastRules.RememberLimit - TimeSpan.FromMinutes(1);
+        using WidgetStatusService service = NewRememberingService(
+            new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, heard - TimeSpan.FromMinutes(5), heard),
+            SavedBook(heard, left: 40, right: 70));
+        service.Start();
+        Assert.IsTrue(File.Exists(WidgetFile("link.json")));
+
+        WearThePair();
+
+        Assert.AreNotEqual(BroadcastSelectionState.Linked, service.Current.Selection);
+        Assert.AreEqual(1, service.Current.Counters.RefindExpired);
+        Assert.IsFalse(File.Exists(WidgetFile("link.json")), "A forgotten link is not remembered after a restart.");
+    }
+
+    [TestMethod]
+    public void TheCountersLineCarriesWhatWasFoundAgainRefusedAndMissed()
+    {
+        DateTimeOffset heard = _clock.GetUtcNow() - TimeSpan.FromMinutes(30);
+        using WidgetStatusService service = NewRememberingService(
+            new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, heard - TimeSpan.FromMinutes(5), heard),
+            SavedBook(heard, left: 40, right: 70));
+        service.Start();
+
+        // A case opened far from the PC, a moment, then the pair worn far away: a burst that did not link, and refusals.
+        Raise(21, BroadcastFixtures.Bud(first: true, caseNibble: 0x9), -85);
+        Tick(1);
+        Raise(22, BroadcastFixtures.Bud(first: false, caseNibble: 0x9), -85);
+        Tick(10);
+        WearThePair(rssi: -80);
+        Assert.AreEqual(0, service.Current.Counters.Refound);
+
+        Tick(61);
+        WearThePair();
+        Assert.AreEqual(1, service.Current.Counters.Refound);
+
+        _clock.Advance(WidgetTiming.CountersLogInterval);
+        LogEntry line = _log.Entries.Last(e => e.Message.StartsWith("Widget counters:", StringComparison.Ordinal));
+        StringAssert.Contains(line.Message, " refound=1 ");
+        StringAssert.Contains(line.Message, " refindRefused=3 refindAmbiguous=0 refindWeak=3 refindInconsistent=0 refindExpired=0 ");
+        StringAssert.Contains(line.Message, " linkMiss=1 linkMissTooFew=1 linkMissTooShort=0 linkMissTooWeak=0 ");
+    }
 }
+

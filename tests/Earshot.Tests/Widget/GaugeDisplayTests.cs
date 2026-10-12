@@ -166,7 +166,7 @@ public sealed class GaugeDisplayTests : IDisposable
         new(new WindowIdentity("GameWindowClass", false), monitor, monitor, label);
 
     private static (GaugeController Controller, FakeGaugeSurface Surface, CapturingLog Log, Func<ForegroundWindowReading?> SetProbe, int[] ProbeCalls) Rig(
-        Func<ForegroundWindowReading?>? probe = null)
+        Func<ForegroundWindowReading?>? probe = null, Streaming.TestTimeProvider? time = null)
     {
         var surface = new FakeGaugeSurface();
         var log = new CapturingLog();
@@ -174,7 +174,7 @@ public sealed class GaugeDisplayTests : IDisposable
         ForegroundWindowReading? current = null;
         Func<ForegroundWindowReading?> reader = probe ?? (() => { calls[0]++; return current; });
         var controller = new GaugeController(
-            () => surface, new FakeTrayIcon(), () => new GaugeControllerSettings(true, false), log, new Streaming.TestTimeProvider(),
+            () => surface, new FakeTrayIcon(), () => new GaugeControllerSettings(true, false), log, time ?? new Streaming.TestTimeProvider(),
             foregroundProbe: reader);
         return (controller, surface, log, () => current, calls);
     }
@@ -472,7 +472,20 @@ public sealed class GaugeDisplayTests : IDisposable
     [TestMethod]
     public void TheGaugeMovesToTheMainTaskbarWhenTheChosenDisplayGoesAndBackWhenItReturns()
     {
-        (GaugeController controller, FakeGaugeSurface surface, CapturingLog log, _, _) = Rig();
+        var time = new Streaming.TestTimeProvider();
+        (GaugeController controller, FakeGaugeSurface surface, CapturingLog log, _, _) = Rig(time: time);
+
+        // A move to another taskbar, like any move, is made once the reads have held it for the window (a secondary taskbar that one
+        // enumeration misses reads as a fall back to the main one and must not take the gauge there for that).
+        void Settle(TaskbarLayout layout)
+        {
+            controller.OnLayout(ITaskbarReader.Result.Ok(layout));
+            time.Advance(TimeSpan.FromSeconds(2.5));
+            controller.OnLayout(ITaskbarReader.Result.Ok(layout));
+            time.Advance(TimeSpan.FromSeconds(2.5));
+            controller.OnLayout(ITaskbarReader.Result.Ok(layout));
+        }
+
         TaskbarLayout onSecond = BarOn(Right1080, secondary: true, label: "Display 2");
         TaskbarLayout onMainNotConnected = BarOn(Left1080, fallback: DisplayFallbackReason.NotConnected, label: "Display 1", displayCount: 1);
         TaskbarLayout onMainNoTaskbar = BarOn(Left1080, fallback: DisplayFallbackReason.TaskbarNotShown, label: "Display 1");
@@ -481,7 +494,7 @@ public sealed class GaugeDisplayTests : IDisposable
         Rectangle secondBounds = ((GaugeState.Shown)controller.State).Bounds;
         Assert.IsTrue(Right1080.Contains(secondBounds), "Shown on the second display's bar: " + secondBounds);
 
-        controller.OnLayout(ITaskbarReader.Result.Ok(onMainNotConnected));
+        Settle(onMainNotConnected);
         Rectangle mainBounds = ((GaugeState.Shown)controller.State).Bounds;
         Assert.IsTrue(Left1080.Contains(mainBounds), "Moved to the main display's bar: " + mainBounds);
         Assert.AreEqual(DisplayFallbackReason.NotConnected, controller.DisplayFallback);
@@ -490,12 +503,12 @@ public sealed class GaugeDisplayTests : IDisposable
         controller.OnLayout(ITaskbarReader.Result.Ok(onMainNotConnected));
         Assert.AreEqual(1, log.Entries.Count(e => e.Message.Contains("is not connected", StringComparison.Ordinal)), "Said once, not every poll.");
 
-        controller.OnLayout(ITaskbarReader.Result.Ok(onSecond));
+        Settle(onSecond);
         Assert.AreEqual(secondBounds, ((GaugeState.Shown)controller.State).Bounds);
         Assert.AreEqual(DisplayFallbackReason.None, controller.DisplayFallback);
         Assert.IsTrue(log.Has(LogLevel.Info, "Gauge display: the chosen display is back (Display 2)."));
 
-        controller.OnLayout(ITaskbarReader.Result.Ok(onMainNoTaskbar));
+        Settle(onMainNoTaskbar);
         Assert.IsTrue(log.Has(LogLevel.Info, "Gauge display: the chosen display shows no taskbar, so the main display's taskbar is used."));
         CollectionAssert.Contains(surface.Calls, "MoveTo " + mainBounds);
     }

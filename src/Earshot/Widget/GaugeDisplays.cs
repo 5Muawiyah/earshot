@@ -234,6 +234,53 @@ internal static class SecondaryTaskbarPicker
 
         return null;
     }
+
+    // Why Pick finds no taskbar for this display, so the log can say what flickers: there is no taskbar window at all, the ones on
+    // this display's monitor are hidden, the only ones are on another monitor, or the one on this monitor has an empty rectangle.
+    // The first cause that applies. Null when Pick would find one.
+    public static TaskbarMissing? Explain(IEnumerable<TaskbarWindowCandidate> candidates, DisplayInfo display)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(display);
+        if (Pick(candidates, display) is not null)
+        {
+            return null;
+        }
+
+        bool any = false;
+        bool onThisMonitor = false;
+        bool hidden = false;
+        foreach (TaskbarWindowCandidate c in candidates)
+        {
+            any = true;
+            if (c.Monitor == display.Handle)
+            {
+                onThisMonitor = true;
+                hidden |= !c.Visible;
+            }
+        }
+
+        if (!any)
+        {
+            return TaskbarMissing.NoWindow;
+        }
+
+        if (!onThisMonitor)
+        {
+            return TaskbarMissing.OtherMonitor;
+        }
+
+        return hidden ? TaskbarMissing.Hidden : TaskbarMissing.EmptyRect;
+    }
+}
+
+// Why a display's taskbar was not found (SecondaryTaskbarPicker.Explain).
+internal enum TaskbarMissing
+{
+    NoWindow,       // no Shell_SecondaryTrayWnd was listed
+    Hidden,         // the ones on this display's monitor are not visible
+    OtherMonitor,   // the ones listed are on other monitors
+    EmptyRect,      // the one on this display's monitor has an empty rectangle
 }
 
 // The foreground window as the full-screen rule needs it: what it is (class only), its rectangle, the monitor it

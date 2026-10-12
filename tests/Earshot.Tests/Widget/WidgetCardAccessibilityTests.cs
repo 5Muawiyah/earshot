@@ -362,11 +362,9 @@ public sealed class WidgetCardAccessibilityTests
             WidgetCardLayout.Layout layout = card.CurrentMainLayout;
 
             Assert.AreEqual("Settings", card.TooltipAt(Centre(layout.Gear))!.Value.Text, "The gear is an icon and says what it is.");
-            Assert.AreEqual("Refresh battery", card.TooltipAt(Centre(layout.Refresh))!.Value.Text, "The refresh icon says what it does.");
-            string leftTip = card.TooltipAt(Centre(layout.Left.ReadTime))!.Value.Text;
-            Assert.StartsWith("Left ", leftTip, "A column's tooltip is a sentence: what it holds and how old the reading is.");
-            Assert.EndsWith("read 2 min ago", leftTip);
-            Assert.AreEqual("Version 1.3.0 is available", card.TooltipAt(Centre(layout.UpdateCaption))!.Value.Text);
+            Assert.AreEqual("Refresh", card.TooltipAt(Centre(layout.Refresh))!.Value.Text, "The refresh icon says what it does.");
+            Assert.IsNull(card.TooltipAt(Centre(layout.Left.ReadTime)), "A column shows its words already.");
+            Assert.IsNull(card.TooltipAt(Centre(layout.UpdateCaption)), "The update line shows its words already.");
             Assert.IsNull(card.TooltipAt(Centre(layout.Button)), "The Connect button says it all.");
             Assert.IsNull(card.TooltipAt(new Point(1, 1)), "Nothing under empty space.");
         });
@@ -384,13 +382,13 @@ public sealed class WidgetCardAccessibilityTests
             Assert.AreEqual("Battery read 2 min ago", card.ReadLineText);
 
             card.Render(CardKit.MainModel(CardKit.Snapshot(readAt: now - TimeSpan.FromMinutes(2))) with { Now = now, Refresh = BatteryRefreshView.Started }, 96);
-            Assert.AreEqual(WidgetCopy.ReadingBattery, card.TooltipAt(Centre(card.CurrentMainLayout.Refresh))!.Value.Text, "The refresh icon's tooltip says what is happening, not its name.");
+            Assert.AreEqual("Refreshing", card.TooltipAt(Centre(card.CurrentMainLayout.Refresh))!.Value.Text, "The refresh icon's tooltip says what is happening.");
             Assert.AreEqual(WidgetCopy.ReadingBattery, card.ReadLineShort);
         });
     }
 
     [TestMethod]
-    public void TheSettingsPageHasATooltipForEveryRowAndEveryIconOnlyControl()
+    public void TheSettingsPageHasATooltipOnlyOnItsIconOnlyControls()
     {
         Phase5.CardSta.Run(() =>
         {
@@ -398,21 +396,14 @@ public sealed class WidgetCardAccessibilityTests
             CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults() with { InstallExists = true }), 96, order: true);
             SettingsLayout layout = card.CurrentSettingsLayout!;
 
-            // The order's pictures are the second item of their row and have no label of their own: a picture says what it is below.
             foreach (SettingsItem row in layout.Items.Where(i => i.Kind == SettingsItemKind.Row && i.Tiles.Count == 0))
             {
-                (string Text, Rectangle Anchor)? tip = card.TooltipAt(Centre(row.LabelRect));
-                Assert.IsNotNull(tip, row.Row + ": a tooltip over the label.");
-                Assert.AreEqual(row.Tip, tip.Value.Text);
+                Assert.IsNull(card.TooltipAt(Centre(row.LabelRect)), row.Row + ": the label shows its words.");
             }
 
             Assert.AreEqual("Back", card.TooltipAt(Centre(layout.Frame.Back))!.Value.Text);
             Assert.AreEqual("Clear", card.TooltipAt(Centre(CardKit.Row(card, SettingsRowId.Connect).B))!.Value.Text);
             Assert.AreEqual("Ring, bolt, number", card.TooltipAt(Centre(layout.Items.Single(i => i.Row == SettingsRowId.GaugeOrder && i.Tiles.Count == 6).Tiles[1]))!.Value.Text, "A picture says what it is a picture of.");
-            Assert.AreEqual(
-                "Pause when a bud comes out, and play again when it goes back",
-                card.TooltipAt(Centre(CardKit.Row(card, SettingsRowId.PauseBud).LabelRect))!.Value.Text,
-                "What used to be the row's description.");
         });
     }
 
@@ -431,7 +422,7 @@ public sealed class WidgetCardAccessibilityTests
 
             Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
             Assert.AreEqual(WidgetCardFocus.Refresh, card.FocusTarget);
-            Assert.AreEqual("Refresh battery", card.TooltipShownForTest, "The refresh icon is an icon too, so it says what it does.");
+            Assert.AreEqual("Refresh", card.TooltipShownForTest, "The refresh icon is an icon too, so it says what it does.");
 
             Phase5.TestWindows.Send(card.Handle, WM_KEYDOWN, (nint)Keys.Tab, 0);
             Assert.AreEqual(WidgetCardFocus.Button, card.FocusTarget);

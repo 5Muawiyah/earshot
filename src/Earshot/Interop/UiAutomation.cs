@@ -32,7 +32,9 @@ internal static class UiAutomation
     internal const int AutomationElementMode_Full = 1;
 
     // Property ids (UIAutomationClient.h).
+    // https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-automation-element-propids
     internal const int UIA_BoundingRectanglePropertyId = 30001;
+    internal const int UIA_ProcessIdPropertyId = 30002;
     internal const int UIA_ControlTypePropertyId = 30003;
     internal const int UIA_NamePropertyId = 30005;
     internal const int UIA_AutomationIdPropertyId = 30011;

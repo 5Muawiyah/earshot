@@ -156,6 +156,14 @@ internal static partial class CardPaint
     [ThreadStatic]
     internal static List<DrawnText>? DrawnTextLog;
 
+    // Every figure the history chart draws one character at a time (DrawTabular), with the rectangle it was given and the room its
+    // characters take together. Null outside a test, and per thread, like DrawnTextLog.
+    [ThreadStatic]
+    internal static List<DrawnTabular>? DrawnTabularLog;
+
+    internal static void NoteTabular(string text, Rectangle bounds, float left, float width, float height) =>
+        DrawnTabularLog?.Add(new DrawnTabular(text, bounds, left, width, height));
+
     // requestedPixels is the size the text was asked for: what it is drawn at is smaller when it was fitted to a narrow rectangle.
     internal static void NoteDrawn(string text, Rectangle bounds, Font font, StringFormat format, int requestedPixels) =>
         DrawnTextLog?.Add(new DrawnText(
@@ -636,3 +644,6 @@ internal static partial class CardPaint
 internal readonly record struct DrawnText(
     string Text, Rectangle Bounds, string FontFamily, float FontSize, FontStyle FontStyle, GraphicsUnit FontUnit,
     StringFormatFlags Flags, StringAlignment Horizontal, StringAlignment Vertical, StringTrimming Trimming, int RequestedPixels);
+
+// One figure drawn a character at a time: its rectangle, where its first character starts and the width and height its characters take.
+internal readonly record struct DrawnTabular(string Text, Rectangle Bounds, float Left, float Width, float Height);

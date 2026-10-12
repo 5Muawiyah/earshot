@@ -12,6 +12,13 @@ internal sealed class FakeGaugeSurface : IGaugeSurface
 {
     public List<string> Calls { get; } = new();
 
+    // How often the window was shown, moved and hidden, for a test that counts them over a long script.
+    public int ShowCount => Calls.Count(c => c.StartsWith("ShowAt", StringComparison.Ordinal));
+
+    public int MoveCount => Calls.Count(c => c.StartsWith("MoveTo", StringComparison.Ordinal));
+
+    public int HideCount => Calls.Count(c => c == "HideWindow");
+
     public StepOutcome NextShowAtResult { get; set; } = new("show-at", true, 0, "S_OK", null);
 
     public StepOutcome NextRaiseResult { get; set; } = new("raise", true, 0, "S_OK", null);
@@ -177,11 +184,17 @@ public sealed class GaugeControllerTests
     [TestMethod]
     public void OneMoreButtonMovesAGaugeNextToTheAppsRatherThanShowingItAgain()
     {
-        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build(position: GaugePosition.NextToApps);
+        (GaugeController controller, FakeGaugeSurface surface, _, Streaming.TestTimeProvider time, _) = Build(position: GaugePosition.NextToApps);
 
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout(8)));
         Assert.AreEqual(1, surface.Calls.Count(c => c.StartsWith("ShowAt", StringComparison.Ordinal)));
 
+        // The new button is a reading of the bar like any other: the move waits until the reads have held it for the window.
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout(9)));
+        Assert.AreEqual(0, surface.MoveCount, "One read does not move it.");
+        time.Advance(TimeSpan.FromSeconds(2.5));
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout(9)));
+        time.Advance(TimeSpan.FromSeconds(2.5));
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout(9)));
         Assert.AreEqual(1, surface.Calls.Count(c => c.StartsWith("ShowAt", StringComparison.Ordinal)), "Never a second ShowAt.");
         Assert.AreEqual(1, surface.Calls.Count(c => c.StartsWith("MoveTo", StringComparison.Ordinal)));
@@ -205,7 +218,7 @@ public sealed class GaugeControllerTests
     [TestMethod]
     public void NoFreeSpaceHidesWithTheIconVisibleThenShowsAgainWhenSpaceReturns()
     {
-        (GaugeController controller, FakeGaugeSurface surface, FakeTrayIcon icon, _, _) = Build();
+        (GaugeController controller, FakeGaugeSurface surface, FakeTrayIcon icon, Streaming.TestTimeProvider time, _) = Build();
 
         // Buttons that reach 1620 run into the gauge's place (1596 to 1670) beside the tray at 1678.
         var tight = new TaskbarLayout(0, Bar, TaskbarEdge.Bottom, false, new Rectangle(0, 0, 1920, 1080),
@@ -213,14 +226,43 @@ public sealed class GaugeControllerTests
             Start, 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
             NotificationArea: new Rectangle(1678, 1032, 242, 48));
 
+        // A gauge that was never on screen has nothing to keep: no room is said at once.
         controller.OnLayout(ITaskbarReader.Result.Ok(tight));
         Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);
         Assert.AreEqual(HiddenReason.NoFreeSpace, ((GaugeState.Hidden)controller.State).Reason);
         Assert.IsTrue(icon.Visible);
 
+        // Room back is not shown on one read: two reads over two seconds show it.
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+        Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State, "One read with room is not shown yet.");
+        time.Advance(TimeSpan.FromSeconds(2));
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
         Assert.IsInstanceOfType<GaugeState.Shown>(controller.State);
         CollectionAssert.Contains(surface.Calls, "ShowAt " + RightEndBounds.ToString());
+    }
+
+    // A gauge on screen keeps its place through a read that finds no room, and is hidden only when that has held.
+    [TestMethod]
+    public void NoFreeSpaceHidesAGaugeOnScreenOnlyWhenTheVerdictHasHeld()
+    {
+        (GaugeController controller, FakeGaugeSurface surface, FakeTrayIcon icon, Streaming.TestTimeProvider time, _) = Build();
+        var tight = new TaskbarLayout(0, Bar, TaskbarEdge.Bottom, false, new Rectangle(0, 0, 1920, 1080),
+            [Start, new Rectangle(807, 1032, 813, 48), new Rectangle(1678, 1032, 242, 48)],
+            Start, 96, Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
+            NotificationArea: new Rectangle(1678, 1032, 242, 48));
+        controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
+
+        controller.OnLayout(ITaskbarReader.Result.Ok(tight));
+        Assert.IsInstanceOfType<GaugeState.Shown>(controller.State, "One read.");
+        Assert.AreEqual(0, surface.HideCount);
+        time.Advance(TimeSpan.FromSeconds(2.5));
+        controller.OnLayout(ITaskbarReader.Result.Ok(tight));
+        time.Advance(TimeSpan.FromSeconds(2.5));
+        controller.OnLayout(ITaskbarReader.Result.Ok(tight));
+
+        Assert.AreEqual(HiddenReason.NoFreeSpace, ((GaugeState.Hidden)controller.State).Reason);
+        Assert.AreEqual(1, surface.HideCount);
+        Assert.IsTrue(icon.Visible);
     }
 
     [TestMethod]
@@ -311,12 +353,17 @@ public sealed class GaugeControllerTests
     [TestMethod]
     public void LeavingShownForAnyHiddenReasonHidesTheWindow()
     {
-        (GaugeController controller, FakeGaugeSurface surface, _, _, _) = Build();
+        (GaugeController controller, FakeGaugeSurface surface, _, Streaming.TestTimeProvider time, _) = Build();
         controller.OnLayout(ITaskbarReader.Result.Ok(FreeSpaceLayout()));
         Assert.IsInstanceOfType<GaugeState.Shown>(controller.State);
         surface.Calls.Clear();
 
         var failure = new TaskbarReadFailure(TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false));
+        controller.OnLayout(ITaskbarReader.Result.Fail(failure));
+        Assert.IsInstanceOfType<GaugeState.Shown>(controller.State, "One read of no taskbar is not a verdict.");
+        time.Advance(TimeSpan.FromSeconds(2.5));
+        controller.OnLayout(ITaskbarReader.Result.Fail(failure));
+        time.Advance(TimeSpan.FromSeconds(2.5));
         controller.OnLayout(ITaskbarReader.Result.Fail(failure));
 
         Assert.IsInstanceOfType<GaugeState.Hidden>(controller.State);

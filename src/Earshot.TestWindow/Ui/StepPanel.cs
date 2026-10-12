@@ -506,6 +506,16 @@ internal sealed class StepPanel : Panel
         return control;
     }
 
+    // The answers as they read once the click-safety wait is over, for a picture of the panel that cannot wait for it.
+    internal void EnableAnswersNow()
+    {
+        _clickSafetyTimer.Stop();
+        foreach (Control control in _buttonRow.Controls)
+        {
+            control.Enabled = true;
+        }
+    }
+
     // Test seam only: the same PerformClick pattern MainForm's own *ForTests members use.
     // PerformClick does nothing while a button is disabled (Button.CanSelect is false while
     // Enabled is false), the same as a real mouse click would find, so a test using this while the

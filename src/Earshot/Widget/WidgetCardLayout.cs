@@ -378,7 +378,8 @@ internal static class WidgetCardLayout
             : Rectangle.Empty;
         int iconBox = CardPlacement.Scale(StatusIconAt96, dpi);
         int textLeft = tile.Right + gap;
-        int textRight = (inline ? action.X : surface.Right - padRight) - gap;
+        bool spinning = !inline && view.Icon == SetupIcon.Spinner;
+        int textRight = (inline ? action.X : spinning ? surface.Right - padRight - iconBox : surface.Right - padRight) - gap;
         int textTop = surface.Y + ((statusHeight - textBlock) / 2);
         var title = new Rectangle(textLeft, textTop, Math.Max(1, textRight - textLeft), titleLine * Math.Max(1, titleLines));
         var caption = new Rectangle(textLeft, title.Bottom, Math.Max(1, textRight - textLeft), captionLine * Math.Max(1, subLines));
