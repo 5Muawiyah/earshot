@@ -86,6 +86,10 @@ internal sealed partial class TrayContext
             {
                 OpenCardChord = hotkeys.Chord(HotkeyAction.OpenCard),
                 OpenCardFailure = hotkeys.FailureMessage(HotkeyAction.OpenCard),
+                SendToChord = hotkeys.Chord(HotkeyAction.SendTo),
+                SendToFailure = hotkeys.FailureMessage(HotkeyAction.SendTo),
+                SendToOnCard = widget.SendToOnCard,
+                SendToOnGauge = widget.SendToOnGauge,
                 HandsFreeMicrophoneOff = HandsFreeMicrophoneMode.IsOn(settings),
                 MicrophoneState = HandsFreeMicrophoneMode.Describe(_tray._snapshot).State,
                 FullyChargedNotice = widget.FullyChargedNotice,
@@ -207,6 +211,12 @@ internal sealed partial class TrayContext
         public void SetFullyChargedNotice(bool on, CardPlace place) =>
             Write("fully charged notice (card)", s => s.Widget = s.Widget with { FullyChargedNotice = on }, place);
 
+        public void SetSendToOnCard(bool on, CardPlace place) =>
+            Write("send to on the card (card)", s => s.Widget = s.Widget with { SendToOnCard = on }, place);
+
+        public void SetSendToOnGauge(bool on, CardPlace place) =>
+            Write("send to in the gauge menu (card)", s => s.Widget = s.Widget with { SendToOnGauge = on }, place);
+
         public void SetCheckAutomatically(bool on, CardPlace place) =>
             Write("check for updates automatically (card)", s => s.CheckForUpdatesAutomatically = on, place);
 
@@ -215,6 +225,7 @@ internal sealed partial class TrayContext
             {
                 CardShortcut.Connect => HotkeyAction.SwitchToPc,
                 CardShortcut.Disconnect => HotkeyAction.SwitchToPhone,
+                CardShortcut.SendTo => HotkeyAction.SendTo,
                 _ => HotkeyAction.OpenCard,
             };
 

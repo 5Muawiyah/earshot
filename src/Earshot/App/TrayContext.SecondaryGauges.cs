@@ -60,7 +60,7 @@ internal sealed partial class TrayContext
         var set = new SecondaryGaugeSet(parts, _displaySource, _secondaryTaskbarSource);
         set.CardRequested += (_, gauge) => OpenWidgetCardFor(gauge);
         set.ToggleRequested += (_, _) => StartToggle();
-        set.MenuRequested += (_, e) => _menu.Strip.Show(e.Point);
+        set.MenuRequested += (_, e) => ShowGaugeMenu(e.Point);
         set.LaidOut += (_, gauge) => RenderSecondaryGauge(gauge);
         return set;
     }

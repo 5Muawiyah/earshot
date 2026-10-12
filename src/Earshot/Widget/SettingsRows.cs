@@ -21,6 +21,9 @@ internal static class SettingsRows
         SettingsRowId.Connect => new(FluentGlyphs.Keyboard, WidgetCopy.TipConnectShortcut, WidgetCopy.NameConnectShortcut),
         SettingsRowId.Disconnect => new(FluentGlyphs.Keyboard, WidgetCopy.TipDisconnectShortcut, WidgetCopy.NameDisconnectShortcut),
         SettingsRowId.OpenCard => new(FluentGlyphs.Keyboard, ShortcutCopy.TipCardShortcut, ShortcutCopy.NameCardShortcut),
+        SettingsRowId.SendTo => new(FluentGlyphs.Keyboard, SendToCopy.TipShortcut, SendToCopy.NameShortcut),
+        SettingsRowId.SendToCard => new(FluentGlyphs.Send, SendToCopy.TipCardRow, SendToCopy.NameCardRow),
+        SettingsRowId.SendToGauge => new(FluentGlyphs.Send, SendToCopy.TipGaugeMenu, SendToCopy.NameGaugeMenu),
         SettingsRowId.Repair => new(FluentGlyphs.Repair, WidgetCopy.TipRepair, WidgetCopy.NameRepair),
         SettingsRowId.CheckAutomatically => new(FluentGlyphs.Sync, WidgetCopy.TipAutoCheck, WidgetCopy.NameAutoCheck),
         SettingsRowId.MicrophoneOff => new(FluentGlyphs.MicOff, WidgetCopy.TipMicOff, WidgetCopy.NameMicOff),
@@ -47,6 +50,7 @@ internal static class SettingsRows
         (SettingsRowId.Connect, SettingsPart.Clear) => WidgetCopy.NameClearConnectShortcut,
         (SettingsRowId.Disconnect, SettingsPart.Clear) => WidgetCopy.NameClearDisconnectShortcut,
         (SettingsRowId.OpenCard, SettingsPart.Clear) => ShortcutCopy.NameClearCardShortcut,
+        (SettingsRowId.SendTo, SettingsPart.Clear) => SendToCopy.NameClearShortcut,
         (SettingsRowId.CaseCard, SettingsPart.Expand) => WidgetCopy.NameCaseCardMore,
         (SettingsRowId.More, SettingsPart.Expand) => WidgetCopy.NameMore,
         (SettingsRowId.GaugeOrder, SettingsPart.Expand) => WidgetCopy.NameGaugeOrder,
@@ -59,7 +63,7 @@ internal static class SettingsRows
     public static string? TipOf(SettingsRowId row, SettingsPart part, int index = 0) => (row, part) switch
     {
         (SettingsRowId.None, SettingsPart.Back) => WidgetCopy.TipBack,
-        (SettingsRowId.Connect, SettingsPart.Clear) or (SettingsRowId.Disconnect, SettingsPart.Clear) or (SettingsRowId.OpenCard, SettingsPart.Clear) => WidgetCopy.TipClear,
+        (SettingsRowId.Connect, SettingsPart.Clear) or (SettingsRowId.Disconnect, SettingsPart.Clear) or (SettingsRowId.OpenCard, SettingsPart.Clear) or (SettingsRowId.SendTo, SettingsPart.Clear) => WidgetCopy.TipClear,
         (SettingsRowId.GaugeOrder, SettingsPart.Tile) => GaugeOrders.AccessibleName(GaugeOrders.FromStored((GaugeOrder)index)),
         (SettingsRowId.CaseCard, SettingsPart.Expand) => WidgetCopy.TipCaseCardMore,
         _ => For(row).Tip,

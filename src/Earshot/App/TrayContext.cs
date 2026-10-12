@@ -489,6 +489,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _menu.ToggleClicked += (_, _) => StartToggle(trigger: SwitchTrigger.Menu);
         _menu.PlayFromPhoneItemClicked += OnPlayFromPhoneItemClicked;
         _menu.RefreshBatteryClicked += (_, _) => OnRefreshBatteryClicked();
+        _menu.SendToClicked += (_, _) => OpenSendTo(openedByKeyboard: false);
         _menu.BlockAtBootClicked += (_, _) => Start("block at boot", place => BlockAtBootAsync(place));
         _menu.HandBackClicked += (_, _) => OnHandBackClicked();
         _menu.ProtectAudioClicked += (_, _) => OnProtectAudioClicked();
@@ -2002,6 +2003,10 @@ internal sealed partial class TrayContext : ApplicationContext
                 OnOpenCardHotkey();
                 break;
 
+            case HotkeyAction.SendTo:
+                OnSendToHotkey();
+                break;
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(e), e.Action, "Unknown hotkey action.");
         }
@@ -2030,7 +2035,7 @@ internal sealed partial class TrayContext : ApplicationContext
         MenuModel.Build(
             _snapshot, BlockStatus, _coordinator.ProtectionStatus, _registry.Settings.Current, IsBusy || _coordinator.IsBusy,
             _startupState, _registry.SafeMode, _voiceKnownNoVoice, _streaming?.Menu,
-            updateInProgress: _updates?.IsBusy ?? false, elevatedRun: _elevatedRun);
+            updateInProgress: _updates?.IsBusy ?? false, elevatedRun: _elevatedRun, openedFromGauge: _menuOpenedFromGauge);
 
     private void UpdatePresentation(bool forceIcon)
     {

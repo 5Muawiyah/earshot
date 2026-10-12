@@ -119,6 +119,18 @@ internal sealed class FakeCardHost : IWidgetCardHost
         Values = Values with { FullyChargedNotice = on };
     }
 
+    public void SetSendToOnCard(bool on, CardPlace place)
+    {
+        Calls.Add("sendToCard:" + on);
+        Values = Values with { SendToOnCard = on };
+    }
+
+    public void SetSendToOnGauge(bool on, CardPlace place)
+    {
+        Calls.Add("sendToGauge:" + on);
+        Values = Values with { SendToOnGauge = on };
+    }
+
     public void SetCaseOpenCard(bool on, CardPlace place)
     {
         Calls.Add("caseCard:" + on);
@@ -171,7 +183,12 @@ internal sealed class FakeCardHost : IWidgetCardHost
     public void ClearShortcut(CardShortcut shortcut, CardPlace place)
     {
         Calls.Add("clear:" + shortcut);
-        Values = shortcut == CardShortcut.Connect ? Values with { ConnectChord = string.Empty } : Values with { DisconnectChord = string.Empty };
+        Values = shortcut switch
+        {
+            CardShortcut.Connect => Values with { ConnectChord = string.Empty },
+            CardShortcut.SendTo => Values with { SendToChord = string.Empty },
+            _ => Values with { DisconnectChord = string.Empty },
+        };
     }
 
     public SetupViewModel UpdatePage(int spinnerFrame) =>
@@ -243,7 +260,7 @@ internal static class CardKit
 
     // The host's calls so far, in order, compared with the ones expected.
     public static void AssertCalls(FakeCardHost host, params string[] expected) =>
-        Microsoft.VisualStudio.TestTools.UnitTesting.CollectionAssert.AreEqual(expected, host.Calls);
+        Microsoft.VisualStudio.TestTools.UnitTesting.CollectionAssert.AreEqual(expected, host.Calls, "The host was called with: " + string.Join(", ", host.Calls));
 
     public static WidgetCardPresenterCallbacks Callbacks(GaugePosition? position = null, WidgetSnapshot? snapshot = null) => new(
         CurrentSnapshot: () => snapshot ?? Snapshot(),

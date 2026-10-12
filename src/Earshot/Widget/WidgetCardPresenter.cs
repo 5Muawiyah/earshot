@@ -25,7 +25,9 @@ internal sealed record WidgetCardPresenterCallbacks(
     Action<bool, CardPlace> SetAutoPause,
     Func<GaugePosition>? GaugePosition = null,   // where the gauge sits, so the card follows it; the right end when null
     Func<CancellationToken, Task<BatteryRefreshOutcome>>? RefreshBattery = null,   // reads the battery again; no refresh icon works when null
-    Func<DateTimeOffset, HistoryWindow>? QueryHistory = null)   // the 24 hours of live readings ending then; the history page is empty when null
+    Func<DateTimeOffset, HistoryWindow>? QueryHistory = null,   // the 24 hours of live readings ending then; the history page is empty when null
+    Func<bool>? SendToRowOn = null,   // whether the card shows its Send to row (SendToAccess.CardRow); off when null
+    Action? OpenSendTo = null)        // the Send to row was pressed: the picker opens
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }
@@ -397,6 +399,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             {
                 CardShortcut.Connect => values with { ConnectFailure = note.Reason },
                 CardShortcut.Disconnect => values with { DisconnectFailure = note.Reason },
+                CardShortcut.SendTo => values with { SendToFailure = note.Reason },
                 _ => values with { OpenCardFailure = note.Reason },
             };
         }
@@ -428,6 +431,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             Setup: setup)
         {
             Parts = BatteryFreshness.Shown(snapshot, time.GetUtcNow()),
+            ShowSendTo = callbacks.SendToRowOn?.Invoke() ?? false,
         };
     }
 
@@ -455,6 +459,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         _card.SettingsRequested += OnSettingsRequested;
         _card.RefreshRequested += OnRefreshRequested;
         _card.BluetoothSettingsRequested += OnBluetoothSettingsRequested;
+        _card.SendToRequested += OnSendToRequested;
         _card.UpdateRequested += OnUpdateRequested;
         _card.SettingChanged += OnSettingChanged;
         _card.CloseRequested += OnCardClosed;
@@ -469,12 +474,20 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         card.SettingsRequested -= OnSettingsRequested;
         card.RefreshRequested -= OnRefreshRequested;
         card.BluetoothSettingsRequested -= OnBluetoothSettingsRequested;
+        card.SendToRequested -= OnSendToRequested;
         card.UpdateRequested -= OnUpdateRequested;
         card.SettingChanged -= OnSettingChanged;
         card.CloseRequested -= OnCardClosed;
     }
 
     private void OnBluetoothSettingsRequested(object? sender, EventArgs e) => _host?.OpenBluetoothSettings(_place);
+
+    // The Send to row: the card goes away, as it does for any action it starts, and the picker opens where it was.
+    private void OnSendToRequested(object? sender, EventArgs e)
+    {
+        HideOnUiThread();
+        _callbacks.OpenSendTo?.Invoke();
+    }
 
     private void OnToggleRequested(object? sender, EventArgs e) => _callbacks.RequestToggle(_place);
 
@@ -610,6 +623,12 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 break;
             case SettingsRowId.FullyCharged:
                 _host!.SetFullyChargedNotice(toggle.On, place);
+                break;
+            case SettingsRowId.SendToCard:
+                _host!.SetSendToOnCard(toggle.On, place);
+                break;
+            case SettingsRowId.SendToGauge:
+                _host!.SetSendToOnGauge(toggle.On, place);
                 break;
         }
     }

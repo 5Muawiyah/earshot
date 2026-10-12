@@ -9,7 +9,7 @@ namespace Earshot.Widget;
 
 // Which of the card's focusable items has the keyboard focus. There are no child controls, so focus is
 // tracked here and painted as the system focus rectangle.
-internal enum WidgetCardFocus { Button, Switch, Gear, UpdateButton, Refresh, Status }
+internal enum WidgetCardFocus { Button, Switch, Gear, UpdateButton, Refresh, Status, SendTo }
 
 // Which control of a sub-page has the keyboard focus: the back button, or a footer button (Index is the button).
 internal enum SetupTargetKind { Back, Button, Row, Day }
@@ -56,6 +56,10 @@ internal sealed record WidgetCardModel(
     public BatteryRefreshView? Refresh { get; init; }
 
     public ShownBattery ShownParts => Parts ?? BatteryFreshness.Shown(Snapshot, Now);
+
+    // The Send to row under the Connect button: on while the setting for it is on (SendToAccess.CardRow). The case-open card never
+    // draws it, whatever this says.
+    public bool ShowSendTo { get; init; }
 }
 
 // The dedicated three-column card: Left, Right, Case battery (each greyed when its value is not fresh), where
@@ -112,9 +116,13 @@ internal sealed partial class WidgetCard : Form
     private bool _leftButtonDownOnUpdate;
     private bool _leftButtonDownOnRefresh;
     private bool _leftButtonDownOnStatus;
+    private bool _leftButtonDownOnSendTo;
 
     // The status row's chevron was pressed while Bluetooth is off: the presenter opens Windows' Bluetooth settings.
     public event EventHandler? BluetoothSettingsRequested;
+
+    // The Send to row was pressed (Enter, Space or a mouse click on it): the presenter closes the card and opens the picker.
+    public event EventHandler? SendToRequested;
     private SetupTarget? _leftButtonDownOnSetupTarget;
 
     public WidgetCard(ILog log, bool notice = false)
@@ -387,6 +395,11 @@ internal sealed partial class WidgetCard : Form
             _focus = WidgetCardFocus.Button;
         }
 
+        if (_focus == WidgetCardFocus.SendTo && _mainLayout.SendTo.IsEmpty)
+        {
+            _focus = WidgetCardFocus.Button;
+        }
+
         SizeTo(new Size(layout.Width, layout.Height));
         RepaintIfChanged();
     }
@@ -406,7 +419,7 @@ internal sealed partial class WidgetCard : Form
 
         return WidgetCardLayout.Compute(
             _dpi, model.ShowSwitch, showGear: true, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, showRefresh: !_notice,
-            textScale: _look.TextScale);
+            textScale: _look.TextScale, showSendTo: model.ShowSendTo && !_notice);
     }
 
     private WidgetCardLayout.SetupLayout ComputeSetupLayout(Graphics measure, SetupViewModel setup)
@@ -511,6 +524,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnUpdate = false;
         _leftButtonDownOnRefresh = false;
         _leftButtonDownOnStatus = false;
+        _leftButtonDownOnSendTo = false;
         _leftButtonDownOnSetupTarget = null;
         _leftButtonDownOnSettingsTarget = null;
         EndScrollDrag();
@@ -645,6 +659,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnUpdate = e.Button == MouseButtons.Left && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
         _leftButtonDownOnRefresh = e.Button == MouseButtons.Left && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
         _leftButtonDownOnStatus = e.Button == MouseButtons.Left && !_notice && BluetoothOff && layout.WhereLine.Contains(e.Location);
+        _leftButtonDownOnSendTo = e.Button == MouseButtons.Left && !layout.SendTo.IsEmpty && layout.SendTo.Contains(e.Location);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -688,6 +703,7 @@ internal sealed partial class WidgetCard : Form
         bool activatesUpdate = e.Button == MouseButtons.Left && _leftButtonDownOnUpdate && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
         bool activatesRefresh = e.Button == MouseButtons.Left && _leftButtonDownOnRefresh && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
         bool activatesStatus = e.Button == MouseButtons.Left && _leftButtonDownOnStatus && BluetoothOff && layout.WhereLine.Contains(e.Location);
+        bool activatesSendTo = e.Button == MouseButtons.Left && _leftButtonDownOnSendTo && !layout.SendTo.IsEmpty && layout.SendTo.Contains(e.Location);
         ClearPressedFlags();
 
         if (activatesGear)
@@ -703,6 +719,11 @@ internal sealed partial class WidgetCard : Form
         else if (activatesStatus)
         {
             _focus = WidgetCardFocus.Status;
+            ActivateFocused();
+        }
+        else if (activatesSendTo)
+        {
+            _focus = WidgetCardFocus.SendTo;
             ActivateFocused();
         }
         else if (activatesUpdate)
@@ -809,6 +830,11 @@ internal sealed partial class WidgetCard : Form
         }
 
         DrawButton(g, layout.Button);
+        if (!layout.SendTo.IsEmpty)
+        {
+            DrawSendToRow(g, layout.SendTo);
+        }
+
         if (layout.ShowSwitch)
         {
             DrawSwitch(g, layout.Switch);
@@ -871,6 +897,11 @@ internal sealed partial class WidgetCard : Form
     private void MoveFocus()
     {
         var order = new List<WidgetCardFocus> { WidgetCardFocus.Button };
+        if (!_mainLayout.SendTo.IsEmpty)
+        {
+            order.Add(WidgetCardFocus.SendTo);
+        }
+
         if (_model.ShowSwitch)
         {
             order.Add(WidgetCardFocus.Switch);
@@ -941,6 +972,13 @@ internal sealed partial class WidgetCard : Form
             if (BluetoothOff)
             {
                 BluetoothSettingsRequested?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        else if (_focus == WidgetCardFocus.SendTo)
+        {
+            if (!_mainLayout.SendTo.IsEmpty)
+            {
+                SendToRequested?.Invoke(this, EventArgs.Empty);
             }
         }
         else if (_focus == WidgetCardFocus.UpdateButton)
@@ -1323,6 +1361,30 @@ internal sealed partial class WidgetCard : Form
 
             var chevronRect = new Rectangle(bounds.Right - chevron, bounds.Y + ((bounds.Height - chevron) / 2), chevron, chevron);
             _ = CardPaint.TryGlyph(g, FluentGlyphs.ChevronRight, chevronRect, colours.TextSecondary, _dpi, ChevronGlyphAt96, _look.TextScale);
+        }
+    }
+
+    // The Send to row: its icon, the words in the primary ink and a chevron at the end, the way the status row draws its own when it
+    // opens something. Pressing it opens the picker.
+    private void DrawSendToRow(Graphics g, Rectangle bounds)
+    {
+        CardColours colours = Colours;
+        int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
+        var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
+        int chevron = TextFit.Grow(ChevronGlyphAt96, _dpi, _look.TextScale);
+        int gap = CardPlacement.Scale(8, _dpi);
+        int textX = bounds.X;
+        if (CardPaint.TryGlyph(g, FluentGlyphs.Send, iconRect, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
+        {
+            textX = iconRect.Right + gap;
+        }
+
+        DrawText(g, new Rectangle(textX, bounds.Y, Math.Max(1, bounds.Right - chevron - gap - textX), bounds.Height), SendToCopy.CardRow, colours.Text, TypeRole.Body, StringAlignment.Near);
+        var chevronRect = new Rectangle(bounds.Right - chevron, bounds.Y + ((bounds.Height - chevron) / 2), chevron, chevron);
+        _ = CardPaint.TryGlyph(g, FluentGlyphs.ChevronRight, chevronRect, colours.TextSecondary, _dpi, ChevronGlyphAt96, _look.TextScale);
+        if (_focus == WidgetCardFocus.SendTo && FocusShown)
+        {
+            CardPaint.Focus(g, bounds, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
         }
     }
 
