@@ -3191,6 +3191,7 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         _snapshot = snapshot;
         _deviceReadFailed = false;
+        NoteNewDeviceGroups(snapshot);
         NoteLinkOwner(snapshot);
         NoteRenderForPauseOnLeave(snapshot);
         if (CoordinatorRules.RenderOf(snapshot, WatchedContainer()) == RenderState.Active)
