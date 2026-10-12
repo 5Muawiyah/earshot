@@ -111,9 +111,11 @@ Startup on is not covered.
   least 6 seconds are left. The card shows "Waiting for the AirPods" and "Trying
   again" while it works. When it fails it gives a short reason: the AirPods did
   not answer, Windows refused the change, the audio driver did not accept the
-  request, open the case near this PC, in use on your iPhone, or not heard
-  nearby. If it did not connect, it puts back only what it turned on itself, and
-  the card has a Connect in Windows button: it lets the AirPods through and opens
+  request, open the case near this PC and try again, in use on your iPhone, or
+  not heard nearby. If it did not connect, it undoes its own change by the record
+  the gate kept of it when it can, and otherwise blocks the AirPods again as at
+  rest; the result can come a little after the 20 seconds while it tidies up.
+  The card has a Connect in Windows button: it lets the AirPods through and opens
   Windows' Bluetooth settings, and a connection made there in the next two
   minutes is left alone. The
   timings are limits in the code, not measurements, and the Connect has had no
@@ -122,9 +124,8 @@ Startup on is not covered.
   in the tray menu, on the settings page's Updates page, in Setup.exe, and as
   `earshot.ps1 -Action Fix`, and it works when Earshot is not installed. The
   card offers it as a button after two Connects in a row fail for a reason on
-  this PC's side, or after three that fail with nothing heard from the AirPods.
-  A failure on the AirPods' side (away, case shut, in use on the phone) does not
-  count. Fix connection plans from reads, then asks two questions on the
+  this PC's side. A failure on the AirPods' side (away, case shut, in use on the
+  phone) or one whose side could not be told does not count. Fix connection plans from reads, then asks two questions on the
   screen, and no flag or script can answer them. The first lists the changes
   that undo Earshot's own, then needs one administrator prompt. The second asks
   to remove the AirPods from Windows and pair them again, and you then pair

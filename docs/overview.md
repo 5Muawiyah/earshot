@@ -103,7 +103,9 @@ the card says "Waiting for the AirPods" and "Trying again". If it still fails,
 the card gives one short reason, for example "The AirPods did not answer this
 PC. They may need pairing again.", "Windows refused the change.", "Open the
 case near this PC.", "In use on your iPhone." or "Not heard nearby." A connect
-that did not get through puts back only what it turned on itself. Under the
+that did not get through undoes its own change by the record the gate kept of it
+when it can, and otherwise blocks the AirPods again as at rest, so its result can
+come a little after the 20 seconds. Under the
 reason the card has a Connect in Windows button: it lets the AirPods through,
 opens Windows' Bluetooth settings, and leaves a connection made there in the next
 two minutes alone. When Fix connection is offered, that button takes its place.
@@ -114,9 +116,8 @@ and the retry are limits in the code. No live run has timed one.
 
 If the AirPods stick on "Connecting" on this PC, Fix connection is for that. The
 card offers it as a button under the reason after two Connects in a row fail
-for a reason on this PC's side, or after three that fail with nothing heard from
-the AirPods. A failure on the AirPods' side (away, case shut, in use on the
-phone) does not count. It is also in the tray menu, on the settings page's
+for a reason on this PC's side. A failure on the AirPods' side (away, case shut,
+in use on the phone), or one whose side could not be told, does not count. It is also in the tray menu, on the settings page's
 Updates page, in Setup.exe and as `earshot.ps1 -Action Fix`, and it works when
 Earshot is not installed.
 

@@ -1206,7 +1206,12 @@ measurement. The steps:
    sentence. A request whose wait for the endpoint was already the retry is not
    retried again.
 4. A connect that does not reach an active endpoint has the allow it made undone
-   by that nonce, and nothing else.
+   by that nonce when the status file is there and recent; otherwise the nodes are
+   blocked as at rest. An allow whose run may still land (its wait was cut by the
+   budget) is blocked behind, whatever the nodes read, and a link bit that stays
+   up with no playing endpoint ends the connect as failed, with the nodes left to
+   the idle rule. The clean-up is not inside the 20 seconds, so a result can come
+   after them.
 5. With the A2DP filter turned down and protection on, the Hands-Free assisted
    way still runs, as before.
 
@@ -1219,8 +1224,9 @@ the air). The plain sentences are the ones in `ConnectFailureClassifier`, such
 as "The AirPods did not answer this PC. They may need pairing again."
 
 A timed-out connect is read against the broadcast: the AirPods' side only when
-the linked pair was not heard, is shut or is in use elsewhere; otherwise the
-failure is temporary and, on its retry, this PC's side.
+the linked pair was not heard, is shut or is in use elsewhere; unknown when
+nothing is known from the air (no linked pair, or the listener off); otherwise
+the failure is temporary and, on its retry, this PC's side.
 
 Every finished connect adds a line to an identifier-free connect history in the
 log folder: the action, the outcome, the class and raw codes, with no address,
@@ -1242,9 +1248,8 @@ every state", is pending an owner run.
 
 For AirPods that stick on "Connecting" on this PC. `FixOfferTracker` counts
 finished connects and raises the offer once: two in a row that failed on this
-PC's side, or three in a row that failed on this PC's side or for a reason
-nothing heard could tell. A success starts the count again. A failure on the
-AirPods' side and a cancelled connect neither count nor reset. The count is held
+PC's side (the owner's rule). A success starts the count again. A failure on the
+AirPods' side, an unknown one and a cancelled connect neither count nor reset. The count is held
 across a restart by reading the connect history back. When the offer is due the
 failure card is shown again with the same words and one added button, Fix
 connection. Fix connection is also in the tray menu (always), in the settings
@@ -1555,5 +1560,5 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe fix [--out <path>]` | Fix connection, run unelevated in the person's session. Plans from reads, asks two questions on the screen, runs `fix-apply` after one administrator prompt, and may remove the AirPods from Windows and pair them again. Takes no option that says yes. Exit code 75 when nobody was at the screen (plan only), 76 when the person declined. See [Fix connection](#fix-connection). |
 | `Earshot.exe fix-apply <planFile> <sha256>` | The elevated half of Fix connection, started by `fix` after the first question, never by hand. It re-derives the plan and applies only what both agree on. |
 | `Earshot.exe doctor [--out <path>]` | A read-only report of the install, the AirPods and Bluetooth, as a short summary and a JSON block, with names, addresses, ids, serial numbers, the user name and the PC name removed. Needs no administrator rights and touches no device. |
-| `Earshot.exe settings list` / `get <name>` / `set <name> <value>` [`--out <path>`] | Lists every setting that can be changed here with its value and what it accepts, reads one, or changes one. A running Earshot picks a change up within a second or two. An unknown name or a value out of range is refused with a non-zero exit code. |
+| `Earshot.exe settings list` / `get <name>` / `set <name> <value>` [`--out <path>`] | Lists every setting that can be changed here with its value and what it accepts, reads one, or changes one. A running Earshot picks a change up when it sees the file change; the code allows a 250 ms settle and up to 8 retries, a limit in the code rather than a measurement. An unknown name or a value out of range is refused with a non-zero exit code. |
 | `Earshot.exe uninstall-ui` / `Earshot.exe repair-ui` | What Settings > Apps > Installed apps runs for Uninstall and Modify. Unelevated, from the installed program only. See [Setup.exe and the Installed apps entry](#setupexe-and-the-installed-apps-entry). |
