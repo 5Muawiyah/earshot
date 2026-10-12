@@ -4,11 +4,11 @@ using Earshot.Contracts;
 namespace Earshot.App;
 
 // Why a Connect failed, in the three words the Fix offer cares about. This is the shape the connect fix's own classification is
-// read through; the offer is made for PcSide and Unknown, and for nothing else.
+// read through; the offer is made for PcSide and for nothing else (the owner's rule: this PC's side only).
 //   PcSide      something on this PC (Windows, the driver, a refused change) kept the AirPods from connecting
 //   DeviceSide  the AirPods themselves were away, in their case with the lid shut, or in use on the other device
 //   Temporary   a failure the connect retries
-//   Unknown     accepted and never connected, with nothing heard from the air: it may be this PC's side
+//   Unknown     accepted and never connected, with nothing heard from the air: either side, so never offered
 //   None        no failure
 internal enum FixFailureClass { None, Temporary, PcSide, DeviceSide, Unknown }
 
@@ -46,14 +46,13 @@ internal static class FixOffer
     public const string ButtonLabel = "Fix connection";
     public const string NotStartedMessage = "Fix connection could not start.";
 
-    // The offer is made only for a Connect that failed on this PC's side, or for a reason nothing heard could tell, was not
-    // cancelled, and has reached the threshold (the connect counts the unknown later than the PC-side). A failure that is the
-    // AirPods' (out of range, in their case, on the other device) is never followed by it, whatever the count.
+    // The offer is made only for a Connect that failed on this PC's side, was not cancelled, and has reached the threshold. A
+    // failure that is the AirPods' (out of range, in their case, on the other device) or whose side could not be told is never
+    // followed by it, whatever the count.
     public static bool ShouldOffer(IFixOfferFacts facts, bool succeeded, bool cancelled, bool wasConnect)
     {
         ArgumentNullException.ThrowIfNull(facts);
-        return wasConnect && !succeeded && !cancelled && facts.FixOfferDue &&
-            facts.FailureClass is FixFailureClass.PcSide or FixFailureClass.Unknown;
+        return wasConnect && !succeeded && !cancelled && facts.FixOfferDue && facts.FailureClass == FixFailureClass.PcSide;
     }
 }
 

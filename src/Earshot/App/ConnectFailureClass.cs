@@ -10,7 +10,8 @@ namespace Earshot.App;
 //   PcSide      this PC, its driver, its pairing or Earshot's set-up; the only class that can lead to Fix connection
 //   DeviceSide  the AirPods are away, in their case or in use on the phone; Fix connection never helps
 //   Unknown     a request that was accepted and never connected, with nothing heard from the air to say why (no linked
-//               pair, or the listener is off): it may be either side, so it counts toward the Fix offer, later than PcSide
+//               pair, or the listener is off): it may be either side, so it never leads to Fix connection (the owner's rule
+//               offers the fix for this PC's side only)
 internal enum FailureClass
 {
     None,
@@ -66,7 +67,7 @@ internal static class ConnectFailureClassifier
     public const string DriverDidNotAccept = "The audio driver did not accept the request.";
     public const string PartOfThemStayedOff = "Part of the AirPods stayed off.";
     public const string OpenTheCase = "Open the case near this PC.";
-    public const string OpenTheCaseOrFix = "Open the case near this PC, or try Fix connection.";
+    public const string OpenTheCaseAndTryAgain = "Open the case near this PC and try again.";
     public const string InUseOnYourIPhone = "In use on your iPhone.";
     public const string NotHeardNearby = "Not heard nearby.";
 
@@ -151,10 +152,9 @@ internal static class ConnectFailureClassifier
         DeviceHint.InUseElsewhere => new ConnectFailure(FailureClass.DeviceSide, InUseOnYourIPhone, "timed-out:in-use-elsewhere"),
         DeviceHint.NotHeard => new ConnectFailure(FailureClass.DeviceSide, NotHeardNearby, "timed-out:not-heard"),
 
-        // Nothing is known about the AirPods from the air, so the failure may be either side. It is its own class: it
-        // counts toward the Fix offer, but later than a failure known to be this PC's, and the sentence asks for the one
-        // thing that costs nothing before it names the repair.
-        DeviceHint.Unknown => new ConnectFailure(FailureClass.Unknown, OpenTheCaseOrFix, "timed-out:no-hint"),
+        // Nothing is known about the AirPods from the air, so the failure may be either side. It is its own class, never
+        // counted toward the Fix offer, and the sentence asks for the one thing that costs nothing.
+        DeviceHint.Unknown => new ConnectFailure(FailureClass.Unknown, OpenTheCaseAndTryAgain, "timed-out:no-hint"),
         _ => Escalate(FailureClass.Temporary, DidNotAnswer, "timed-out:heard-nearby", retried),
     };
 

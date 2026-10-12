@@ -49,10 +49,10 @@ public sealed class FixOfferFactsTests
         }
     }
 
-    // A connect that was accepted and never came, with nothing heard from the air, may be this PC's side, so once the connect
-    // counts it as due the card offers the fix like a PC-side failure.
+    // A connect that was accepted and never came, with nothing heard from the air, may be either side. The owner's rule offers the
+    // fix for this PC's side only, so even a report marked due does not give the button.
     [TestMethod]
-    public void AnUnknownFailureThatTheConnectCountedAsDueGivesTheButton()
+    public void AnUnknownFailureNeverGivesTheButtonEvenWhenTheCountSaysDue()
     {
         var timedOut = new ConnectResult(ConnectOutcome.AttemptedTimedOut, "", []);
         ConnectFailure failure = ConnectFailureClassifier.Classify(timedOut, DeviceHint.Unknown, retried: true);
@@ -60,7 +60,7 @@ public sealed class FixOfferFactsTests
 
         Assert.AreEqual(FailureClass.Unknown, failure.Class);
         Assert.AreEqual(FixFailureClass.Unknown, FixOfferFacts.From(due).FailureClass);
-        Assert.IsTrue(Offered(due));
+        Assert.IsFalse(Offered(due));
         Assert.IsFalse(Offered(Failed(failure.Class, due: false)));
     }
 

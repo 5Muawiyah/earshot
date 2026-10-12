@@ -87,13 +87,13 @@ public sealed class ConnectFailureClassTests
     }
 
     [TestMethod]
-    public void ARequestThatWasAcceptedWithNothingHeardFromTheAirIsItsOwnClassAndNamesTheRepair()
+    public void ARequestThatWasAcceptedWithNothingHeardFromTheAirIsItsOwnClassAndAsksForTheCase()
     {
         ConnectFailure failure = ConnectFailureClassifier.Classify(
             new ConnectResult(ConnectOutcome.AttemptedTimedOut, ConnectMessages.StillConnecting, []), DeviceHint.Unknown, retried: false);
 
         Assert.AreEqual(FailureClass.Unknown, failure.Class);
-        Assert.AreEqual("Open the case near this PC, or try Fix connection.", failure.Reason);
+        Assert.AreEqual("Open the case near this PC and try again.", failure.Reason);
     }
 
     [TestMethod]

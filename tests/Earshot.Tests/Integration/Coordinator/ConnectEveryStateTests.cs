@@ -361,7 +361,7 @@ public sealed class ConnectEveryStateTests
     // ---- the Fix offer ----
 
     [TestMethod]
-    public void ThreeTimeoutsWithNoLinkedPairReachTheOfferAtTheThirdAndNotBefore()
+    public void TimeoutsWithNoLinkedPairNeverReachTheOffer()
     {
         using var h = new CoordinatorHarness();
         h.Block.Status = Statuses.Allowed(blockAtBoot: false);
@@ -377,10 +377,8 @@ public sealed class ConnectEveryStateTests
         }
 
         Assert.IsTrue(reports.All(r => r.FailureClass == FailureClass.Unknown));
-        Assert.AreEqual("Open the case near this PC, or try Fix connection.", reports[0].UserMessage);
-        Assert.IsFalse(reports[0].FixOfferDue);
-        Assert.IsFalse(reports[1].FixOfferDue);
-        Assert.IsTrue(reports[2].FixOfferDue);
+        Assert.AreEqual("Open the case near this PC and try again.", reports[0].UserMessage);
+        Assert.IsTrue(reports.All(r => !r.FixOfferDue), "Unknown is not this PC's side, so it never raises the Fix offer.");
     }
 
     private static CoordinatorHarness AllowedWithNoBlockAtBoot(FixOfferTracker? tracker)

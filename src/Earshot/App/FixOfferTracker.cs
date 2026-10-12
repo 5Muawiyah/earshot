@@ -3,20 +3,15 @@ using Earshot.Diagnostics;
 namespace Earshot.App;
 
 // Decides when the card should offer Fix connection. Two connects in a row that failed for a reason on this PC's side raise
-// the offer, once, and the count starts again; so do three in a row that failed for a reason on either side or on none that
-// could be heard (Unknown). A success starts the count again too. A failure on the AirPods' side (away, in the case, in use
-// on the phone) and a cancelled connect neither count nor reset: they say nothing about this PC's pairing.
+// the offer, once, and the count starts again (the owner's rule: this PC's side only). A success starts the count again too.
+// A failure on the AirPods' side (away, in the case, in use on the phone), one whose side could not be told (Unknown) and a
+// cancelled connect neither count nor reset.
 internal sealed class FixOfferTracker
 {
     // Consecutive PC-side failures that raise the offer.
     public const int FailuresForOffer = 2;
 
-    // Consecutive PC-side and Unknown failures that raise it when too few are known to be this PC's.
-    public const int UnknownFailuresForOffer = 3;
-
-    private int _pcSide;
-
-    // The PC-side and Unknown failures counted since the last success or offer.
+    // The PC-side failures counted since the last success or offer.
     public int Consecutive { get; private set; }
 
     // Notes one finished connect. Returns true exactly when this one makes the offer due.
@@ -30,28 +25,21 @@ internal sealed class FixOfferTracker
         if (success)
         {
             Consecutive = 0;
-            _pcSide = 0;
             return false;
         }
 
-        if (failure is not (FailureClass.PcSide or FailureClass.Unknown))
+        if (failure != FailureClass.PcSide)
         {
             return false;
         }
 
         Consecutive++;
-        if (failure == FailureClass.PcSide)
-        {
-            _pcSide++;
-        }
-
-        if (_pcSide < FailuresForOffer && Consecutive < UnknownFailuresForOffer)
+        if (Consecutive < FailuresForOffer)
         {
             return false;
         }
 
         Consecutive = 0;
-        _pcSide = 0;
         return true;
     }
 

@@ -53,7 +53,7 @@ public sealed class StalledDriverTests
         ToggleReport report = toggle.GetAwaiter().GetResult();
         Assert.AreEqual(OpStatus.Failed, report.Status);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The coordinator's own allow was not undone.");
-        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseOrFix, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, report.UserMessage);
         Assert.IsFalse(h.Coordinator.IsBusy);
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "was not refreshed within"));
         h.AssertAtRest();

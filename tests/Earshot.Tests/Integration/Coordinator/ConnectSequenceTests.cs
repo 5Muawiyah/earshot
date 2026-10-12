@@ -71,8 +71,8 @@ public sealed class ConnectSequenceTests
         Assert.AreEqual(BlockState.Blocked, h.Coordinator.BlockStatus?.State);
 
         // The nodes are disabled again, so nothing can still be connecting.
-        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseOrFix, report.UserMessage);
-        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseOrFix, h.Cards.Statuses[^1]);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, h.Cards.Statuses[^1]);
         CollectionAssert.DoesNotContain(h.Cards.Statuses, ConnectMessages.StillConnecting);
     }
 
@@ -97,7 +97,7 @@ public sealed class ConnectSequenceTests
         Assert.AreEqual(OpStatus.Failed, report.Status);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The connect's own allow was left in place on a setting that could not be read.");
         Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
-        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseOrFix, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, report.UserMessage);
     }
 
     [TestMethod]
@@ -113,7 +113,7 @@ public sealed class ConnectSequenceTests
         ToggleReport report = h.Toggle(connect: true);
 
         // Nothing was allowed, so the connect blocks nothing, and the request may still be taken.
-        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseOrFix, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, report.UserMessage);
         Assert.IsEmpty(h.Block.Calls);
         Assert.IsTrue(h.Coordinator.IdleWaitRunning, "The idle rule still blocks the nodes if it never connects.");
     }

@@ -20,13 +20,16 @@ public sealed class FixOfferTrackerTests
     }
 
     [TestMethod]
-    public void ThreeUnknownInARowRaiseTheOfferOnTheThirdAndTwoDoNot()
+    public void UnknownFailuresNeverRaiseTheOfferHoweverMany()
     {
+        // The owner's rule: the offer follows failures on this PC's side only. Unknown may be either side, so it is not counted.
         var t = new FixOfferTracker();
 
-        Assert.IsFalse(Note(t, FailureClass.Unknown));
-        Assert.IsFalse(Note(t, FailureClass.Unknown));
-        Assert.IsTrue(Note(t, FailureClass.Unknown));
+        for (int i = 0; i < 5; i++)
+        {
+            Assert.IsFalse(Note(t, FailureClass.Unknown));
+        }
+
         Assert.AreEqual(0, t.Consecutive);
     }
 
@@ -40,21 +43,20 @@ public sealed class FixOfferTrackerTests
 
         Assert.IsFalse(Note(t, FailureClass.PcSide));
         Assert.IsFalse(Note(t, FailureClass.Unknown));
-        Assert.IsTrue(Note(t, FailureClass.PcSide), "Three counted failures, two of them known to be this PC's.");
+        Assert.IsTrue(Note(t, FailureClass.PcSide), "An Unknown between two PC-side failures neither counts nor resets.");
     }
 
     [TestMethod]
-    public void ASuccessAndTheAirPodsSideLeaveTheUnknownCountAsTheyDoThePcSideCount()
+    public void UnknownAndTheAirPodsSideNeitherCountNorResetThePcSideCount()
     {
         var t = new FixOfferTracker();
-        Note(t, FailureClass.Unknown);
-        Note(t, FailureClass.Unknown);
-        Assert.IsFalse(Note(t, FailureClass.DeviceSide), "The AirPods' side neither counts nor resets.");
-        Assert.AreEqual(2, t.Consecutive);
+        Assert.IsFalse(Note(t, FailureClass.PcSide));
+        Assert.IsFalse(Note(t, FailureClass.Unknown));
+        Assert.IsFalse(Note(t, FailureClass.DeviceSide));
+        Assert.IsFalse(Note(t, FailureClass.Unknown));
+        Assert.AreEqual(1, t.Consecutive);
 
-        Assert.IsFalse(Note(t, FailureClass.None, success: true));
-        Assert.IsFalse(Note(t, FailureClass.Unknown));
-        Assert.IsFalse(Note(t, FailureClass.Unknown));
+        Assert.IsTrue(Note(t, FailureClass.PcSide));
     }
 
     [TestMethod]
