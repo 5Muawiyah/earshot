@@ -68,6 +68,62 @@ public sealed class CardTextFitTests
         yield return ("history, two days back", false, (card, dpi) => card.Render(CardKit.HistoryModel(HistoryDays.View(2, Now, TimeZoneInfo.Utc, null)), dpi));
     }
 
+    // "No reading" takes the value's place, in a column that has room for two lines. It wraps to them at the size asked for before it
+    // is drawn smaller, and is drawn at the largest size with which the wrapped words fit the column.
+    [TestMethod]
+    public void NoReadingWrapsInItsColumnBeforeItIsDrawnSmaller()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            var failures = new List<string>();
+            int seen = 0;
+            using var probe = new Bitmap(1, 1);
+            using Graphics measure = Graphics.FromImage(probe);
+            measure.TextRenderingHint = CardPaint.CardTextHint;
+            foreach (int dpi in Dpis)
+            {
+                foreach (double scale in Scales)
+                {
+                    using WidgetCard card = DesignPixels.NewCard(DesignTheme.Light, scale, false);
+                    CardPaint.DrawnTextLog = [];
+                    try
+                    {
+                        card.Render(CardKit.MainModel(CardKit.Snapshot()) with { Now = Now }, dpi);
+                        using Bitmap bitmap = CardKit.Render(card);
+                        foreach (DrawnText drawn in CardPaint.DrawnTextLog.Where(d => d.Text == WidgetCopy.NoReading))
+                        {
+                            seen++;
+                            string where = "dpi " + dpi + ", text " + scale + ": ";
+                            if ((drawn.Flags & StringFormatFlags.NoWrap) != 0)
+                            {
+                                failures.Add(where + "drawn on one line, so it shrinks instead of wrapping");
+                            }
+
+                            using var format = new StringFormat(drawn.Flags) { Alignment = drawn.Horizontal, LineAlignment = drawn.Vertical, Trimming = drawn.Trimming };
+                            if (drawn.FontSize < drawn.RequestedPixels - 0.5f)
+                            {
+                                // Drawn smaller than asked: one pixel larger must no longer fit the wrapped words.
+                                using var larger = new Font(drawn.FontFamily, drawn.FontSize + 1, drawn.FontStyle, drawn.FontUnit);
+                                _ = measure.MeasureString(drawn.Text, larger, new SizeF(drawn.Bounds.Width, drawn.Bounds.Height), format, out int fitted, out _);
+                                if (fitted >= drawn.Text.Length)
+                                {
+                                    failures.Add(where + drawn.FontSize + " px drawn, but " + (drawn.FontSize + 1) + " px fits wrapped (asked " + drawn.RequestedPixels + ")");
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        CardPaint.DrawnTextLog = null;
+                    }
+                }
+            }
+
+            Assert.AreEqual(Dpis.Length * Scales.Length * 3, seen, "Three columns, each saying No reading, on every dpi and text size.");
+            Assert.IsEmpty(failures, string.Join("\n", failures.Take(40)));
+        });
+    }
+
     [TestMethod]
     public void EveryTextOnEveryPageIsDrawnWholeAtEveryTextSizeAndDisplayScale()
     {

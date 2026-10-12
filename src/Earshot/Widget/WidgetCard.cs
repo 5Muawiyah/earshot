@@ -1208,8 +1208,9 @@ internal sealed partial class WidgetCard : Form
         CardColours colours = Colours;
         if (shown.Percent is not { } percent)
         {
-            // Words, not a number: in the body size, which at a large text size gives way to the column's width where the number's would not.
-            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Body, StringAlignment.Center);
+            // Words, not a number: in the body size. Where the column is too narrow for them on one line they wrap to the two lines
+            // it has room for before the size gives way.
+            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Body, StringAlignment.Center, wrap: true);
             return;
         }
 
@@ -1367,9 +1368,9 @@ internal sealed partial class WidgetCard : Form
         && (_model.Refresh?.Outcome == BatteryRefreshOutcome.BluetoothOff
             || (_model.Snapshot.Watcher == WidgetWatcherState.Stopped && _model.Snapshot.WatcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode));
 
-    private void DrawText(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role, StringAlignment horizontal)
+    private void DrawText(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role, StringAlignment horizontal, bool wrap = false)
     {
-        using var format = new StringFormat(StringFormatFlags.NoWrap) { Alignment = horizontal, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+        using var format = new StringFormat(wrap ? 0 : StringFormatFlags.NoWrap) { Alignment = horizontal, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
         using Font font = FittingRoleFont(g, text, bounds, role, format);
         using var brush = new SolidBrush(colour);
         g.DrawString(text, font, brush, bounds, format);
