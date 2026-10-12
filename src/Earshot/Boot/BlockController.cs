@@ -568,11 +568,20 @@ internal sealed class BlockController : IBlockController, IDisposable
             : _worker.RunAsync(token => ChangeNodes(GateVerbs.Block, null, token), ct);
     }
 
+    // Sent even when every node reads blocked: an allow this tray sent may still enable them after this read, and the gate's task
+    // runs a new instance after the ones already running (MultipleInstances Queue), so this run follows the allow's. The order
+    // is the documented policy; no live run has shown it yet.
+    // https://learn.microsoft.com/en-us/windows/win32/api/taskschd/ne-taskschd-task_instances_policy
+    public Task<ControllerResult> BlockBehindAllowAsync(string? allowNonce, CancellationToken ct = default) =>
+        allowNonce is not null && BoundaryValidation.IsNonce(allowNonce)
+            ? _worker.RunAsync(token => ChangeNodes(GateVerbs.UndoAllow, allowNonce, token, evenIfBlocked: true), ct)
+            : _worker.RunAsync(token => ChangeNodes(GateVerbs.BlockIdle, null, token, evenIfBlocked: true), ct);
+
     private ControllerResult ChangeNodes(bool block, CancellationToken ct) =>
         ChangeNodes(block ? GateVerbs.Block : GateVerbs.Allow, null, ct);
 
     // block, allow, block-idle (a block that refuses to cut a live link) or undo-allow (argument is the allow's nonce).
-    private ControllerResult ChangeNodes(string verb, string? argument, CancellationToken ct)
+    private ControllerResult ChangeNodes(string verb, string? argument, CancellationToken ct, bool evenIfBlocked = false)
     {
         bool block = verb != GateVerbs.Allow;
         var steps = new List<StepOutcome>();
@@ -595,7 +604,7 @@ internal sealed class BlockController : IBlockController, IDisposable
 
         // Only a read of every target answers "already": a node that could not be read never counts, so the gate
         // runs and decides from its own strict read.
-        if (block ? BlockStateClassifier.IsFullyBlocked(before) : BlockStateClassifier.IsFullyAllowed(before))
+        if (!evenIfBlocked && (block ? BlockStateClassifier.IsFullyBlocked(before) : BlockStateClassifier.IsFullyAllowed(before)))
         {
             return Finish(verb, ControllerResult.Already(block ? AlreadyBlockedMessage : AlreadyAllowedMessage));
         }

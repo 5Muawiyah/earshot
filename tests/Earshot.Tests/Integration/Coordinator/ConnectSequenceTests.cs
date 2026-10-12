@@ -248,6 +248,7 @@ public sealed class ConnectSequenceTests
 
         Assert.IsTrue(idle.IsCompleted);
         Assert.AreEqual("block", h.Block.Calls.Skip(before).LastOrDefault(), "Exit closed without a block while the allow could still land: " + string.Join(", ", h.Block.Calls));
+        Assert.AreEqual("block-idle", h.Block.GateVerbCalls[^1], "Behind an allow, the block that does not cut a live link: " + string.Join(", ", h.Block.GateVerbCalls));
         Assert.AreNotEqual(BlockCoordinator.ClosedBeforeChangeEndedMessage, h.Coordinator.ClosingNotice);
     }
 

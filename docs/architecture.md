@@ -1207,8 +1207,10 @@ measurement. The steps:
    retried again.
 4. A connect that does not reach an active endpoint has the allow it made undone
    by that nonce when the status file is there and recent; otherwise the nodes are
-   blocked as at rest. An allow whose run may still land (its wait was cut by the
-   budget) is blocked behind, whatever the nodes read, and a link bit that stays
+   blocked as at rest. For an allow whose run may still land (its wait was cut by
+   the budget) the undo, or the block that does not cut a live link, is sent even
+   when every node reads blocked, so the gate's task runs it after the allow under
+   its documented queue policy (not yet seen in a live run); a link bit that stays
    up with no playing endpoint ends the connect as failed, with the nodes left to
    the idle rule. The clean-up is not inside the 20 seconds, so a result can come
    after them.
@@ -1557,7 +1559,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe service` | The hand-back service's run mode. Started by Windows from the service's registration, not by hand. |
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
 | `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep and `gate status` change the state of the device**; those two only read. They exist for the live tests in `tools\live-tests` and are not part of normal use. |
-| `Earshot.exe fix [--out <path>]` | Fix connection, run unelevated in the person's session. Plans from reads, asks two questions on the screen, runs `fix-apply` after one administrator prompt, and may remove the AirPods from Windows and pair them again. Takes no option that says yes. Exit code 75 when nobody was at the screen (plan only), 76 when the person declined. See [Fix connection](#fix-connection). |
+| `Earshot.exe fix [--out <path>]` | Fix connection, run unelevated in the person's session. Plans from reads, asks two questions on the screen, runs `fix-apply` after one administrator prompt, and may remove the AirPods from Windows and pair them again. Takes no option that says yes. Exit code 75 when nobody was at the screen (plan only), 76 when the person declined the first question, 79 when they declined the second after the first one's changes were made, 70 when a step failed. See [Fix connection](#fix-connection). |
 | `Earshot.exe fix-apply <planFile> <sha256>` | The elevated half of Fix connection, started by `fix` after the first question, never by hand. It re-derives the plan and applies only what both agree on. |
 | `Earshot.exe doctor [--out <path>]` | A read-only report of the install, the AirPods and Bluetooth, as a short summary and a JSON block, with names, addresses, ids, serial numbers, the user name and the PC name removed. Needs no administrator rights and touches no device. |
 | `Earshot.exe settings list` / `get <name>` / `set <name> <value>` [`--out <path>`] | Lists every setting that can be changed here with its value and what it accepts, reads one, or changes one. A running Earshot picks a change up when it sees the file change; the code allows a 250 ms settle and up to 8 retries, a limit in the code rather than a measurement. An unknown name or a value out of range is refused with a non-zero exit code. |

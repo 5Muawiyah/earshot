@@ -62,6 +62,13 @@ public interface IBlockController
     // is still not at rest; refuses like BlockIfIdleAsync when the AirPods are connected. A controller without the verb blocks.
     Task<ControllerResult> UndoAllowAsync(string allowNonce, CancellationToken ct = default) => BlockAsync(ct);
 
+    // For an allow this tray sent that may still land: sends the request even when every node reads blocked, since the allow may
+    // enable them after this read. The gate's task queues the run behind the allow's (MultipleInstances Queue). It is the
+    // undo-allow for that nonce when one is given, and otherwise the block that refuses to cut a live link, so a link that forms
+    // when the allow lands is not cut on purpose. A controller without the verbs blocks as those two do.
+    Task<ControllerResult> BlockBehindAllowAsync(string? allowNonce, CancellationToken ct = default) =>
+        allowNonce is null ? BlockIfIdleAsync(ct) : UndoAllowAsync(allowNonce, ct);
+
     // Copies the hand-back setting into the machine folder's config.json (RunEx "sethandback-on" or "sethandback-off"),
     // where the service that hands the AirPods back at shut down can read it. The tray's own settings file is not
     // readable by that service. A controller with no gate has nothing to copy it to.

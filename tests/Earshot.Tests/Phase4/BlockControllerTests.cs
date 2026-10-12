@@ -635,6 +635,22 @@ public sealed class BlockControllerTests
         Assert.IsEmpty(h.Nodes.Calls.Where(c => c.Kind == "disable-phantom"));
     }
 
+    // An allow this tray sent may still land after the read, so a block behind it is sent even with every node reading blocked:
+    // the gate's task queues it after the allow. Without a nonce it is the block that refuses to cut a live link.
+    [TestMethod]
+    public async Task ABlockBehindAnAllowIsSentEvenWhenEveryNodeReadsBlocked()
+    {
+        using var h = new Harness();
+        await h.Controller.BlockAsync();
+        int runs = h.Tasks.Runs.Count;
+
+        ControllerResult behind = await ((IBlockController)h.Controller).BlockBehindAllowAsync(null);
+
+        Assert.HasCount(runs + 1, h.Tasks.Runs, "Every node read blocked, and the block behind the allow was still sent.");
+        Assert.AreEqual(GateVerbs.BlockIdle, h.Tasks.Runs[^1][0]);
+        Assert.AreNotEqual(OpStatus.AlreadyInState, behind.Status, behind.UserMessage);
+    }
+
     [TestMethod]
     public async Task ANodeThatIsNotPresentButStillMarkedDisabledCountsAsBlocked()
     {

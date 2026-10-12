@@ -2206,7 +2206,7 @@ internal sealed partial class BlockCoordinator : IDisposable
 
             _log.Info("connect clean-up: blocking the nodes again.");
             ProtectionRun run = await RunBlockSequenceAsync(BlockReason.ConnectCleanUp, request.Container, request.Place, CancellationToken.None, cleanup.AllowNonce,
-                behindAllow: cleanup.AllowIssued && AllowMayLand);
+                behindAllow: status?.State == BlockState.Blocked && cleanup.AllowIssued && AllowMayLand);
             steps.AddRange(run.Steps);
             if (run.Skipped is { } why)
             {
@@ -2730,11 +2730,13 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
     }
 
-    // The block for this check. The idle block asks the gate not to cut a live link; a connect's clean-up asks it to put back
-    // exactly its own allow; every other block, and either of these once the look before it judged the link bit stuck, is the
-    // plain block.
+    // The block for this check. A block behind an allow that may still land is sent even with every node reading blocked, as
+    // the undo of that allow or the block that does not cut a live link; the idle block asks the gate not to cut a live link; a
+    // connect's clean-up asks it to put back exactly its own allow; every other block, and either of these once the look before
+    // it judged the link bit stuck, is the plain block.
     private Task<ControllerResult> SendBlockAsync(BlockCheck? check, BlockDecision decision) => check switch
     {
+        { BehindAllow: true } c => _block.BlockBehindAllowAsync(c.AllowNonce, CancellationToken.None),
         { Reason: BlockReason.Idle } when !decision.Plain => _block.BlockIfIdleAsync(CancellationToken.None),
         { Reason: BlockReason.ConnectCleanUp, AllowNonce: { } nonce } when !decision.Plain => _block.UndoAllowAsync(nonce, CancellationToken.None),
         _ => _block.BlockAsync(CancellationToken.None),
@@ -3804,7 +3806,8 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         _log.Info("Closing: the nodes are enabled and the AirPods are not in use. Blocking before Earshot closes (" + Utc(_time.GetUtcNow()) + ").");
-        ProtectionRun run = await RunBlockSequenceAsync(BlockReason.Closing, container, CardPlace.NearTray, ct, behindAllow: allowMayLand);
+        ProtectionRun run = await RunBlockSequenceAsync(BlockReason.Closing, container, CardPlace.NearTray, ct,
+            behindAllow: allowMayLand && !CoordinatorRules.NodesEnabled(status));
         if (run.Skipped is { } skipped)
         {
             if (skipped is ProtectMayRunReason or PinMayMoveReason)
