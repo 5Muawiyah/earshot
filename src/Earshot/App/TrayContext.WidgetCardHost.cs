@@ -285,6 +285,8 @@ internal sealed partial class TrayContext
 
         public void RepairEarshot() => _tray.RepairFromCard();
 
+        public void FixConnection() => _tray.FixConnectionFromSettings();
+
         public void SwitchToInstalled() => _tray.SwitchToInstalledCopy();
 
         private void Write(string what, Action<EarshotSettings> mutate, CardPlace place)

@@ -39,16 +39,17 @@ public sealed class UpdatesPageDesignLayoutTests
         Assert.IsGreaterThanOrEqualTo(l.StatusTitle.Bottom, l.StatusCaption.Top, "The caption is under the title.");
     }
 
+    // Fix connection follows Repair, and is there with or without an install: it repairs the AirPods' pairing, not Earshot.
     [TestMethod]
-    public void TheRowsAreCheckAutomaticallyWhatsNewAndRepairInThatOrderAndRepairOnlyWithAnInstall()
+    public void TheRowsAreCheckAutomaticallyWhatsNewRepairAndFixConnectionInThatOrderAndRepairOnlyWithAnInstall()
     {
-        CollectionAssert.AreEqual(Three, Layout(Page(UpdateStage.UpToDate, repair: true)).UpdateRows.Select(r => r.Index).ToArray());
-        CollectionAssert.AreEqual(Two, Layout(Page(UpdateStage.UpToDate, repair: false)).UpdateRows.Select(r => r.Index).ToArray());
+        CollectionAssert.AreEqual(Four, Layout(Page(UpdateStage.UpToDate, repair: true)).UpdateRows.Select(r => r.Index).ToArray());
+        CollectionAssert.AreEqual(WithoutRepair, Layout(Page(UpdateStage.UpToDate, repair: false)).UpdateRows.Select(r => r.Index).ToArray());
     }
 
-    private static readonly int[] Three = [0, 1, 2];
+    private static readonly int[] Four = [0, 1, 2, 3];
 
-    private static readonly int[] Two = [0, 1];
+    private static readonly int[] WithoutRepair = [0, 1, 3];
 
     // Each row is as high as a single-line settings row (48 at 100%, 58 at 150% text), 336 wide, 4 apart, with a 40 by 20 toggle.
     [TestMethod]
@@ -71,6 +72,7 @@ public sealed class UpdatesPageDesignLayoutTests
 
         Assert.AreEqual(new Size(40, 20), l.UpdateRows[0].Control.Size, "The toggle.");
         Assert.AreEqual(WidgetCardLayout.RowHeight(96, t), l.UpdateRows[2].Control.Height, "Repair is a button, 20t + 12 high.");
+        Assert.AreEqual(l.UpdateRows[2].Control.Size, l.UpdateRows[3].Control.Size, "Fix connection's button is Repair's size.");
     }
 
     [TestMethod]

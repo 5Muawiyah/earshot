@@ -54,6 +54,12 @@ internal sealed partial class TrayContext
         StartFixConnectionNow();
     }
 
+    internal void FixConnectionFromSettings()
+    {
+        _log.Info("Fix connection: started from the settings page.");
+        StartFixConnectionNow();
+    }
+
     private void StartFixConnectionNow()
     {
         if (_closing)

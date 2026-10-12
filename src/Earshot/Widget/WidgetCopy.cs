@@ -73,6 +73,8 @@ internal static class WidgetCopy
     public const string CheckButton = "Check";
     public const string RepairEarshot = "Repair Earshot";
     public const string RepairButton = "Repair";
+    public const string FixConnectionRow = "Fix connection";
+    public const string FixConnectionButton = "Fix";
     public const string RepairSub = "Checks the installed files and sets Earshot up again.";
     public const string CheckAutomatically = "Check automatically";
     public const string UpdateButton = "Update";
@@ -131,6 +133,7 @@ internal static class WidgetCopy
     public const string NameClearDisconnectShortcut = "Clear disconnect shortcut";
     public const string NameCheckForUpdates = CheckForUpdates;
     public const string NameRepair = RepairEarshot;
+    public const string NameFixConnection = FixConnectionRow;
     public const string NameAutoCheck = "Check for updates automatically";
     public const string NameMicOff = "Microphone off mode";
     public const string NameSoundSettings = "Open sound settings";

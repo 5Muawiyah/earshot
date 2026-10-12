@@ -9,7 +9,7 @@ internal enum SetupIcon { None, Spinner, Check, Caution, Down, Shield }
 
 // The update page's buttons (Update, Check, SetUp, Repair, Switch, and Cancel and TryAgain while it downloads or
 // has failed), and Back, any sub-page's back button.
-internal enum SetupAction { Cancel, TryAgain, Back, Update, Check, SetUp, Repair, Switch, ToggleAutoCheck, WhatsNew, HistoryEarlier, HistoryLater }
+internal enum SetupAction { Cancel, TryAgain, Back, Update, Check, SetUp, Repair, Switch, ToggleAutoCheck, WhatsNew, HistoryEarlier, HistoryLater, FixConnection }
 
 internal sealed record SetupButton(string Label, bool Primary, SetupAction Action);
 
@@ -29,8 +29,8 @@ internal sealed record SetupViewModel(
 {
     public const int SpinnerFrames = 10;
 
-    // The rows under the status on the updates page: Check automatically, What's new and, with an install, Repair. Null on
-    // every other page.
+    // The rows under the status on the updates page: Check automatically, What's new, with an install Repair, and Fix
+    // connection. Null on every other page.
     public UpdatesRows? Rows { get; init; }
 
     // The least height of the body, in epx at 100%, for a page whose content is supplied later (the history page's frame). A

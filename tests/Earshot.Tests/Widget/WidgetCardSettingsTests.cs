@@ -53,9 +53,9 @@ public sealed class WidgetCardSettingsTests
     private static readonly string[] MoreRows =
         ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "LeftClick", "SendToCard", "SendToGauge", "History", "CopyDiagnostics"];
 
-    private static readonly int[] WithoutRepair = [0, 1];
+    private static readonly int[] WithoutRepair = [0, 1, 3];
 
-    private static readonly int[] WithRepair = [0, 1, 2];
+    private static readonly int[] WithRepair = [0, 1, 2, 3];
 
     private static string[] Shape(WidgetCard card) =>
         card.CurrentSettingsLayout!.Items
@@ -878,7 +878,7 @@ public sealed class WidgetCardSettingsTests
         });
     }
 
-    // Repair is on the updates page, a row of its own, and only when an install exists.
+    // Repair is on the updates page, a row of its own, and only when an install exists. Fix connection follows it, always.
     [TestMethod]
     public void TheUpdatesPageHasCheckAutomaticallyWhatsNewAndRepairOnlyWhenAnInstallExistsAndFitsAtEveryScale()
     {
@@ -894,7 +894,7 @@ public sealed class WidgetCardSettingsTests
                 card.Render(CardKit.UpdateModelWithRows(CardKit.Update(UpdateStage.UpToDate), showRepair: true), dpi);
                 WidgetCardLayout.SetupLayout layout = card.CurrentSetupLayout!;
 
-                CollectionAssert.AreEqual(WithRepair, layout.UpdateRows.Select(r => r.Index).ToArray(), "Check automatically, What's new, Repair at " + dpi + " dpi.");
+                CollectionAssert.AreEqual(WithRepair, layout.UpdateRows.Select(r => r.Index).ToArray(), "Check automatically, What's new, Repair, Fix connection at " + dpi + " dpi.");
                 int previousBottom = layout.StatusSurface.Bottom;
                 foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
                 {
@@ -906,6 +906,23 @@ public sealed class WidgetCardSettingsTests
                 Assert.IsLessThanOrEqualTo(layout.Frame.Height, previousBottom);
             }
         });
+    }
+
+    [TestMethod]
+    public void TheFixConnectionRowOfTheUpdatesPageAsksTheTrayToStartFixConnectionAndNothingElse()
+    {
+        RunSettings(
+            page =>
+            {
+                CardKit.ClickPart(page.Card, SettingsRowId.About, SettingsPart.Button);
+                CardKit.Click(page.Card, page.Card.CurrentSetupLayout!.UpdateRows.Single(r => r.Index == 3).Surface);
+
+                Assert.AreEqual(1, page.Host.FixConnectionCalls);
+                Assert.AreEqual(0, page.Host.RepairCalls, "It is not Repair.");
+                Assert.AreEqual(0, page.Host.CheckCalls);
+                Assert.AreEqual(WidgetCardView.Update, page.Presenter.ViewForTest, "The card stays where it was: Fix connection asks on screens of its own.");
+            },
+            host => host.Values = FakeCardHost.Defaults() with { InstallExists = false });
     }
 
     [TestMethod]
