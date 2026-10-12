@@ -62,6 +62,21 @@ internal sealed record ToggleReport(bool Connect, OpStatus Status, string UserMe
 {
     public string? CancelledBecause { get; init; }
 
+    // Whose side a failed connect was on; None for a success, a cancel and a disconnect.
+    public FailureClass FailureClass { get; init; }
+
+    // Every step the card showed or would have shown, in order, for a connect ("Connecting", "Allowing", ...).
+    public IReadOnlyList<string> Progress { get; init; } = Array.Empty<string>();
+
+    // The one retry the temporary class allows was made.
+    public bool Retried { get; init; }
+
+    // The card should offer Connect in Windows: a connect that failed for a reason other than a cancel.
+    public bool OfferConnectInWindows { get; init; }
+
+    // This report made the second PC-side failure in a row: the card should offer Fix connection. Raised once.
+    public bool FixOfferDue { get; init; }
+
     // The measurement of this connect or disconnect, set by the coordinator on every report it returns.
     public SwitchTimeline? Timeline { get; init; }
 
@@ -86,6 +101,7 @@ internal enum BlockReason
     Closing,          // the block before Earshot closes: the same
     HandBack,         // the hand-back at shut down or sleep: never cancelled, no protection step
     Resume,           // the resume check after sleep: the start-up check under another name
+    ForeignLink,      // a link formed with no one connecting it (the session locked, outside every window): blocked while ACTIVE
 }
 
 // What raised the hand-back: WM_ENDSESSION (shut down, restart or sign-out), PBT_APMSUSPEND (sleep) or Exit from

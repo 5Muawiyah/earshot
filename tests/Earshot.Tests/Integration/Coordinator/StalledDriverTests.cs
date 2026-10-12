@@ -53,7 +53,7 @@ public sealed class StalledDriverTests
         ToggleReport report = toggle.GetAwaiter().GetResult();
         Assert.AreEqual(OpStatus.Failed, report.Status);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The coordinator's own allow was not undone.");
-        Assert.AreEqual(BlockCoordinator.DidNotConnectMessage, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCase, report.UserMessage);
         Assert.IsFalse(h.Coordinator.IsBusy);
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "was not refreshed within"));
         h.AssertAtRest();
@@ -217,6 +217,8 @@ public sealed class StalledDriverTests
         Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true));
         h.Pump();
         h.Advance(BlockCoordinator.EndpointWait);
+        Assert.IsFalse(toggle.IsCompleted, "The one retry waits a second time.");
+        h.Advance(BlockCoordinator.EndpointWait);
 
         Assert.IsFalse(toggle.IsCompleted, "The clean-up refresh is bounded too, but has not run out yet.");
         Assert.HasCount(1, h.Connection.Calls, "Nothing is sent without a render endpoint.");
@@ -224,7 +226,7 @@ public sealed class StalledDriverTests
         h.Advance(BlockCoordinator.RefreshBudget);
 
         Assert.IsTrue(toggle.IsCompleted, "The wait for the endpoints outlived its own timeout.");
-        Assert.AreEqual(BlockCoordinator.DidNotComeBackMessage, toggle.GetAwaiter().GetResult().UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.WindowsDidNotBringThemBack, toggle.GetAwaiter().GetResult().UserMessage);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
     }
 

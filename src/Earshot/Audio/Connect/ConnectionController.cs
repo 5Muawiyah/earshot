@@ -151,10 +151,14 @@ internal sealed class ConnectionController : IConnectionController
     public async Task<ConnectResult> ConnectAsync(Guid containerId, CancellationToken ct = default) =>
         (await RunAsync(ConnectAction.Connect, containerId, ct).ConfigureAwait(false)).Result;
 
+    public async Task<ConnectResult> ConnectAsync(Guid containerId, TimeSpan confirmWithin, CancellationToken ct) =>
+        (await RunAsync(ConnectAction.Connect, containerId, ct, confirmWithin).ConfigureAwait(false)).Result;
+
     public async Task<ConnectResult> DisconnectAsync(Guid containerId, CancellationToken ct = default) =>
         (await RunAsync(ConnectAction.Disconnect, containerId, ct).ConfigureAwait(false)).Result;
 
-    internal async Task<ConnectReport> RunAsync(ConnectAction action, Guid container, CancellationToken ct)
+    // confirmWithin: how long an accepted request is waited for, when that is less than the action's own limit.
+    internal async Task<ConnectReport> RunAsync(ConnectAction action, Guid container, CancellationToken ct, TimeSpan? confirmWithin = null)
     {
         DateTimeOffset started = _time.GetUtcNow();
         string name = Name(action) + " " + TopologyWalk.Format(container);
@@ -283,7 +287,13 @@ internal sealed class ConnectionController : IConnectionController
         ConfirmationResult confirmation;
         try
         {
-            confirmation = await _waiter.WaitAsync(container, action, ConfirmationWaiter.TimeoutFor(action), pass.Sequence, ct).ConfigureAwait(false);
+            TimeSpan limit = ConfirmationWaiter.TimeoutFor(action);
+            if (confirmWithin is { } shorter && shorter < limit)
+            {
+                limit = shorter > TimeSpan.Zero ? shorter : TimeSpan.FromMilliseconds(1);
+            }
+
+            confirmation = await _waiter.WaitAsync(container, action, limit, pass.Sequence, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
         {

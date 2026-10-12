@@ -3,6 +3,7 @@ using System.Runtime.ExceptionServices;
 using Earshot.Audio.Connect;
 using Earshot.AudioProtection;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Interop;
 using Earshot.Tray;
 using Earshot.Widget.EarPause;
@@ -110,7 +111,12 @@ internal sealed partial class BlockCoordinator : IDisposable
     // waited for and may well have worked, so it claims neither that something changed nor that nothing did.
     public const string SessionEndingMessage = "Windows is closing Earshot, so nothing was changed. If Earshot stays open, restart it.";
     public const string SessionEndStoppedMessage = "Windows began closing Earshot, so the change may not have finished. If Earshot stays open, restart it.";
+    internal const string GateInUseReason = "the gate found the AirPods connected";
+    private const string UnconfirmedLinkReason = "the device node reads connected and no endpoint confirms it";
     public const string ChangesNotWatchedMessage = "Earshot cannot see audio device changes, so blocking may be late.";
+    public const string ForeignLinkMessage = "The AirPods connected while no one was connecting them, so they were blocked.";
+    public const string UnconfirmedLinkMessage = "The AirPods looked connected but nothing was playing, so they were blocked.";
+
 
     // How long render must stay not ACTIVE, with nothing in flight, before the nodes are blocked again. A
     // conservative waiting budget, not a measured figure: long enough that the churn of a protection change or a
@@ -173,6 +179,7 @@ internal sealed partial class BlockCoordinator : IDisposable
     private readonly ILog _log;
     private readonly TimeProvider _time;
     private readonly CoordinatorOptions _options;
+    private readonly CoordinatorServices _services;
 
     private DeviceSnapshot _snapshot;
     private BootBlockStatus? _blockStatus;
@@ -246,6 +253,7 @@ internal sealed partial class BlockCoordinator : IDisposable
     private bool _sessionBlockWhileInUse;
     private Task? _closingBlock;
     private CancellationTokenSource? _idleWait;
+    private bool _idleWaitForeign;
     private CancellationTokenSource? _recheck;
     private int _rechecksInARow;
 
@@ -303,7 +311,8 @@ internal sealed partial class BlockCoordinator : IDisposable
         ICardPresenter cards,
         ILog log,
         TimeProvider time,
-        CoordinatorOptions options)
+        CoordinatorOptions options,
+        CoordinatorServices? services = null)
     {
         ArgumentNullException.ThrowIfNull(monitor);
         ArgumentNullException.ThrowIfNull(connection);
@@ -323,6 +332,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         _log = log;
         _time = time;
         _options = options;
+        _services = services ?? new CoordinatorServices();
         _snapshot = monitor.Current;
     }
 
@@ -538,6 +548,11 @@ internal sealed partial class BlockCoordinator : IDisposable
                 _blockStatus = status;
                 _blockStatusFresh = true;
                 _tasksSeenInstalled |= status.TasksInstalled;
+                if (status.State == BlockState.Blocked && !AllowMayLand)
+                {
+                    _enabledByUs = false;
+                }
+
                 if (_statusAtIdleFailure is { } before &&
                     (before.State != status.State || before.BlockAtBoot != status.BlockAtBoot))
                 {
@@ -1023,6 +1038,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         _closing = true;
+        CancelWindowTimer();
         CancelIdleWait("Earshot is closing");
         StopRechecks(settled: false);
         _currentCancel?.Cancel();
@@ -1921,153 +1937,6 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
     }
 
-    private async Task<ToggleReport> ConnectCoreAsync(ToggleRequest request, CancellationToken ct)
-    {
-        // Shown once the connect is under way, not while it waits behind an operation it may never follow. Safe
-        // mode refuses the connect, so no card promises it.
-        if (!_options.SafeMode)
-        {
-            ShowCard(request, TrayStatus.CardConnecting);
-        }
-
-        var steps = new List<StepOutcome>();
-        var cleanup = new ConnectCleanup();
-        request.Timeline?.CoreBegan();
-        ReArmIdleRule("a connect was asked for");
-        try
-        {
-            long mark = request.Timeline?.Mark() ?? -1;
-            ConnectResult result = await _connection.ConnectAsync(request.Container, ct);
-            request.Timeline?.Record(SwitchPhase.FirstPass, mark);
-            steps.AddRange(result.Steps);
-            if (result.Confirmed)
-            {
-                NoteConfirmed(request, result, SwitchPath.Direct);
-                return await ConnectedAsync(request, steps, allowed: false, ct);
-            }
-
-            if (result.Outcome == ConnectOutcome.NodesBlocked)
-            {
-                if (PinMayMove)
-                {
-                    // The allow would enable whichever device the gate pins when it runs, which may be another one.
-                    _log.Warn("connect: nothing is allowed, because " + PinMayMoveReason + " until " + Utc(_pinSettlesAt) + ".");
-                    steps.Add(StepOutcomes.NotAttempted("connect-allow", "Not sent, because " + PinMayMoveReason + "."));
-                    return Finish(request, OpStatus.Failed, ChangeStillRunningMessage, steps);
-                }
-
-                mark = request.Timeline?.Mark() ?? -1;
-                BootBlockStatus? status = await ReadBlockStatusAsync(ct);
-                request.Timeline?.Record(SwitchPhase.Status, mark);
-                string? refusal = CoordinatorRules.AllowFirstRefusal(status, request.Container);
-                if (refusal is not null)
-                {
-                    _log.Warn("connect: every render endpoint is NOTPRESENT and the nodes read " + (status is null ? "nothing" : Describe(status)) +
-                        " for container " + request.Container.ToString("D") + ", so nothing is allowed.");
-                    return Finish(request, OpStatus.Failed, refusal, steps);
-                }
-
-                // The allow cannot be taken back once sent, so a cancellation that came while the status was read
-                // ends the connect before it.
-                ct.ThrowIfCancellationRequested();
-                cleanup.BlockAtBoot = status!.BlockAtBootKnown ? status.BlockAtBoot : null;
-                ShowCard(request, AllowingStatus);
-                cleanup.AllowIssued = true;
-                mark = request.Timeline?.Mark() ?? -1;
-                ControllerResult allow = await SendAllowAsync("allow (connect)", steps);
-                request.Timeline?.Record(SwitchPhase.Allow, mark);
-                if (IsSessionEndRefusal(allow))
-                {
-                    // Nothing was sent, so there is no allow to put back; whatever else the connect changed still is.
-                    cleanup.AllowIssued = false;
-                    await CleanUpConnectAsync(request, cleanup, steps);
-                    return RefusedAtSessionEnd(request, steps);
-                }
-
-                if (allow.Status is OpStatus.Failed or OpStatus.NotAttempted)
-                {
-                    return await FailConnectAsync(request, cleanup, steps, allow.UserMessage, ct);
-                }
-
-                mark = request.Timeline?.Mark() ?? -1;
-                await ReadBlockStatusAsync(ct);
-                bool endpointCame = await WaitForSnapshotAsync(request.Container, CoordinatorRules.RenderEndpointPresent, EndpointWait, ct);
-                request.Timeline?.Record(SwitchPhase.Endpoints, mark);
-                if (!endpointCame)
-                {
-                    _log.Warn("connect: no render endpoint came back within " + Seconds(EndpointWait) + " of the allow.");
-                    return await FailConnectAsync(request, cleanup, steps, DidNotComeBackMessage, ct);
-                }
-
-                mark = request.Timeline?.Mark() ?? -1;
-                result = await _connection.ConnectAsync(request.Container, ct);
-                request.Timeline?.Record(SwitchPhase.Connect, mark);
-                steps.AddRange(result.Steps);
-                if (result.Confirmed)
-                {
-                    NoteConfirmed(request, result, SwitchPath.AllowFirst);
-                    return await ConnectedAsync(request, steps, allowed: true, ct);
-                }
-            }
-
-            // Only on observations: the A2DP filter was sent the request and refused it, a good read shows render
-            // not ACTIVE, and a good read shows the services protected.
-            if (CoordinatorRules.A2dpRejected(result) &&
-                await RenderNotActiveAsync(request.Container) &&
-                await ProtectionIsOnAsync(ct))
-            {
-                return await HandsFreeAssistedConnectAsync(request, steps, cleanup, ct);
-            }
-
-            return await FailConnectAsync(request, cleanup, steps, result, ct);
-        }
-        catch (Exception ex)
-        {
-            // A connect cancelled once its walk to the filters began carries what was sent to which filter.
-            if (ex is ConnectCancelledException sent)
-            {
-                steps.AddRange(sent.Steps);
-            }
-
-            bool cancelled = ex is OperationCanceledException && ct.IsCancellationRequested;
-            if (cancelled)
-            {
-                _log.Info("connect: cancelled; cleaning up before it ends.");
-            }
-            else
-            {
-                _log.Error("connect: unexpected error; cleaning up before it is reported.", ex);
-            }
-
-            await CleanUpConnectAsync(request, cleanup, steps);
-            if (cancelled)
-            {
-                return CancelledReport(connect: true, OpStatus.Failed, "", steps);
-            }
-
-            throw;
-        }
-    }
-
-    // A connect that did not reach ACTIVE: clean up, then report what is true once the clean-up is done.
-    private async Task<ToggleReport> FailConnectAsync(ToggleRequest request, ConnectCleanup cleanup, List<StepOutcome> steps, ConnectResult result, CancellationToken ct)
-    {
-        ConnectCleanUpOutcome outcome = await CleanUpConnectAsync(request, cleanup, steps);
-        NoteBlockedAgain(request, outcome);
-        return outcome == ConnectCleanUpOutcome.InUse
-            ? await ConnectedAsync(request, steps, allowed: cleanup.AllowIssued, ct)
-            : Finish(request, OpStatus.Failed, CoordinatorRules.ConnectFailureMessage(result, blockedAgain: outcome == ConnectCleanUpOutcome.Blocked), steps);
-    }
-
-    private async Task<ToggleReport> FailConnectAsync(ToggleRequest request, ConnectCleanup cleanup, List<StepOutcome> steps, string message, CancellationToken ct)
-    {
-        ConnectCleanUpOutcome outcome = await CleanUpConnectAsync(request, cleanup, steps);
-        NoteBlockedAgain(request, outcome);
-        return outcome == ConnectCleanUpOutcome.InUse
-            ? await ConnectedAsync(request, steps, allowed: cleanup.AllowIssued, ct)
-            : Finish(request, OpStatus.Failed, message, steps);
-    }
-
     // What the timeline says of a connect's clean-up. Only reads what the clean-up already decided.
     private static void NoteBlockedAgain(ToggleRequest request, ConnectCleanUpOutcome outcome)
     {
@@ -2138,9 +2007,10 @@ internal sealed partial class BlockCoordinator : IDisposable
     // The A2DP filter turned the request down while protection is on, so the Hands-Free filter is not there to
     // take it. Protection comes off, the connect is tried once more, and the saved protection setting is put back.
     // Inside the one operation, so none of the driver churn can start an idle block.
-    private async Task<ToggleReport> HandsFreeAssistedConnectAsync(ToggleRequest request, List<StepOutcome> steps, ConnectCleanup cleanup, CancellationToken ct)
+    private async Task<ToggleReport> HandsFreeAssistedConnectAsync(ToggleRequest request, ConnectAttempt attempt, List<StepOutcome> steps, ConnectCleanup cleanup, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+        attempt.Progress.Add(TryingAnotherWayMessage);
         ShowCard(request, TryingAnotherWayMessage);
         cleanup.ProtectOffIssued = true;
         cleanup.ReblockAfterFallback = true;
@@ -2148,7 +2018,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         Record(steps, "protect-off (connect)", off);
         if (off.Status is OpStatus.Failed or OpStatus.NotAttempted)
         {
-            return await FailConnectAsync(request, cleanup, steps, CouldNotReachDriverMessage, ct);
+            return await FailAsync(request, attempt, cleanup, steps, new ConnectFailure(FailureClass.PcSide, CouldNotReachDriverMessage, "protect-off"), ct);
         }
 
         if (!await WaitForSnapshotAsync(request.Container, CoordinatorRules.CaptureEndpointPresent, EndpointWait, ct))
@@ -2160,7 +2030,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         steps.AddRange(again.Steps);
         if (!again.Confirmed)
         {
-            return await FailConnectAsync(request, cleanup, steps, again, ct);
+            return await FailAsync(request, attempt, cleanup, steps, ConnectFailureClassifier.Classify(again, _services.Hints.Read(), retried: true), ct);
         }
 
         if (request.Timeline is { } assisted)
@@ -2261,12 +2131,12 @@ internal sealed partial class BlockCoordinator : IDisposable
             }
 
             _log.Info("connect clean-up: blocking the nodes again.");
-            ProtectionRun run = await RunBlockSequenceAsync(BlockReason.ConnectCleanUp, request.Container, request.Place, CancellationToken.None);
+            ProtectionRun run = await RunBlockSequenceAsync(BlockReason.ConnectCleanUp, request.Container, request.Place, CancellationToken.None, cleanup.AllowNonce);
             steps.AddRange(run.Steps);
             if (run.Skipped is { } why)
             {
                 _log.Info("connect clean-up: the nodes are not blocked again, because " + why + ".");
-                return why == InUseReason ? ConnectCleanUpOutcome.InUse : ConnectCleanUpOutcome.NodesLeftEnabled;
+                return why is InUseReason or GateInUseReason ? ConnectCleanUpOutcome.InUse : ConnectCleanUpOutcome.NodesLeftEnabled;
             }
 
             if (!run.BlockTook)
@@ -2313,6 +2183,18 @@ internal sealed partial class BlockCoordinator : IDisposable
     }
 
     private async Task<ToggleReport> DisconnectCoreAsync(ToggleRequest request, CancellationToken ct)
+    {
+        DateTimeOffset started = _time.GetUtcNow();
+        string startState = StartStateOf(FreshStatus ?? _blockStatus);
+        ToggleReport report = await DisconnectBodyAsync(request, ct);
+        WriteHistory(new ConnectHistoryEntry(
+            started, ConnectHistoryActions.Disconnect, startState, "direct", ConnectHistory.FromSteps(report.Steps), false,
+            report.Cancelled ? ConnectHistoryOutcomes.Cancelled : report.IsSuccess ? ConnectHistoryOutcomes.Disconnected : ConnectHistoryOutcomes.Failed,
+            "None", (long)(_time.GetUtcNow() - started).TotalMilliseconds));
+        return report;
+    }
+
+    private async Task<ToggleReport> DisconnectBodyAsync(ToggleRequest request, CancellationToken ct)
     {
         var steps = new List<StepOutcome>();
         request.Timeline?.CoreBegan();
@@ -2479,8 +2361,8 @@ internal sealed partial class BlockCoordinator : IDisposable
 
     // Block goal: protection first while the nodes are enabled, then the nodes, with the checks for why the
     // block is being issued made again just before it is sent.
-    private Task<ProtectionRun> RunBlockSequenceAsync(BlockReason reason, Guid container, CardPlace place, CancellationToken ct) =>
-        RunProtectionAsync(ProtectionGoal.Block, Settings.ProtectAudioQuality, place, notice: true, ct, new BlockCheck(reason, container));
+    private Task<ProtectionRun> RunBlockSequenceAsync(BlockReason reason, Guid container, CardPlace place, CancellationToken ct, string? allowNonce = null) =>
+        RunProtectionAsync(ProtectionGoal.Block, Settings.ProtectAudioQuality, place, notice: true, ct, new BlockCheck(reason, container, allowNonce));
 
     // Steps ProtectionPolicy for goal until it is done, running each action and refreshing the facts after it.
     // Every gate change is waited for (see the class comment).
@@ -2498,6 +2380,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         bool intentPending = _pendingProtect is not null || kept is not null;
         bool settingIsTheRequest = false;
         ProtectionProgress progress = default;
+        BlockDecision decision = BlockDecision.Go;
 
         // With the setting off, services that still read protected are a restore not applied yet: one kept only in
         // memory while the nodes were unreadable, or one that did not take, is not lost across a restart. The
@@ -2548,8 +2431,8 @@ internal sealed partial class BlockCoordinator : IDisposable
 
             if (action == ProtectionAction.BlockNodes && check is { } why)
             {
-                string? skip = await BlockSkipReasonAsync(why, run.Status, refreshSnapshot: progress.ServiceChangeTried);
-                if (skip is not null)
+                decision = await BlockSkipReasonAsync(why, run.Status, refreshSnapshot: progress.ServiceChangeTried);
+                if (decision.Skip is { } skip)
                 {
                     run.Skipped = skip;
                     _log.Info("protection Block (" + why.Reason + "): no block sent, because " + skip + ".");
@@ -2602,7 +2485,7 @@ internal sealed partial class BlockCoordinator : IDisposable
                         RaiseChanged();
                     }
 
-                    ControllerResult block = await _block.BlockAsync(CancellationToken.None);
+                    ControllerResult block = await SendBlockAsync(check, decision);
                     Record(run.Steps, "block (" + goal + (check is { } reason ? ", " + reason.Reason : "") + ")", block);
                     run.NodeChange = block;
                     if (CoordinatorRules.MayStillRun(block))
@@ -2610,6 +2493,17 @@ internal sealed partial class BlockCoordinator : IDisposable
                         _log.Warn("block: the gate run did not end while it was waited for, so it may still change the nodes.");
                     }
 
+                    if (CoordinatorRules.GateRefusedInUse(block))
+                    {
+                        // The gate read a live link and changed nothing: the AirPods are in use as far as it can tell. This is
+                        // the idle rule's answer to a link that came up since its own look, not a block that failed.
+                        _unconfirmedSince ??= _time.GetUtcNow();
+                        run.Skipped = GateInUseReason;
+                        _log.Info("protection Block: the gate found the AirPods connected and changed nothing.");
+                        break;
+                    }
+
+                    run.Notice = check is { Reason: BlockReason.ForeignLink } ? ForeignLinkMessage : decision.Notice;
                     break;
                 }
 
@@ -2680,6 +2574,11 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         Record(steps, action, allow);
+        if (allow.Status is OpStatus.Success or OpStatus.Partial or OpStatus.AlreadyInState)
+        {
+            _enabledByUs = true;
+        }
+
         if (CoordinatorRules.MayStillRun(allow))
         {
             _allowSettlesAt = _time.GetUtcNow() + UnsettledGateWindow;
@@ -2736,20 +2635,30 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
     }
 
-    // Why a block that is about to be sent no longer should be, or null when it should. Automatic blocks (idle,
-    // start-up, closing) need good reads: Block at boot on, the nodes enabled, and render not ACTIVE. A connect
-    // clean-up undoes its own allow unless Block at boot is now off or the AirPods are in use after all. A
-    // disconnect blocks unless Block at boot is now off: the block is what drops a link the request did not. None
-    // is sent while a protect verb this tray started may still run, or while a set-device it sent may still move the
-    // pin.
-    //
-    // An automatic block acts only on reads taken just before it is sent: the nodes and Block at boot are read
-    // again, then the device, and nothing is awaited between the last read and the block. The reads the sequence
-    // took when it started may be older than a protect verb that ran since, and one that failed after it would
-    // otherwise leave the read from before it in hand.
-    private async Task<string?> BlockSkipReasonAsync(BlockCheck check, BootBlockStatus? status, bool refreshSnapshot)
+    // The block for this check. The idle block asks the gate not to cut a live link; a connect's clean-up asks it to put back
+    // exactly its own allow; every other block, and either of these once the look before it judged the link bit stuck, is the
+    // plain block.
+    private Task<ControllerResult> SendBlockAsync(BlockCheck? check, BlockDecision decision) => check switch
     {
-        bool automatic = check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.Closing or BlockReason.Resume;
+        { Reason: BlockReason.Idle } when !decision.Plain => _block.BlockIfIdleAsync(CancellationToken.None),
+        { Reason: BlockReason.ConnectCleanUp, AllowNonce: { } nonce } when !decision.Plain => _block.UndoAllowAsync(nonce, CancellationToken.None),
+        _ => _block.BlockAsync(CancellationToken.None),
+    };
+
+    // Why a block that is about to be sent no longer should be, or what to send instead. Automatic blocks (idle, start-up,
+    // closing, a link no one made) need good reads: Block at boot on, the nodes enabled, and render not ACTIVE (a link no one
+    // made is blocked while ACTIVE). A connect clean-up undoes its own allow unless Block at boot is now off or the AirPods
+    // are in use after all. A disconnect blocks unless Block at boot is now off: the block is what drops a link the request
+    // did not. None is sent while a protect verb this tray started may still run, or while a set-device it sent may still
+    // move the pin.
+    //
+    // An automatic block acts only on reads taken just before it is sent: the nodes and Block at boot are read again, then
+    // the device and, for the idle block and a clean-up, the device node's link bit, and nothing is awaited between the last
+    // read and the block. The reads the sequence took when it started may be older than a protect verb that ran since, and one
+    // that failed after it would otherwise leave the read from before it in hand.
+    private async Task<BlockDecision> BlockSkipReasonAsync(BlockCheck check, BootBlockStatus? status, bool refreshSnapshot)
+    {
+        bool automatic = check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.Closing or BlockReason.Resume or BlockReason.ForeignLink;
         if (automatic)
         {
             status = await ReadBlockStatusAsync(CancellationToken.None);
@@ -2760,42 +2669,43 @@ internal sealed partial class BlockCoordinator : IDisposable
         bool undoesOwnAllow = check.Reason is BlockReason.ConnectCleanUp or BlockReason.DeviceChangeCleanUp;
         if (status is { BlockAtBoot: false } && (status.BlockAtBootKnown || !undoesOwnAllow))
         {
-            return status.BlockAtBootKnown ? "Block at boot is now off" : BlockAtBootOffReason(status);
+            return new BlockDecision(status.BlockAtBootKnown ? "Block at boot is now off" : BlockAtBootOffReason(status));
         }
 
         if (ProtectMayRun)
         {
-            return ProtectMayRunReason;
+            return new BlockDecision(ProtectMayRunReason);
         }
 
         // The gate acts on whichever device it pins when the block runs.
         if (PinMayMove)
         {
-            return PinMayMoveReason;
+            return new BlockDecision(PinMayMoveReason);
         }
 
         if (automatic && status is null)
         {
-            return "the node state is not known";
+            return new BlockDecision("the node state is not known");
         }
 
         if (automatic && !CoordinatorRules.NodesEnabled(status))
         {
-            return "the nodes are not known to be enabled";
+            return new BlockDecision("the nodes are not known to be enabled");
         }
 
         if (check.Reason == BlockReason.Disconnect)
         {
-            return null;
+            return BlockDecision.Go;
         }
 
         // The device is read again when protection was changed first, which takes time and churns the endpoints,
         // and before every automatic block, which acts only on what a read shows now: a notification can be late,
         // and none comes at all when watching for changes failed.
         RenderState render;
+        DeviceSnapshot? now = null;
         if (refreshSnapshot || automatic)
         {
-            DeviceSnapshot? now = await RefreshSnapshotAsync();
+            now = await RefreshSnapshotAsync();
             render = now is null ? RenderState.Unknown : CoordinatorRules.RenderOf(now, check.Container);
         }
         else
@@ -2803,12 +2713,61 @@ internal sealed partial class BlockCoordinator : IDisposable
             render = SnapshotRender(check.Container);
         }
 
-        if (render == RenderState.Active)
+        if (render == RenderState.Active && check.Reason != BlockReason.ForeignLink)
         {
-            return InUseReason;
+            _unconfirmedSince = null;
+            return new BlockDecision(InUseReason);
         }
 
-        return automatic && render == RenderState.Unknown ? "the device state is not known" : null;
+        if (automatic && render == RenderState.Unknown)
+        {
+            return new BlockDecision("the device state is not known");
+        }
+
+        if (check.Reason == BlockReason.ForeignLink)
+        {
+            return render == RenderState.Active ? BlockDecision.Go : new BlockDecision("the link dropped before it was blocked");
+        }
+
+        return check.Reason is BlockReason.Idle or BlockReason.ConnectCleanUp ? await LinkDecisionAsync(check.Container, now) : BlockDecision.Go;
+    }
+
+    // The device node's link bit, weighed against the endpoint. The bit is a header comment seen to follow the link on this PC,
+    // not a documented contract, so it can hold a block back for two minutes at most, and an endpoint that exists and is not
+    // playing outweighs it:
+    //   bit says disconnected, or cannot be read     go (the gate reads it again itself)
+    //   connected, an endpoint exists, not playing   the bit is stuck: the plain block
+    //   connected, no endpoint to confirm it         held back, then blocked and reported after UnconfirmedLinkCap
+    // A gate that refused a block for a live link counts toward the same cap.
+    private async Task<BlockDecision> LinkDecisionAsync(Guid container, DeviceSnapshot? now)
+    {
+        DateTimeOffset at = _time.GetUtcNow();
+        if (_unconfirmedSince is { } since && at - since >= UnconfirmedLinkCap)
+        {
+            _log.Warn("The AirPods have looked connected for " + Seconds(UnconfirmedLinkCap) + " with nothing playing, so they are blocked.");
+            return new BlockDecision(null, Plain: true, UnconfirmedLinkMessage);
+        }
+
+        LinkState link = await _services.Link.ReadAsync(CancellationToken.None);
+        if (link != LinkState.Connected)
+        {
+            if (link == LinkState.Disconnected)
+            {
+                _unconfirmedSince = null;
+            }
+
+            return BlockDecision.Go;
+        }
+
+        if (now is not null && CoordinatorRules.RenderEndpointPresent(now, container))
+        {
+            _log.Warn("The device node reads connected, but the render endpoint is not playing; the bit is taken as stuck and the block goes ahead.");
+            return new BlockDecision(null, Plain: true);
+        }
+
+        _unconfirmedSince ??= at;
+        _log.Info("The device node reads connected and no endpoint confirms it; the block waits (since " + Utc(_unconfirmedSince.Value) + ").");
+        return new BlockDecision(UnconfirmedLinkReason);
     }
 
     private async Task NoteServiceChangeAsync(ProtectionRun run, ControllerResult change, bool on, bool protect, bool storeIntent, CardPlace place, bool notice)
@@ -3102,6 +3061,7 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         _snapshot = snapshot;
         _deviceReadFailed = false;
+        NoteLinkOwner(snapshot);
         NoteRenderForPauseOnLeave(snapshot);
         if (CoordinatorRules.RenderOf(snapshot, WatchedContainer()) == RenderState.Active)
         {
@@ -3123,6 +3083,12 @@ internal sealed partial class BlockCoordinator : IDisposable
         if (IsBusy)
         {
             return ("an operation is in flight", IdleVerdict.Held);
+        }
+
+        // The owner is connecting in Windows' settings; the idle rule starts again when the window ends.
+        if (WindowsConnectOpen)
+        {
+            return ("a Connect in Windows window is open", IdleVerdict.Held);
         }
 
         // Only the latest node read, and only when it worked, can rule out enabled nodes: Block at boot read off, the
@@ -3187,6 +3153,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         // read again later, less often each time, rather than an idle wait started on it again and again.
         return SnapshotRender(WatchedContainer()) switch
         {
+            RenderState.Active when IsForeignLink() => ("a link formed while no one was connecting the AirPods", IdleVerdict.Due),
             RenderState.Unknown => ("the device state is not known", IdleVerdict.Unsettled),
             RenderState.Active when _monitor.WatchFailed => (InUseReason + " and changes are not watched", IdleVerdict.Unsettled),
             RenderState.Active => (InUseReason, IdleVerdict.Settled),
@@ -3219,15 +3186,24 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         StopRechecks(settled: true);
+        bool foreign = IsForeignLink();
         if (_idleWait is not null)
         {
-            return;
+            if (!foreign || _idleWaitForeign)
+            {
+                return;
+            }
+
+            CancelIdleWait("a link formed with no one connecting it");
         }
 
-        TimeSpan delay = IdleDelay;
+        _idleWaitForeign = foreign;
+        TimeSpan delay = foreign ? ForeignLinkDelay : IdleDelay;
         _idleWait = new CancellationTokenSource();
-        _log.Info("The nodes are enabled and the AirPods are not in use. They are blocked in " + Seconds(delay) + " unless that changes" +
-            (_idleFailures > 0 ? " (" + _idleFailures.ToString(CultureInfo.InvariantCulture) + " automatic block(s) in a row did not take)." : "."));
+        _log.Info(foreign
+            ? "A link formed while no one was connecting the AirPods. They are blocked in " + Seconds(delay) + "."
+            : "The nodes are enabled and the AirPods are not in use. They are blocked in " + Seconds(delay) + " unless that changes" +
+              (_idleFailures > 0 ? " (" + _idleFailures.ToString(CultureInfo.InvariantCulture) + " automatic block(s) in a row did not take)." : "."));
         _ = IdleWaitAsync(_idleWait, delay);
     }
 
@@ -3404,7 +3380,8 @@ internal sealed partial class BlockCoordinator : IDisposable
             // CancellationToken.None cannot wait for ever: RunExclusiveAsync only waits for the operation in flight
             // and the session-end block, which end by limits of their own, never for a session end to be cancelled.
             // Not refused at a session end: a block only makes the at-rest state safer.
-            await RunExclusiveAsync("idle block", token => AutomaticBlockAsync("idle block", BlockReason.Idle, WatchedContainer(), token), CancellationToken.None);
+            BlockReason reason = IsForeignLink() ? BlockReason.ForeignLink : BlockReason.Idle;
+            await RunExclusiveAsync("idle block", token => AutomaticBlockAsync("idle block", reason, WatchedContainer(), token), CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -3450,7 +3427,13 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         if (run.BlockTook)
         {
+            _unconfirmedSince = null;
             ReArmIdleRule(name + " took");
+            if (run.Notice is { } notice && !_closing)
+            {
+                CardPlace.NearTray.Show(_cards, TrayStatus.DeviceName(_snapshot, Settings), notice);
+            }
+
             return;
         }
 
@@ -3532,7 +3515,12 @@ internal sealed partial class BlockCoordinator : IDisposable
         RenderState render = CoordinatorRules.RenderOf(_snapshot, container);
         if (status is { BlockAtBoot: true, TasksInstalled: true })
         {
-            if (render == RenderState.Active)
+            if (render == RenderState.Active && IsForeignLink())
+            {
+                _log.Info("Start-up check: a link is up with no one connecting it (the session is not unlocked). Blocking.");
+                await AutomaticBlockAsync("start-up block", BlockReason.ForeignLink, container, ct);
+            }
+            else if (render == RenderState.Active)
             {
                 _log.Info("connected at start-up: render ACTIVE in container " + container.ToString("D") + " at " + Utc(_time.GetUtcNow()) +
                     " (snapshot " + Utc(_snapshot.TakenUtc) + "), nodes " + status.State + ", Block at boot on, " +
@@ -3798,7 +3786,15 @@ internal sealed partial class BlockCoordinator : IDisposable
     }
 
     // Why a Block sequence runs and which device its render check watches.
-    private readonly record struct BlockCheck(BlockReason Reason, Guid Container);
+    private readonly record struct BlockCheck(BlockReason Reason, Guid Container, string? AllowNonce = null);
+
+    // What the last look before a block decided: Skip says why no block is sent; Plain says the block is the plain one, which
+    // does not refuse a link (the idle block's refusal was judged stuck or has run out of time); Notice is what the card says
+    // once such a block has taken.
+    private readonly record struct BlockDecision(string? Skip, bool Plain = false, string? Notice = null)
+    {
+        public static BlockDecision Go => new(null);
+    }
 
     // What a device change has done to the device pinned now, to put back if the pin does not move.
     private sealed class DeviceChangeUndo
@@ -3827,6 +3823,10 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         // The Hands-Free assisted way ran: a failure there blocks again with Block at boot on even without an allow.
         public bool ReblockAfterFallback { get; set; }
+
+        // The nonce of the allow this connect sent, which names the status file that lists the nodes it changed; the
+        // clean-up puts back those and no others.
+        public string? AllowNonce { get; set; }
     }
 
     private sealed class ProtectionRun
@@ -3849,6 +3849,9 @@ internal sealed partial class BlockCoordinator : IDisposable
         // Why the block was not sent after all (Block at boot now off, the AirPods in use, a read that failed, a
         // protect verb that may still run), or null when it was sent or none was needed.
         public string? Skipped { get; set; }
+
+        // What the card says once the block has taken, when the block is one the person should hear about.
+        public string? Notice { get; set; }
 
         // The nodes ended blocked: the block succeeded (the controller confirms that from the nodes), a node read
         // after it shows them blocked whatever the result said, or none was needed because they already were.

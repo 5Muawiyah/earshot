@@ -150,9 +150,10 @@ public sealed class InterleavingTests
         allowing.SetResult(ControllerResult.Ok("Allowed"));
         h.Pump();
 
+        // The allow came back after the connect's twenty seconds, so the connect ends there and puts its allow back.
         Assert.IsTrue(toggle.IsCompleted);
-        Assert.AreEqual(OpStatus.Success, toggle.GetAwaiter().GetResult().Status);
-        CollectionAssert.AreEqual(AllowOnly, h.Block.Calls);
+        Assert.AreEqual(OpStatus.Failed, toggle.GetAwaiter().GetResult().Status);
+        CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
         h.AssertAtRest();
     }
 
@@ -246,7 +247,7 @@ public sealed class InterleavingTests
         Assert.IsTrue(toggle.GetAwaiter().GetResult().Cancelled);
         Assert.IsTrue(idle.IsCompleted);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The clean-up blocks, and the block before closing finds nothing left to do.");
-        Assert.IsEmpty(h.Cards.Shown.Where(c => c.Content.Status != "Connecting" && c.Content.Status != BlockCoordinator.AllowingStatus),
+        Assert.IsEmpty(h.Cards.Shown.Where(c => c.Content.Status != "Connecting" && c.Content.Status != BlockCoordinator.AllowingStatus && c.Content.Status != BlockCoordinator.WaitingStatus),
             "No card is shown once Earshot is closing.");
         h.AssertAtRest();
     }

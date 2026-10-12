@@ -2,7 +2,10 @@ using System.Diagnostics;
 using System.Drawing;
 using Earshot.App;
 using Earshot.Audio.Connect;
+using Earshot.Boot;
+using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Integration.Coordinator;
@@ -26,7 +29,9 @@ internal sealed class CoordinatorHarness : IDisposable
         SynchronizationContext.SetSynchronizationContext(Ui);
 
         Connection = new FakeConnection(Monitor) { Trace = Trace };
-        Block = new FakeBlock(Monitor) { Trace = Trace };
+        Block = new FakeBlock(Monitor) { Trace = Trace, Link = Link };
+        _historyFolder = Path.Combine(Path.GetTempPath(), "earshot-history-" + Guid.NewGuid().ToString("N"));
+        History = new ConnectHistory(Path.Combine(_historyFolder, "connect-history.jsonl"), Time, Log);
         Protection.Trace = Trace;
         Settings.Update(s =>
         {
@@ -41,8 +46,23 @@ internal sealed class CoordinatorHarness : IDisposable
         });
 
         Coordinator = new BlockCoordinator(Monitor, Connection, Block, Protection, Settings, Cards, Log, Time,
-            new CoordinatorOptions(safeMode, startedAtLogon));
+            new CoordinatorOptions(safeMode, startedAtLogon),
+            new CoordinatorServices { Link = Link, Session = Session, Hints = Hints, Launcher = Launcher, History = History, FixOffer = FixOffer });
     }
+
+    private readonly string _historyFolder;
+
+    public FakeLink Link { get; } = new();
+
+    public FakeSession Session { get; } = new();
+
+    public FakeHints Hints { get; } = new();
+
+    public RecordingLauncher Launcher { get; } = new();
+
+    public ConnectHistory History { get; }
+
+    public FixOfferTracker FixOffer { get; } = new();
 
     public ManualUiContext Ui { get; }
 
@@ -130,6 +150,7 @@ internal sealed class CoordinatorHarness : IDisposable
         if (CoordinatorRules.RenderOf(now, Devices.Container) == RenderState.Active ||
             Coordinator.IsBusy ||
             Coordinator.IdleWaitRunning ||
+            Coordinator.WindowsConnectOpen ||
             Coordinator.RecheckRunning ||
             Block.StatusFailure is not null ||
             Block.StatusStalls ||
@@ -181,6 +202,53 @@ internal sealed class CoordinatorHarness : IDisposable
         Coordinator.Dispose();
         Ui.RunAll();
         SynchronizationContext.SetSynchronizationContext(_previous);
+        if (Directory.Exists(_historyFolder))
+        {
+            Directory.Delete(_historyFolder, recursive: true);
+        }
+    }
+}
+
+// What the device node's link bit says, set by the test. A plain block drops the link; a refused one leaves it.
+internal sealed class FakeLink : ILinkProbe
+{
+    public LinkState State { get; set; } = LinkState.Unknown;
+
+    // What the gate reads when it is asked to block. Null: the same as State. A test sets it to model a link that came up
+    // between the coordinator's read and the gate's.
+    public LinkState? GateSees { get; set; }
+
+    public int Reads { get; private set; }
+
+    public Task<LinkState> ReadAsync(CancellationToken ct)
+    {
+        Reads++;
+        return Task.FromResult(State);
+    }
+}
+
+internal sealed class FakeSession : ISessionState
+{
+    public SessionLockState State { get; set; } = SessionLockState.Unlocked;
+
+    public SessionLockState Current => State;
+}
+
+internal sealed class FakeHints : IDeviceHints
+{
+    public DeviceHint Hint { get; set; } = DeviceHint.Unknown;
+
+    public DeviceHint Read() => Hint;
+}
+
+internal sealed class RecordingLauncher : IWindowsSettingsLauncher
+{
+    public int Opened { get; private set; }
+
+    public StepOutcome OpenBluetoothSettings()
+    {
+        Opened++;
+        return StepOutcomes.FromWin32("open-settings", 0, "ms-settings:bluetooth");
     }
 }
 
@@ -525,6 +593,19 @@ internal sealed class FakeBlock : IBlockController
 
     public ActiveLinkOnBlock ActiveLink { get; set; }
 
+    // The link bit the gate would read for an idle block or an undo-allow; null when the test has no link to model.
+    public FakeLink? Link { get; init; }
+
+    // The gate verbs sent, with the allow nonce an undo carried, in order. Calls keeps the plain names older tests read.
+    public List<string> GateVerbCalls { get; } = new();
+
+    // The cancellation token each undo-allow was handed, to show a clean-up is not cancellable.
+    public List<CancellationToken> UndoTokens { get; } = new();
+
+    private int _nonces;
+
+    public string LastAllowNonce { get; private set; } = "";
+
     // Blocks sent while render was ACTIVE with ActiveLink not chosen; Pump fails the test on any.
     public List<string> UnchosenActiveBlocks { get; } = new();
 
@@ -589,6 +670,12 @@ internal sealed class FakeBlock : IBlockController
 
     public Task<ControllerResult> BlockAsync(CancellationToken ct = default)
     {
+        GateVerbCalls.Add("block");
+        return BlockCore(ct);
+    }
+
+    private Task<ControllerResult> BlockCore(CancellationToken ct)
+    {
         Calls.Add("block");
         Trace?.Add("block");
         NoteToken("block", ct);
@@ -607,6 +694,10 @@ internal sealed class FakeBlock : IBlockController
         if (!active || ActiveLink != ActiveLinkOnBlock.Stays)
         {
             _monitor.Publish(Devices.NotPresent(++_sequence));
+            if (Link is not null)
+            {
+                Link.State = LinkState.Disconnected;
+            }
         }
 
         return Task.FromResult(ControllerResult.Ok("Blocked at boot"));
@@ -615,8 +706,10 @@ internal sealed class FakeBlock : IBlockController
     public Task<ControllerResult> AllowAsync(CancellationToken ct = default)
     {
         Calls.Add("allow");
+        GateVerbCalls.Add("allow");
         Trace?.Add("allow");
         NoteToken("allow", ct);
+        LastAllowNonce = (++_nonces).ToString("x32", System.Globalization.CultureInfo.InvariantCulture);
         if (OnAllow is { } allow)
         {
             return allow(ct);
@@ -624,7 +717,34 @@ internal sealed class FakeBlock : IBlockController
 
         Status = Status with { State = BlockState.Allowed };
         _monitor.Publish(Devices.Idle(++_sequence));
-        return Task.FromResult(ControllerResult.Ok("Allowed"));
+        return Task.FromResult(ControllerResult.Ok("Allowed") with { GateNonce = LastAllowNonce });
+    }
+
+    // The older tests read "block" for every block, so these two record that too, and add the verb to GateVerbCalls.
+    public Task<ControllerResult> BlockIfIdleAsync(CancellationToken ct = default)
+    {
+        GateVerbCalls.Add("block-idle");
+        return GuardedBlockAsync(ct);
+    }
+
+    public Task<ControllerResult> UndoAllowAsync(string allowNonce, CancellationToken ct = default)
+    {
+        GateVerbCalls.Add("undo-allow:" + allowNonce);
+        UndoTokens.Add(ct);
+        return GuardedBlockAsync(ct);
+    }
+
+    // The gate's own refusal: with the link up it changes nothing and says InUse.
+    private Task<ControllerResult> GuardedBlockAsync(CancellationToken ct)
+    {
+        if ((Link?.GateSees ?? Link?.State) == LinkState.Connected)
+        {
+            Calls.Add("block-refused");
+            return Task.FromResult(ControllerResult.Fail(BlockController.InUseMessage,
+                [new StepOutcome(BlockController.GateExitStep, false, (int)GateExitCode.InUse, "in-use", null)]));
+        }
+
+        return BlockCore(ct);
     }
 
     // A Block at boot change that does something else than write the setting at once.

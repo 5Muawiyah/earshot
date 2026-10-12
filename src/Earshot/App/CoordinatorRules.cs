@@ -96,6 +96,14 @@ internal static class CoordinatorRules
         _ => BlockCoordinator.NotAvailableMessage,
     };
 
+    // True when the gate was asked for an idle block or an undo and found the AirPods connected: it changed nothing and ended with
+    // the InUse exit code, which the controller records as a gate-exit step.
+    public static bool GateRefusedInUse(ControllerResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return result.Steps.Any(s => s.Step == BlockController.GateExitStep && s.Code == (int)GateExitCode.InUse);
+    }
+
     // The message for a connect that did not reach ACTIVE and whose other way is not taken. The controller's
     // "Trying another way" and "Allowing first" promise actions that only the coordinator takes, so they are
     // replaced whenever that action does not follow. Once the clean-up has blocked the nodes again (blockedAgain),

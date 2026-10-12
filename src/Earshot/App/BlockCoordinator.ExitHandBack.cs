@@ -1,4 +1,5 @@
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 
 namespace Earshot.App;
 
@@ -129,8 +130,16 @@ internal sealed partial class BlockCoordinator
         }
     }
 
-    private void RecordHandBack(string disconnect, HandBackBlockOutcome block, string detail) =>
+    private void RecordHandBack(string disconnect, HandBackBlockOutcome block, string detail)
+    {
         _handBackOutcome = new HandBackOutcome(disconnect, block, detail);
+        DateTimeOffset now = _time.GetUtcNow();
+        WriteHistory(new ConnectHistoryEntry(
+            now, ConnectHistoryActions.HandBack, StartStateOf(FreshStatus ?? _blockStatus), "hand-back",
+            [new HistoryStep("disconnect-" + ConnectHistory.StepKind(disconnect), 0, "S_OK")], false,
+            block is HandBackBlockOutcome.Blocked or HandBackBlockOutcome.NotNeeded ? ConnectHistoryOutcomes.Blocked : ConnectHistoryOutcomes.Failed,
+            "None", 0));
+    }
 
     // A block not sent is only a problem when it leaves the nodes enabled by Earshot's doing: the boot block off,
     // not set up, or the nodes already blocked leave nothing to do. A status never read, a protect verb that may

@@ -34,6 +34,10 @@ public interface IConnectionController                            // pure Core A
 {
     Task<ConnectResult> ConnectAsync(Guid containerId, CancellationToken ct = default);
     Task<ConnectResult> DisconnectAsync(Guid containerId, CancellationToken ct = default);
+
+    // Connects, waiting at most confirmWithin for an endpoint to reach ACTIVE once a request was accepted. The coordinator
+    // gives each attempt only what is left of the connect's own time limit. A controller without the option uses its own limit.
+    Task<ConnectResult> ConnectAsync(Guid containerId, TimeSpan confirmWithin, CancellationToken ct) => ConnectAsync(containerId, ct);
 }
 
 public interface IBlockController
@@ -48,6 +52,15 @@ public interface IBlockController
     // named after a language keyword, and On is a Visual Basic keyword.
     // https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/ca1716
     Task<ControllerResult> SetBlockAtBootAsync(bool blockAtBoot, CancellationToken ct = default);
+
+    // Blocks like BlockAsync, but the gate first reads the device node's link bit and, finding the AirPods connected, changes
+    // nothing (the result is a failure whose steps carry a gate-exit step with the InUse code). For the idle rule. A controller
+    // without the verb blocks plainly.
+    Task<ControllerResult> BlockIfIdleAsync(CancellationToken ct = default) => BlockAsync(ct);
+
+    // Puts back exactly what the allow with this GateNonce changed (its status file lists the nodes), then blocks anything that
+    // is still not at rest; refuses like BlockIfIdleAsync when the AirPods are connected. A controller without the verb blocks.
+    Task<ControllerResult> UndoAllowAsync(string allowNonce, CancellationToken ct = default) => BlockAsync(ct);
 
     // Copies the hand-back setting into the machine folder's config.json (RunEx "sethandback-on" or "sethandback-off"),
     // where the service that hands the AirPods back at shut down can read it. The tray's own settings file is not

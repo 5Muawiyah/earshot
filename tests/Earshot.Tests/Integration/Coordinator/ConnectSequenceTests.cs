@@ -14,7 +14,8 @@ public sealed class ConnectSequenceTests
     private static readonly string[] AllowThenBlock = ["allow", "block"];
     private static readonly string[] BlockOnly = ["block"];
     private static readonly string[] ConnectingThenConnected = ["Connecting", "Connected"];
-    private static readonly string[] ConnectingAllowingConnected = ["Connecting", BlockCoordinator.AllowingStatus, "Connected"];
+    private static readonly string[] ConnectingAllowingConnected =
+        ["Connecting", BlockCoordinator.AllowingStatus, BlockCoordinator.WaitingStatus, "Connecting", "Connected"];
     private static readonly string[] SetDevice = ["set-device:" + Devices.Address];
     private static readonly string[] SafeModeRefusal = ["Safe mode: no device actions."];
 
@@ -70,8 +71,8 @@ public sealed class ConnectSequenceTests
         Assert.AreEqual(BlockState.Blocked, h.Coordinator.BlockStatus?.State);
 
         // The nodes are disabled again, so nothing can still be connecting.
-        Assert.AreEqual(BlockCoordinator.DidNotConnectMessage, report.UserMessage);
-        Assert.AreEqual(BlockCoordinator.DidNotConnectMessage, h.Cards.Statuses[^1]);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCase, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCase, h.Cards.Statuses[^1]);
         CollectionAssert.DoesNotContain(h.Cards.Statuses, ConnectMessages.StillConnecting);
     }
 
@@ -96,7 +97,7 @@ public sealed class ConnectSequenceTests
         Assert.AreEqual(OpStatus.Failed, report.Status);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls, "The connect's own allow was left in place on a setting that could not be read.");
         Assert.AreEqual(BlockState.Blocked, h.Block.Status.State);
-        Assert.AreEqual(BlockCoordinator.DidNotConnectMessage, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCase, report.UserMessage);
     }
 
     [TestMethod]
@@ -112,7 +113,7 @@ public sealed class ConnectSequenceTests
         ToggleReport report = h.Toggle(connect: true);
 
         // Nothing was allowed, so the connect blocks nothing, and the request may still be taken.
-        Assert.AreEqual(ConnectMessages.StillConnecting, report.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.OpenTheCase, report.UserMessage);
         Assert.IsEmpty(h.Block.Calls);
         Assert.IsTrue(h.Coordinator.IdleWaitRunning, "The idle rule still blocks the nodes if it never connects.");
     }
@@ -422,11 +423,13 @@ public sealed class ConnectSequenceTests
         Assert.IsFalse(toggle.IsCompleted, "The connect did not wait for the endpoints.");
 
         h.Advance(BlockCoordinator.EndpointWait);
+        Assert.IsFalse(toggle.IsCompleted, "The one retry waits for the endpoints a second time.");
+        h.Advance(BlockCoordinator.EndpointWait);
 
         Assert.IsTrue(toggle.IsCompleted);
         ToggleReport timedOut = toggle.GetAwaiter().GetResult();
         Assert.AreEqual(OpStatus.Failed, timedOut.Status);
-        Assert.AreEqual(BlockCoordinator.DidNotComeBackMessage, timedOut.UserMessage);
+        Assert.AreEqual(ConnectFailureClassifier.WindowsDidNotBringThemBack, timedOut.UserMessage);
         CollectionAssert.AreEqual(AllowThenBlock, h.Block.Calls);
         Assert.HasCount(1, h.Connection.Calls);
     }

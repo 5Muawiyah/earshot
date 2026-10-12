@@ -24,6 +24,10 @@ public sealed record ControllerResult(
     public static ControllerResult Fail(string msg, IReadOnlyList<StepOutcome> steps) =>
         new(OpStatus.Failed, msg, steps);
     public bool IsSuccess => Status is OpStatus.Success or OpStatus.AlreadyInState;
+
+    // The nonce of the gate run that produced this result, for a node change sent through the gate; null otherwise. An allow's
+    // nonce names its status file, which lists what it changed, so the undo can put back exactly that.
+    public string? GateNonce { get; init; }
 }
 
 public sealed record ConnectResult(

@@ -281,8 +281,8 @@ public sealed class TrayContextTests
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             tray.PumpUntilIdle();
 
-            CollectionAssert.AreEqual(new[] { TrayStatus.CardConnecting, "Still connecting. Check your AirPods." }, tray.Cards.Statuses);
-            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "connect: Failed. Still connecting. Check your AirPods."));
+            CollectionAssert.AreEqual(new[] { TrayStatus.CardConnecting, ConnectFailureClassifier.OpenTheCase }, tray.Cards.Statuses);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "connect: Failed. " + ConnectFailureClassifier.OpenTheCase));
         });
     }
 

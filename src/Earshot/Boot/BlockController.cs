@@ -550,9 +550,31 @@ internal sealed class BlockController : IBlockController, IDisposable
         return GateStore.ValidateDevice(pinned) is null ? pinned : null;
     }
 
-    private ControllerResult ChangeNodes(bool block, CancellationToken ct)
+    // The gate step a result carries when the gate ended with something other than success: the exit code and its name. The
+    // coordinator reads it to tell "the AirPods are in use" (InUse) and a gate that cannot be used (no identity, not set up)
+    // from a partial change.
+    internal const string GateExitStep = "gate-exit";
+
+    public const string InUseMessage = "The AirPods are in use, so they were not blocked.";
+
+    public Task<ControllerResult> BlockIfIdleAsync(CancellationToken ct = default) =>
+        _worker.RunAsync(token => ChangeNodes(GateVerbs.BlockIdle, null, token), ct);
+
+    public Task<ControllerResult> UndoAllowAsync(string allowNonce, CancellationToken ct = default)
     {
-        string verb = block ? GateVerbs.Block : GateVerbs.Allow;
+        ArgumentNullException.ThrowIfNull(allowNonce);
+        return BoundaryValidation.IsNonce(allowNonce)
+            ? _worker.RunAsync(token => ChangeNodes(GateVerbs.UndoAllow, allowNonce, token), ct)
+            : _worker.RunAsync(token => ChangeNodes(GateVerbs.Block, null, token), ct);
+    }
+
+    private ControllerResult ChangeNodes(bool block, CancellationToken ct) =>
+        ChangeNodes(block ? GateVerbs.Block : GateVerbs.Allow, null, ct);
+
+    // block, allow, block-idle (a block that refuses to cut a live link) or undo-allow (argument is the allow's nonce).
+    private ControllerResult ChangeNodes(string verb, string? argument, CancellationToken ct)
+    {
+        bool block = verb != GateVerbs.Allow;
         var steps = new List<StepOutcome>();
 
         GateRead<DeviceIdentity> device = _store.ReadDevice();
@@ -581,29 +603,40 @@ internal sealed class BlockController : IBlockController, IDisposable
         // What the check saw fail stays on record with the result.
         steps.AddRange(before.Steps.Where(s => !s.Ok));
 
-        GateRunResult run = _gate.Run(TaskPlan.GateTaskName, verb, NewNonce(), null, TaskSchedulerGate.GateTimeout, ct);
+        string nonce = NewNonce();
+        GateRunResult run = _gate.Run(TaskPlan.GateTaskName, verb, nonce, argument, TaskSchedulerGate.GateTimeout, ct);
         steps.AddRange(run.Steps);
         if (run.Status is not null)
         {
             steps.AddRange(run.Status.Steps);
+            if (run.Status.ExitCode != 0)
+            {
+                steps.Add(ExitStep(GateExitStep, run.Status.ExitCode));
+            }
         }
 
         ControllerResult? refused = RunRefusal(run);
         if (refused is not null)
         {
-            return Finish(verb, refused with { Steps = steps });
+            return Finish(verb, refused with { Steps = steps, GateNonce = nonce });
         }
 
         if (IsBusy(run))
         {
-            return Finish(verb, ControllerResult.Fail(BusyMessage, steps));
+            return Finish(verb, ControllerResult.Fail(BusyMessage, steps) with { GateNonce = nonce });
+        }
+
+        // A block that found the AirPods connected changed nothing, and says so.
+        if (run.Status?.ExitCode == (int)GateExitCode.InUse)
+        {
+            return Finish(verb, ControllerResult.Fail(InUseMessage, steps) with { GateNonce = nonce });
         }
 
         // Ground truth: the node state read now, not the task's result.
         NodeReadResult after = _reader.Read(identity.ContainerId, identity.Address);
         steps.AddRange(after.Steps);
         BlockState state = BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, after);
-        return Finish(verb, MapNodeResult(block, state, after, run.Outcome, steps));
+        return Finish(verb, MapNodeResult(block, state, after, run.Outcome, steps) with { GateNonce = nonce });
     }
 
     // The result of a block or an allow, from the node state read afterwards. A target that is not present is
