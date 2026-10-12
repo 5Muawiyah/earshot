@@ -71,6 +71,15 @@ public sealed class TesterPicturesTests
 
         using var small = new Bitmap(Path.Combine(folder.Path, "home-light-100pct.png"));
         using var large = new Bitmap(Path.Combine(folder.Path, "home-light-150pct.png"));
+
+        // Windows cuts a window wider than the screen to the screen, so on a small screen both pictures are as wide as it allows
+        // and the size of the larger one cannot be seen here.
+        // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.systeminformation.maxwindowtracksize
+        if (large.Width >= System.Windows.Forms.SystemInformation.MaxWindowTrackSize.Width)
+        {
+            Assert.Inconclusive("The 150% picture is " + large.Width + " px wide, the widest window this screen allows, so whether it is larger than the 100% one cannot be told here.");
+        }
+
         Assert.IsGreaterThan(small.Width, large.Width, "150% is not larger than 100%.");
     }
 

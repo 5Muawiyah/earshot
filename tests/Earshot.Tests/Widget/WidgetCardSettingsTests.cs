@@ -366,8 +366,12 @@ public sealed class WidgetCardSettingsTests
         AssertTheCardKeepsItsBottomEdge(new Rectangle(0, 0, 1280, 600));
     }
 
+    // Windows cuts a window taller than the screen to the screen, whatever work area the card is told, so the given work area is
+    // held to the tallest window this screen allows; otherwise the test measures the screen it runs on, not the card.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.systeminformation.maxwindowtracksize
     private static void AssertTheCardKeepsItsBottomEdge(Rectangle workArea)
     {
+        workArea.Height = Math.Min(workArea.Height, SystemInformation.MaxWindowTrackSize.Height);
         Phase5.CardDesktop.Run(() =>
         {
             using Page page = Page.Open(new FakeCardHost(), workArea: workArea);
