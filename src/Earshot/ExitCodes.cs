@@ -7,6 +7,7 @@ internal static class ExitCodes
     public const int Ok = 0;
     public const int Usage = 64;         // bad command line
     public const int Unavailable = 69;   // this build has no implementation for the request
+    public const int Declined = 76;      // the person said no on the screen to Fix connection; nothing more was changed
     public const int PlanOnly = 75;      // Fix connection printed its plan and changed nothing, because nobody was at the screen to answer
     public const int Software = 70;      // an internal check failed
     public const int OsError = 71;       // a startup Win32 call failed

@@ -103,7 +103,7 @@ internal static class SetupPlan
                     SetupAction.Repair => (SetupText.RepairedInstruction, SetupText.RepairedContent, true),
                     SetupAction.Uninstall => (SetupText.UninstalledInstruction, SetupText.UninstalledContent, true),
                     SetupAction.FixConnection => (SetupText.FixedInstruction, SetupText.FixedContent, true),
-                    _ => (SetupText.InstalledInstruction, SetupText.InstalledContentNotStarted, true),
+                    _ => (SetupText.InstalledInstruction, SetupText.InstalledContent, true),
                 };
             case 2:
                 return (SetupText.PartialInstruction, SetupText.PartialContent + " " + SetupText.Code(exit), false);
@@ -137,6 +137,9 @@ internal sealed class SetupFlow
 {
     internal static readonly TimeSpan ProbeWait = TimeSpan.FromMinutes(2);
     internal static readonly TimeSpan ActionWait = TimeSpan.FromMinutes(12);
+
+    // Earshot's own exit code for a Fix connection the person said no to on the screen (ExitCodes.Declined).
+    internal const int FixDeclinedExit = 76;
     internal static readonly TimeSpan FixWait = TimeSpan.FromHours(1);
 
     private readonly IPayload _payload;
@@ -311,23 +314,15 @@ internal sealed class SetupFlow
         LaunchResult result = usable && action == SetupAction.Repair
             ? RunWork(action, instruction, _host.InstalledExe, ["repair", values.UserSid, chosen.Address, container], Path.GetDirectoryName(_host.InstalledExe)!, ActionWait)
             : RunWork(action, instruction, exe, ["install-zip", zip, _payload.Sha256.ToUpperInvariant(), values.UserSid, chosen.Address, container], app, ActionWait);
-        SetupOutcome outcome = Finish(action, result);
-        if (outcome.ExitCode == SetupExit.Done && action == SetupAction.Install)
-        {
-            LaunchResult started = _launcher.StartInUserSession(_host.InstalledExe);
-            _ui.Show(MessageKind.Information, SetupText.InstalledInstruction,
-                started.Started ? SetupText.InstalledContentStarted : SetupText.InstalledContentNotStarted);
-            return outcome;
-        }
-
-        return outcome;
+        return Finish(action, result);
     }
 
     private LaunchResult RunWork(SetupAction action, string instruction, string exe, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan wait) =>
         _ui.Work(instruction, SetupText.WorkContent, () => _launcher.RunAndWait(exe, arguments, workingDirectory, wait));
 
-    // Shows the result of an action and turns it into the outcome. The install's own success message is shown by the caller,
-    // after it has tried to open Earshot.
+    // Shows the result of an action and turns it into the outcome. Setup starts nothing afterwards: it runs elevated, and the
+    // only documented ways to start a program as the person signed in are not available to it, so the message says where to
+    // open Earshot.
     private SetupOutcome Finish(SetupAction action, LaunchResult result)
     {
         if (!result.Started)
@@ -335,14 +330,16 @@ internal sealed class SetupFlow
             return new SetupOutcome(SetupExit.Failed, SetupText.FailedInstruction, SetupText.FailedContent + " " + result.Detail);
         }
 
+        if (action == SetupAction.FixConnection && result.ExitCode == FixDeclinedExit)
+        {
+            _ui.Show(MessageKind.Information, SetupText.FixDeclinedInstruction, SetupText.NothingChanged);
+            return new SetupOutcome(SetupExit.Cancelled, SetupText.FixDeclinedInstruction, SetupText.NothingChanged);
+        }
+
         (string instruction, string content, bool ok) = SetupPlan.Describe(action, result.ExitCode);
         if (ok)
         {
-            if (action != SetupAction.Install)
-            {
-                _ui.Show(MessageKind.Information, instruction, content);
-            }
-
+            _ui.Show(MessageKind.Information, instruction, content);
             return new SetupOutcome(SetupExit.Done, instruction, content);
         }
 

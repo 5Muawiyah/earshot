@@ -173,7 +173,8 @@ public sealed class SetupFlowTests
         Assert.AreEqual(UserSid, install[3]);
         Assert.AreEqual(AddressA, install[4]);
         Assert.AreEqual(ContainerA, install[5]);
-        CollectionAssert.AreEqual(new[] { w.InstalledExe }, w.Launcher.UserSessionStarts);
+        Assert.HasCount(2, w.Launcher.Runs, "Setup starts nothing after the install; the person opens Earshot from the Start menu.");
+        Assert.AreEqual(SetupText.InstalledContent, w.Ui.Messages.Last().Content);
         Assert.IsFalse(Directory.Exists(Path.Combine(w.StagingRoot)), "The working folder and its empty parent are gone.");
         StringAssert.Contains(w.Ui.Footer, "does not show the file is genuine", "The wording says what the check does not do.");
     }
@@ -330,6 +331,23 @@ public sealed class SetupFlowTests
 
         Assert.AreEqual(SetupExit.Done, outcome.ExitCode, outcome.Detail);
         Assert.AreEqual("fix", string.Join("|", w.Launcher.Runs[1].Args));
+    }
+
+    // A no to one of Fix connection's on-screen questions is its own exit code, so Setup does not report it as a fix that
+    // worked or as a failure.
+    [TestMethod]
+    public void AFixConnectionThePersonDeclinedSaysNothingWasChanged()
+    {
+        using var w = new World();
+        w.Launcher.ValuesJson = Values("usable", "1.5.0");
+        w.Ui.Choose = _ => SetupAction.FixConnection;
+        w.Launcher.Handler = (_, args) => new Earshot.Setup.LaunchResult(true, args[0] == "fix" ? Earshot.ExitCodes.Declined : 0, "");
+
+        SetupOutcome outcome = w.Run();
+
+        Assert.AreEqual(SetupExit.Cancelled, outcome.ExitCode, outcome.Detail);
+        Assert.AreEqual("Nothing was changed.", outcome.Detail);
+        Assert.AreEqual(MessageKind.Information, w.Ui.Messages.Last().Kind);
     }
 
     [TestMethod]

@@ -78,6 +78,7 @@ public sealed class FixExitPathTests
         FixResult result = await RunAsync(rig);
 
         Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+        Assert.AreEqual(Earshot.ExitCodes.Declined, result.ExitCode, "A no on the screen is not reported as a fix that worked.");
         Expect.Same(rig.GateFake.Calls, "block");
         Assert.IsEmpty(rig.Pairing.Calls, "Nothing was unpaired or scanned.");
         Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
@@ -105,10 +106,26 @@ public sealed class FixExitPathTests
         FixResult result = await RunAsync(rig);
 
         Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+        Assert.AreEqual(Earshot.ExitCodes.Declined, result.ExitCode);
         Assert.IsEmpty(rig.GateFake.Calls);
         Assert.IsEmpty(rig.Elevator.Calls);
         Assert.IsEmpty(rig.Gate.Nodes.Calls);
         Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);
+    }
+
+    // The administrator run may have started and changed the nodes before the wait for it ends in an exception, so the run
+    // counts as having touched them and the closing block follows.
+    [TestMethod]
+    public async Task AnAdministratorRunWhoseWaitEndsInAnExceptionEndsInTheBlock()
+    {
+        using FixRig rig = Arranged();
+        rig.Prompter.SayOk();
+        rig.Elevator.Result = (_, _) => throw new OperationCanceledException();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        Expect.Same(rig.GateFake.Calls, "block");
     }
 
     [TestMethod]

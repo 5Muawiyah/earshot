@@ -37,6 +37,7 @@ internal sealed record FixResult(FixOutcome Outcome, IReadOnlyList<string> Lines
     {
         FixOutcome.Usage => Earshot.ExitCodes.Usage,
         FixOutcome.PlanOnly => Earshot.ExitCodes.PlanOnly,
+        FixOutcome.Declined => Earshot.ExitCodes.Declined,
         FixOutcome.Failed => Earshot.ExitCodes.Software,
         _ => Earshot.ExitCodes.Ok,
     };
@@ -167,6 +168,10 @@ internal static class FixConnection
             FixPlanFileInfo file = host.PlanFiles.Write(work);
             steps.Add(host.Recovery.Begin("restoring"));
             ElevatedRun run;
+
+            // Counted as touched before the wait: the administrator run may change the nodes and then the wait end in an
+            // exception, and the closing block must still follow. Only a run Windows never started clears it again.
+            state.Touched = true;
             try
             {
                 run = await host.Elevator.ApplyAsync(first.Consent, file.Path, file.Sha256, ct).ConfigureAwait(false);
@@ -179,6 +184,7 @@ internal static class FixConnection
             steps.Add(run.Step);
             if (run.ExitCode is not int exit)
             {
+                state.Touched = false;
                 lines.Add("Windows did not start the administrator run: " + run.Step.CodeName + " (" + run.Step.Code.ToString(CultureInfo.InvariantCulture) + "). Nothing was changed.");
                 return FixOutcome.Failed;
             }

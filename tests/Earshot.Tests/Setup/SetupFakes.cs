@@ -129,8 +129,6 @@ internal sealed class FakeLauncher : IProcessLauncher
 {
     public List<(string Exe, string[] Args)> Runs { get; } = [];
 
-    public List<string> UserSessionStarts { get; } = [];
-
     public Func<string, string[], LaunchResult>? Handler { get; set; }
 
     // What "probe setup-values" writes.
@@ -147,12 +145,6 @@ internal sealed class FakeLauncher : IProcessLauncher
         }
 
         return Handler?.Invoke(exePath, args) ?? new LaunchResult(true, 0, "");
-    }
-
-    public LaunchResult StartInUserSession(string exePath)
-    {
-        UserSessionStarts.Add(exePath);
-        return new LaunchResult(true, 0, "");
     }
 }
 

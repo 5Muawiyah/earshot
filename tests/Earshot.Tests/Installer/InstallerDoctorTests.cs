@@ -153,6 +153,18 @@ public sealed class InstallerDoctorTests
         StringAssert.Contains(run.Final, "code 74");
     }
 
+    [TestMethod]
+    [DataRow(ShellKind.WindowsPowerShell)]
+    [DataRow(ShellKind.PowerShell7)]
+    public void AFixThePersonSaidNoToSaysNothingWasChanged(ShellKind shell)
+    {
+        using var world = new InstallerWorld();
+
+        InstallerRun run = Run(world, shell, "Fix", exitCode: 76);
+
+        Assert.AreEqual("Earshot: stopped. Fix connection stopped at your answer, so nothing was changed.", run.Final, run.Describe());
+    }
+
     // The one real run of the helper that starts the program: a harmless Windows program stands in for Earshot.exe, so the
     // process start, the redirected output and the exit code are the script's own. findstr.exe finds nothing to match in no input and ends with 1.
     [TestMethod]
