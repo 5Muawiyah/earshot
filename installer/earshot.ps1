@@ -1117,6 +1117,8 @@ If Doctor and Fix do not explain the problem:
     function Invoke-Main {
         if (-not (Test-TestParametersAllowed)) { Stop-Run '-Feed, -Roots and -TestHooks are for the tests and are not accepted here. Pass only -Action, -DryRun and -RemoveSettings.' }
         if ($env:OS -ne 'Windows_NT') { Stop-Run 'Earshot is for Windows.' }
+        # The guide only prints text, so it is shown in an administrator window too; everything else runs as the person.
+        if ($Action -eq 'Help') { Show-AiGuide; return }
         if (Test-Elevated) { Stop-Run 'Run this in a normal PowerShell window, not as administrator.' }
         $act = Resolve-Action
         if ($act -eq 'Help') { Show-AiGuide; return }
