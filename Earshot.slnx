@@ -5,6 +5,7 @@
   <Folder Name="/src/">
     <Project Path="src/Earshot/Earshot.csproj" />
     <Project Path="src/Earshot.AdvertProbe/Earshot.AdvertProbe.csproj" />
+    <Project Path="src/Earshot.Setup/Earshot.Setup.csproj" />
     <Project Path="src/Earshot.TestWindow/Earshot.TestWindow.csproj" />
   </Folder>
   <Folder Name="/tests/">
