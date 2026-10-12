@@ -1185,6 +1185,122 @@ owner's own label, never a name read off the AirPods.
   test scripts stop the run themselves when it is set, rather than let a
   real device action write its evidence somewhere else.
 
+## Connect, Fix connection and Send to
+
+### Connect
+
+A Connect has one time limit, `BlockCoordinator.ConnectBudget`, 20 seconds from
+the moment it is asked for. It is a limit set by the requirements, not a
+measurement. The steps:
+
+1. Send the reconnect request. If the AirPods are confirmed, that is the end.
+2. If every render endpoint is absent (the nodes are blocked, or flagged and
+   away), allow first: the gate enables the device node and what is under it,
+   waits for what is away to be reported and enables that too. The coordinator
+   then waits up to 10 seconds for a render endpoint and sends the request. The
+   allow carries a nonce, and a status file named by it lists exactly what the
+   allow changed.
+3. A failure is classified (`ConnectFailureClassifier`). A temporary one is tried
+   once more when at least `RetryRoom`, 6 seconds, is left of the 20. Anything
+   else, or a second temporary one, ends the connect with the class's plain
+   sentence. A request whose wait for the endpoint was already the retry is not
+   retried again.
+4. A connect that does not reach an active endpoint has the allow it made undone
+   by that nonce, and nothing else.
+5. With the A2DP filter turned down and protection on, the Hands-Free assisted
+   way still runs, as before.
+
+Progress is reported as "Waiting for the AirPods" and "Trying again". A
+failure is one of four classes: this PC's side (Windows refused the change, the
+audio driver did not accept the request, a node stayed off), the AirPods' side
+(the case is shut, they are in use on the phone, or the linked pair was not
+heard), temporary, or unknown (accepted, never connected, and nothing heard from
+the air). The plain sentences are the ones in `ConnectFailureClassifier`, such
+as "The AirPods did not answer this PC. They may need pairing again."
+
+A timed-out connect is read against the broadcast: the AirPods' side only when
+the linked pair was not heard, is shut or is in use elsewhere; otherwise the
+failure is temporary and, on its retry, this PC's side.
+
+Every finished connect adds a line to an identifier-free connect history in the
+log folder: the action, the outcome, the class and raw codes, with no address,
+container, instance id or name.
+
+`BlockCoordinator.ConnectInWindowsAsync` is built: it allows the nodes, opens
+Windows' Bluetooth settings page, and keeps the idle rule off for two minutes so
+a link formed there in that time, while the person is signed in and active,
+counts as theirs. A failed Connect's card carries it as a Connect in Windows
+button (`ConnectInWindowsOffer`) whenever the connect sets
+`OfferConnectInWindows`, unless Fix connection is due, which takes the card's
+one button instead.
+
+The Connect has been proved only against stand-ins (`ConnectEveryStateTests`,
+`ConnectSequenceTests`, `ConnectFailureClassTests`). Live test 23, "Connect from
+every state", is pending an owner run.
+
+### Fix connection
+
+For AirPods that stick on "Connecting" on this PC. `FixOfferTracker` counts
+finished connects and raises the offer once: two in a row that failed on this
+PC's side, or three in a row that failed on this PC's side or for a reason
+nothing heard could tell. A success starts the count again. A failure on the
+AirPods' side and a cancelled connect neither count nor reset. The count is held
+across a restart by reading the connect history back. When the offer is due the
+failure card is shown again with the same words and one added button, Fix
+connection. Fix connection is also in the tray menu (always), in the settings
+page's Updates page (a row after Repair, with a Fix button, with or without an
+install), in Setup.exe, and as `earshot.ps1 -Action Fix`.
+
+The mode is `Earshot.exe fix [--out <path>]`, run unelevated in the person's
+session. It takes no option that says yes.
+
+1. Plan, from reads only: the AirPods the identity rule finds, Earshot's
+   records, and what Earshot's own node choice picks.
+2. Print the plan. With nobody at the screen (no input desktop, a different
+   desktop, not interactive, or safe mode) it stops here, changes nothing and
+   exits with 75.
+3. First question, an on-screen dialog listing every change that would undo
+   Earshot's own. On OK, one administrator prompt runs `fix-apply`, which builds
+   the plan again itself and applies only the part both plans agree on. When
+   the process already starts elevated, as Setup.exe's does, it applies in the
+   same process with no second prompt, from an administrators-only plan folder.
+4. Second question, a separate dialog: remove the AirPods from Windows and pair
+   them again, by name. On OK, in the same session: unpair, scan, show the
+   instruction for putting the AirPods in pairing mode, pick, pair, check the new
+   device with the identity rule, and adopt it through one gate run when Earshot
+   is installed.
+5. Every path that changed something and ends without an adoption ends with the
+   normal block, when Earshot is installed and Block at boot is on. A marker
+   file covers a crash in between, and the tray answers a stale one with the
+   block at its next start. When the new pair is not the one Earshot protects,
+   it says so.
+6. A result lists every change, status and code, and what could not be done.
+
+Consent comes from the two dialogs and from nothing else: no flag, environment
+variable, standard input or setting makes one. That keeps accidents and scripts
+out. It is not a boundary against another program of the same user that can
+press a dialog's button or run the elevated mode itself. A person declining
+gives exit code 76; the install script says nothing was changed.
+
+It touches only the AirPods the identity rule finds. It works when Earshot is
+not installed. Removing the AirPods and pairing them again has not yet been
+proved on real AirPods, and both dialogs and the AI guide say so. The tests
+(`FixPlannerTests`, `FixConsentTests`, `FixApplyTests`, `FixRePairTests`,
+`FixExitPathTests`) run it against stand-ins.
+
+### Send to
+
+A picker with three choices: This PC, the other device (named by the "Other
+device name" setting, "iPhone" by default) and Other speakers. It opens from
+a Send to row on the card, from a Send to item in the menu a right-click on the
+gauge opens (never in the tray icon's menu), and from Ctrl+Alt+Shift+S. Each has
+its own switch: the card row and the gauge menu item in More, and the
+shortcut by clearing it. Opening it touches nothing. This PC and the other
+device go through the paths the Connect and Disconnect buttons use; Other
+speakers opens Windows' sound settings (`ms-settings:sound`) and never hands the
+AirPods back. Covered by `SendToModelTests`, `SendToAccessTests`,
+`SendToCardTests` and `SendToShortcutTests`; it has had no live run.
+
 ## Setup and removal
 
 Setup is the one-time flow started from **Set up Earshot...** in the tray
@@ -1225,6 +1341,44 @@ settings survive a reinstall.
 Test 15, which exercises setup and this reversal live, has not yet run; the
 elevated launch site it covers has never been exercised. See
 [verification.md](verification.md).
+
+### Setup.exe and the Installed apps entry
+
+**Setup.exe.** `src\Earshot.Setup` builds `Earshot-<version>-Setup.exe` with the
+release zip embedded in it. `tools\build-release.ps1` publishes it as Native AOT
+from the zip it has just written, reads the executable (never runs it) to check
+its imports and load flag, writes `Earshot-<version>-Setup.exe.sha256`, and
+writes `release-notes.md` carrying the SHA-256 of the zip, of Setup.exe and of
+`earshot.ps1`. The hosted build attaches them to the release. The file is not
+signed, so SmartScreen warns.
+
+Its manifest requires administrator rights, so Windows shows one prompt. Setup
+refuses when the account that answered the prompt is not the person signed in.
+It checks the embedded zip against the SHA-256 recorded at build time (a build
+with no zip refuses), unpacks it into a folder only administrators can use, and
+shows one screen of choices: Install, Repair, Fix connection or Uninstall,
+depending on what is installed. Install goes through the same `install-zip`
+verb the install script uses; a pair of AirPods is picked when more than one is
+paired, and with none it says to pair them first. It will not replace a newer
+installed version. The check catches a damaged download, not a hostile release
+or a swapped file, because the hash sits inside the file it checks. Tests:
+`SetupFlowTests`, `SetupPartsTests`. Setup.exe has not been run on a real PC.
+
+**The Installed apps entry.** `InstalledAppsEntry` writes
+`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Earshot` on install, update and repair, and removes it when
+an uninstall has finished. It uses Windows Installer's documented value names:
+DisplayName, DisplayVersion, Publisher, DisplayIcon, InstallLocation,
+InstallDate, UninstallString, ModifyPath, EstimatedSize and NoRepair. The
+UninstallString runs `Earshot.exe uninstall-ui` and ModifyPath runs
+`Earshot.exe repair-ui`. Both run unelevated, only from the installed program
+(a copy elsewhere, safe mode and a redirected data folder are refused), raise
+the one administrator prompt for the installed program's `uninstall` or
+`repair`, and report the outcome in a message box. The per-user clean-up (the
+Open on startup value and the Start menu shortcut) runs only after the elevated
+uninstall ended with exit code 0, and removes only what is exactly Earshot's.
+That Settings shows a Modify button for a program that is not an MSI package
+rests on the documentation; it has not been seen. Tests:
+`InstalledAppsEntryTests`, `InstalledAppsEntryActionsTests`, `UiVerbsTests`.
 
 ### The install script
 
@@ -1296,6 +1450,17 @@ as long as a first install's own wait, for the update's record.
 | Update | usable and older | the installed `Earshot.exe update ...`, the same verb the tray's Update uses, so it works against an install made before the script existed; the script waits for the outcome record in `%ProgramData%\Earshot\update-outcome.json` |
 | Repair | usable | the installed `update` verb with the zip of the installed version's own release, so a repair never changes the version |
 | Uninstall | usable | the installed `Earshot.exe uninstall`; with the program gone, or its folder not usable, the latest release's verified copy runs `uninstall` instead |
+
+**Help, Doctor and Fix.** Three more actions are named the same way. `Help`
+prints the guide built into the script, the same text as
+[ai-guide.md](ai-guide.md) (a test checks that they match), and runs in an
+administrator window too. `Doctor` and `Fix` download the
+latest release, check its SHA-256, and run that copy's `doctor` or `fix` command
+as the person, never elevated, so they work with Earshot not installed. They
+stop with a plain line when the latest release is older than 1.5.0, because an
+older program would take the unknown word as a request to start its tray, and
+both refuse in an administrator window. Fix shows the program's two questions on
+the screen; its exit code 76 ends with "nothing was changed".
 
 Uninstall downloads and checks the latest release too, even when a program is
 installed, because the installed program cannot vouch for its own folder:
@@ -1383,3 +1548,8 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe service` | The hand-back service's run mode. Started by Windows from the service's registration, not by hand. |
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
 | `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep and `gate status` change the state of the device**; those two only read. They exist for the live tests in `tools\live-tests` and are not part of normal use. |
+| `Earshot.exe fix [--out <path>]` | Fix connection, run unelevated in the person's session. Plans from reads, asks two questions on the screen, runs `fix-apply` after one administrator prompt, and may remove the AirPods from Windows and pair them again. Takes no option that says yes. Exit code 75 when nobody was at the screen (plan only), 76 when the person declined. See [Fix connection](#fix-connection). |
+| `Earshot.exe fix-apply <planFile> <sha256>` | The elevated half of Fix connection, started by `fix` after the first question, never by hand. It re-derives the plan and applies only what both agree on. |
+| `Earshot.exe doctor [--out <path>]` | A read-only report of the install, the AirPods and Bluetooth, as a short summary and a JSON block, with names, addresses, ids, serial numbers, the user name and the PC name removed. Needs no administrator rights and touches no device. |
+| `Earshot.exe settings list` / `get <name>` / `set <name> <value>` [`--out <path>`] | Lists every setting that can be changed here with its value and what it accepts, reads one, or changes one. A running Earshot picks a change up within a second or two. An unknown name or a value out of range is refused with a non-zero exit code. |
+| `Earshot.exe uninstall-ui` / `Earshot.exe repair-ui` | What Settings > Apps > Installed apps runs for Uninstall and Modify. Unelevated, from the installed program only. See [Setup.exe and the Installed apps entry](#setupexe-and-the-installed-apps-entry). |

@@ -19,7 +19,9 @@ AirPods' own Bluetooth device nodes while they are not in use on the PC, so
 Windows has nothing to page at boot. It connects and disconnects them from a
 click on the tray icon's card. It blocks the Hands-Free profile so a browser
 tab or a game cannot drop them to call quality. Since v1.3.0 it also shows
-their battery, and in v1.4.0 it keeps their last reading when they are away.
+their battery, in v1.4.0 it keeps their last reading when they are away, and
+v1.5.0 adds Fix connection, a Setup.exe, an Installed apps entry and a Send to
+picker.
 
 | Document | What it covers |
 |---|---|
@@ -49,6 +51,20 @@ The script and the zip come from the same release, so the checksum catches a
 damaged or cut-short download. It does not catch a compromised release or
 account, and the app is not signed.
 
+**Setup.exe.** The release also carries `Earshot-<version>-Setup.exe`, with the
+zip inside it. It is not signed, so SmartScreen warns when you run it. It asks
+for administrator rights once, checks the zip it carries against the SHA-256
+recorded when it was built, and unpacks it into a folder only administrators can
+change. Then it offers Install, Repair, Fix connection or Uninstall. That check
+catches a damaged download, not a swapped file: compare the file with the
+SHA-256 in the release notes before you run it. Setup.exe has not been run on a
+real PC yet.
+
+**Installed apps.** An install, update or repair writes an Earshot entry under
+Settings > Apps > Installed apps, with Uninstall and Modify. Uninstall runs
+Earshot's removal, and Modify runs Repair, each behind one administrator
+prompt. That Windows shows a Modify button for this entry has not been seen yet.
+
 ### Install, fix or manage with AI
 
 ```
@@ -61,12 +77,22 @@ https://github.com/5Muawiyah/earshot/blob/main/docs/ai-guide.md
 and walk me through it one step at a time.
 ```
 
+`-Action Help` prints the guide built into the script, the same text as
+[docs/ai-guide.md](docs/ai-guide.md). The script's other actions are
+`-Action Doctor`, a read-only report of the install, the AirPods and Bluetooth,
+and `-Action Fix`, which runs Fix connection (below). Once Earshot is installed,
+`Earshot.exe doctor` gives the same report and `Earshot.exe settings` lists, reads
+and changes settings. The guide sets four limits: nothing that weakens security,
+only the AirPods, settings kept on uninstall, and every download's SHA-256
+checked. A real bug is drafted as a GitHub issue for you to post.
+
 ### By hand
 
 Download `Earshot-<version>-win-x64.zip` and its `.sha256` from the latest
 release, check the hash, unzip, run `Earshot.exe`, then choose **Set up
 Earshot...** from the menu. Windows shows one administrator prompt. Once
-Earshot is installed the menu says **Repair Earshot...** in its place.
+Earshot is installed the menu says **Repair Earshot...** in its place. Or run
+Setup.exe, above.
 
 Requirements: Windows 11 on x64, and AirPods paired to this PC and connected to
 it at least once, so Windows has created their device nodes. Nothing else needs
@@ -89,7 +115,35 @@ Startup on is not covered.
 ## What it does
 
 - **Stops Windows paging the AirPods at boot**, with Block at boot turned on.
-- **Connects and disconnects them** from the card.
+- **Connects and disconnects them** from the card. A Connect has 20 seconds
+  from the click, with one retry when the first failure looks temporary and at
+  least 6 seconds are left. The card shows "Waiting for the AirPods" and "Trying
+  again" while it works. When it fails it gives a short reason: the AirPods did
+  not answer, Windows refused the change, the audio driver did not accept the
+  request, open the case near this PC, in use on your iPhone, or not heard
+  nearby. If it did not connect, it puts back only what it turned on itself, and
+  the card has a Connect in Windows button: it lets the AirPods through and opens
+  Windows' Bluetooth settings, and a connection made there in the next two
+  minutes is left alone. The
+  timings are limits in the code, not measurements, and the Connect has had no
+  live run yet.
+- **Fix connection**, for AirPods that stick on "Connecting" on this PC. It is
+  in the tray menu, on the settings page's Updates page, in Setup.exe, and as
+  `earshot.ps1 -Action Fix`, and it works when Earshot is not installed. The
+  card offers it as a button after two Connects in a row fail for a reason on
+  this PC's side, or after three that fail with nothing heard from the AirPods.
+  A failure on the AirPods' side (away, case shut, in use on the phone) does not
+  count. Fix connection plans from reads, then asks two questions on the
+  screen, and no flag or script can answer them. The first lists the changes
+  that undo Earshot's own, then needs one administrator prompt. The second asks
+  to remove the AirPods from Windows and pair them again, and you then pair
+  them. It touches only the AirPods. Removing and pairing again has not yet
+  been proved on real AirPods.
+- **Send to**, a small picker with This PC, the iPhone and Other speakers. This
+  PC and the iPhone use the same paths as Connect and Disconnect, and Other
+  speakers opens Windows' sound settings. It opens from a Send to row on the
+  card, from a right-click on the gauge, and with Ctrl+Alt+Shift+S, and each of
+  the three can be switched off in the settings. It has had no live run.
 - **Blocks the Hands-Free profile**, on by default. This turns off the AirPods
   microphone on this PC while it is on.
 - **Microphone off mode**, an opt-in alternative, off by default. The switch
@@ -229,7 +283,7 @@ on the display the gauge is on by default, and closes when the case closes, afte
 a time I choose, or on its close button. It never shows over a full-screen app
 and never takes focus. It is on by default.
 
-**Also new in 1.4.0.** A fully charged notice, one per charge per part, on by
+**From 1.4.0.** A fully charged notice, one per charge per part, on by
 default. Low battery alerts now cover the case. **Battery history** is a 24 hour
 chart of left, right and case, stepping back by day over the 7 days kept. Screen
 readers get names and values for the gauge, the card and the history. **Copy
@@ -238,6 +292,12 @@ stall log with addresses, ids, names and user paths removed. Motion follows
 Windows' curves and is paced to each display's refresh rate. The card is built
 before the first click, and the taskbar is read on its own events with a slower
 safety poll. None of this has had a live run yet.
+
+**Also new in 1.5.0.** The tooltips are gone except on controls that are only
+an icon, where they are one to three words. The gauge holds its place until a
+verdict about the taskbar has held, so it should stop jumping between screens.
+An estimate is made only while the AirPods are away from this PC; on it the last
+reading is shown as it was read. None of this has had a live run yet.
 
 See [docs/overview.md](docs/overview.md#the-airpods-widget) and
 [docs/architecture.md](docs/architecture.md#the-airpods-widget).
@@ -262,10 +322,11 @@ read are in `%ProgramData%\Earshot`.
 
 ## Remove
 
-Turn **Open on startup** off in the menu, close Earshot, then run
+The easiest ways are **Uninstall** under Settings > Apps > Installed apps, Uninstall
+in Setup.exe, or the install script's Uninstall. By hand, turn **Open on
+startup** off in the menu, close Earshot, then run
 `& "C:\Program Files\Earshot\Earshot.exe" uninstall` from an administrator
-PowerShell (in Command Prompt, leave out the `&`). The install script's
-Uninstall does the same. Your pairing is untouched and the AirPods' device
+PowerShell (in Command Prompt, leave out the `&`). Your pairing is untouched and the AirPods' device
 entries are turned back on, so Windows pages them at boot again. See
 [docs/architecture.md](docs/architecture.md#setup-and-removal).
 

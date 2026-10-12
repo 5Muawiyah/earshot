@@ -34,6 +34,11 @@ stays pending until a run on the device has written the evidence for it.
 | Hand back on shut down while connected (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
 | Hand back on sleep while connected (`tools\live-tests\18-HandBackOnSleep.ps1`) | Pending: no live run yet |
 | Hand back on Exit while connected (`tools\live-tests\20-HandBackOnExit.ps1`) | Pending: no live run yet |
+| Connect from every node state inside 20 seconds with one retry, a plain reason and the allow put back (`tools\live-tests\23-ConnectEveryState.ps1`, test 23) | Pending: no live run yet, the script is being added. Stand-in tests only |
+| Fix connection, including removing the AirPods from Windows and pairing them again | Pending: unproved on real AirPods. Stand-in tests only |
+| Setup.exe on a real PC (SmartScreen, the administrator prompt, install, repair, uninstall) | Pending: no live run yet |
+| Settings > Apps > Installed apps: the entry, Uninstall and the Modify button | Pending: no live run yet |
+| Send to from the card, the gauge menu and the shortcut | Pending: no live run yet |
 | Pause when the AirPods leave this PC (`tools\live-tests\21-PauseOnLeave.ps1`) | Pending: no live run yet |
 | Service hand-back with the tray not running (`tools\live-tests\22-ServiceHandBack.ps1`) | Pending: no live run yet |
 | The service finds nothing to do after the tray's hand-back (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |

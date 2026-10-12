@@ -95,6 +95,48 @@ driver refusal.
 
 <img src="images/boot-block.png" alt="An earlier version of the card Earshot shows when the AirPods are blocked at boot" width="360" align="right">
 
+## When a Connect does not work
+
+A Connect has 20 seconds from the click. If the first try fails in a way that
+looks temporary and there is time left, Earshot tries once more. While it works
+the card says "Waiting for the AirPods" and "Trying again". If it still fails,
+the card gives one short reason, for example "The AirPods did not answer this
+PC. They may need pairing again.", "Windows refused the change.", "Open the
+case near this PC.", "In use on your iPhone." or "Not heard nearby." A connect
+that did not get through puts back only what it turned on itself. Under the
+reason the card has a Connect in Windows button: it lets the AirPods through,
+opens Windows' Bluetooth settings, and leaves a connection made there in the next
+two minutes alone. When Fix connection is offered, that button takes its place.
+The 20 seconds
+and the retry are limits in the code. No live run has timed one.
+
+## Fix connection
+
+If the AirPods stick on "Connecting" on this PC, Fix connection is for that. The
+card offers it as a button under the reason after two Connects in a row fail
+for a reason on this PC's side, or after three that fail with nothing heard from
+the AirPods. A failure on the AirPods' side (away, case shut, in use on the
+phone) does not count. It is also in the tray menu, on the settings page's
+Updates page, in Setup.exe and as `earshot.ps1 -Action Fix`, and it works when
+Earshot is not installed.
+
+It first works out, without changing anything, what it would do. Then it asks
+two questions on the screen. The first lists the changes that undo Earshot's
+own, and needs one administrator prompt. The second asks whether to remove the
+AirPods from Windows and pair them again. Nothing a program or a script passes
+in can answer either, and a question left for five minutes counts as no. If you
+say no, nothing more is changed. It touches only the AirPods. Removing them and
+pairing again has not yet been proved on real AirPods, and both the question and
+the AI guide say so.
+
+## Send to
+
+A small picker that sends the AirPods somewhere: This PC, your other device
+(called "iPhone" unless you rename it), or Other speakers, which opens
+Windows' sound settings. It opens from the Send to row on the card, from a
+right-click on the gauge, or with Ctrl+Alt+Shift+S. Each of the three can be
+switched off in the settings. It has had no live run.
+
 ## The boot block
 
 With Block at boot ticked, the AirPods' device nodes are disabled the moment
@@ -351,6 +393,17 @@ What the checksum does and does not protect against: it catches a damaged or
 cut-short download, and a file that differs from what the release lists. It
 does not protect against a compromised release or account, because the
 checksum comes from the same release and the app is not signed.
+
+## Setup.exe and Installed apps
+
+The release carries `Earshot-<version>-Setup.exe` beside the zip. It is not
+signed, so SmartScreen warns. It asks for administrator rights once, checks the
+zip inside it against the SHA-256 recorded when it was built, and offers
+Install, Repair, Fix connection or Uninstall. That check catches a damaged
+download, not a swapped file, so compare the file with the SHA-256 in the
+release notes first. An install, update or repair also adds Earshot to Settings
+> Apps > Installed apps, with Uninstall and Modify; Modify runs Repair. Neither
+Setup.exe nor that entry's Modify button has been seen on a real PC.
 
 ## Shutdown safety
 
