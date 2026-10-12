@@ -17,13 +17,13 @@ public sealed class FixConsentTests
 {
     private static readonly string EmDash = ((char)0x2014).ToString();
 
-    private static readonly string[] YesFlags =
+    internal static readonly string[] YesFlags =
     [
         "--yes", "-y", "/y", "--force", "-f", "--consent", "--ok", "--accept", "--assume-yes", "--confirm", "--no-prompt", "--noprompt",
         "--silent", "/quiet", "--unattended", "--non-interactive", "--consent=yes", "--yes=true", "YES", "y",
     ];
 
-    private static readonly string[] YesVariables =
+    internal static readonly string[] YesVariables =
     [
         "EARSHOT_YES", "EARSHOT_CONSENT", "EARSHOT_FORCE", "EARSHOT_ASSUME_YES", "EARSHOT_FIX_CONSENT", "CONSENT", "YES", "FORCE", "ASSUME_YES", "CI",
     ];

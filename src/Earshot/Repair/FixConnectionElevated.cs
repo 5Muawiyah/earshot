@@ -72,4 +72,79 @@ internal static class FixPlanRoot
 
         return folders.CreateWithSddl(root, UpdateActions.WorkFolderSddl);
     }
+
+    // Removes the run's plan folder when it ends. A folder that stays is logged: it holds only a plan that nothing reads
+    // without its hash.
+    public static void Remove(string root, ILog log)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(log);
+        try
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+        catch (IOException ex)
+        {
+            log.Warn("fix: the plan folder could not be removed (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ").");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            log.Warn("fix: the plan folder could not be removed (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ").");
+        }
+    }
+}
+
+// What a run uses to hand its plan to the apply step and to run that step.
+internal sealed record FixElevation(IFixPlanFiles PlanFiles, IFixElevator Elevator, bool InProcess, string? PlanRoot, StepOutcome? Refusal);
+
+internal static class FixElevationChoice
+{
+    // From an elevated administrator the apply step runs in this process and the plan goes to a new admin-only folder; from
+    // anyone else the ordinary pair is used (a plan in the user's folder, one administrator prompt). When the admin-only folder
+    // cannot be made and checked, the run is refused with the step that failed, and nothing falls back to the ordinary folder.
+    public static FixElevation Choose(
+        IProcessToken token, IFolderSecurity folders, string machineFolder, Guid id, Func<string, string, int> apply,
+        IFixPlanFiles ordinaryPlanFiles, IFixElevator promptElevator)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(apply);
+        ArgumentNullException.ThrowIfNull(ordinaryPlanFiles);
+        ArgumentNullException.ThrowIfNull(promptElevator);
+
+        // SYSTEM never runs Fix connection (nobody is at its screen), so it gets the ordinary pair and the same plan-only stop.
+        if (!token.IsElevatedAdministrator || token.IsLocalSystem)
+        {
+            return new FixElevation(ordinaryPlanFiles, promptElevator, false, null, null);
+        }
+
+        StepOutcome made = FixPlanRoot.CreateAdminOnly(folders, machineFolder, id, out string root);
+        if (!made.Ok)
+        {
+            return new FixElevation(ordinaryPlanFiles, new RefusingFixElevator(made), true, null, made);
+        }
+
+        return new FixElevation(new FixPlanFiles(root), new InProcessFixElevator(apply), true, root, null);
+    }
+}
+
+// The apply step of a run whose admin-only plan folder could not be made. It applies nothing and says why.
+internal sealed class RefusingFixElevator : IFixElevator
+{
+    private readonly StepOutcome _why;
+
+    public RefusingFixElevator(StepOutcome why)
+    {
+        ArgumentNullException.ThrowIfNull(why);
+        _why = why;
+    }
+
+    public Task<ElevatedRun> ApplyAsync(FixConsent consent, string planPath, string planSha256, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(consent);
+        return Task.FromResult(new ElevatedRun(null, _why));
+    }
 }

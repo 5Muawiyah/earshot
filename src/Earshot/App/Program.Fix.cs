@@ -62,7 +62,50 @@ internal static partial class Program
         using var cancel = new CancellationTokenSource();
         using var ui = new FixRePairWindow(cancel);
         using var worker = new SystemWorker(log);
-        FixHost host = CreateFixHost(paths, log, output, ui, worker);
+        IProcessToken token = WindowsProcessToken.Current();
+        FixElevation elevation = ChooseFixElevation(paths, token, log);
+        if (elevation.Refusal is { } refusal)
+        {
+            // Surfaced with the raw code. Nothing was asked and nothing changed.
+            log.Warn("fix: " + GateActions.Describe(refusal));
+            output.WriteLine(FixConnection.NoProtectedFolderNote + " (" + refusal.CodeName + ", " + refusal.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) + ").");
+            return ExitCodes.Software;
+        }
+
+        try
+        {
+            return RunFix(args, paths, log, output, cancel, ui, worker, elevation);
+        }
+        finally
+        {
+            if (elevation.PlanRoot is not null)
+            {
+                FixPlanRoot.Remove(elevation.PlanRoot, log);
+            }
+        }
+    }
+
+    // Already an elevated administrator (Setup.exe runs this verb that way): the apply step runs in this process and the plan
+    // goes to a folder only administrators can reach, so there is no second administrator prompt. Safe mode and a redirected
+    // data root keep the ordinary pair, whose apply step the fix-apply mode refuses there.
+    private static FixElevation ChooseFixElevation(Paths paths, IProcessToken token, ILog log)
+    {
+        var ordinaryFiles = new FixPlanFiles(Path.Combine(paths.LocalFolder, "fix"));
+        var prompting = new ShellRunasFixElevator(new ShellRunasLauncher(), File.Exists(paths.InstalledExe) ? paths.InstalledExe : Environment.ProcessPath ?? paths.InstalledExe);
+        if (paths.IsSafeMode || paths.IsRedirected)
+        {
+            return new FixElevation(ordinaryFiles, prompting, false, null, null);
+        }
+
+        return FixElevationChoice.Choose(
+            token, new NtfsFolderSecurity(), paths.MachineFolder, Guid.NewGuid(),
+            (planPath, planSha256) => ApplyFixInProcess(planPath, planSha256, paths, token, log, request => FixApply.Run(request, CreateFixApplyDeps(paths, log))),
+            ordinaryFiles, prompting);
+    }
+
+    private static int RunFix(IReadOnlyList<string> args, Paths paths, ILog log, TextWriter output, CancellationTokenSource cancel, FixRePairWindow ui, SystemWorker worker, FixElevation elevation)
+    {
+        FixHost host = CreateFixHost(paths, log, output, ui, worker, elevation);
 
         Application.EnableVisualStyles();
         SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
@@ -98,7 +141,7 @@ internal static partial class Program
         return result?.ExitCode ?? ExitCodes.Software;
     }
 
-    private static FixHost CreateFixHost(Paths paths, ILog log, TextWriter output, FixRePairWindow ui, SystemWorker worker)
+    private static FixHost CreateFixHost(Paths paths, ILog log, TextWriter output, FixRePairWindow ui, SystemWorker worker, FixElevation elevation)
     {
         var nodes = new CfgMgr32NodeReader();
         var store = new GateStore(paths.MachineFolder);
@@ -110,7 +153,6 @@ internal static partial class Program
             ? new TaskGateFixGate(worker, CreateTaskGate(paths, store, log), store, nodes, log)
             : new NoInstalledGate();
 
-        string executable = File.Exists(paths.InstalledExe) ? paths.InstalledExe : Environment.ProcessPath ?? paths.InstalledExe;
         IInputDesktop desktop = paths.IsSafeMode || paths.IsRedirected ? new NobodyThere() : new WindowsInputDesktop();
         return new FixHost
         {
@@ -119,8 +161,8 @@ internal static partial class Program
             Leftovers = MachineLeftovers.For(paths, service),
             Desktop = desktop,
             Prompter = new TaskDialogPrompter(),
-            PlanFiles = new FixPlanFiles(Path.Combine(paths.LocalFolder, "fix")),
-            Elevator = new ShellRunasFixElevator(new ShellRunasLauncher(), executable),
+            PlanFiles = elevation.PlanFiles,
+            Elevator = elevation.Elevator,
             Pairing = new WinRtPairingApi(),
             RePairUi = ui,
             Gate = gate,
@@ -140,6 +182,22 @@ internal static partial class Program
         }
 
         return new TaskSchedulerGate(new ComScheduledTasks(), store, paths.InstallFolder, sid, AccountSids.Translate, TimeProvider.System, TaskSchedulerGate.WaitOrCancelled, log);
+    }
+
+    // The apply step of an already-elevated run: the checks of the fix-apply mode (safe mode and a redirected data root, the
+    // token, the environment, the shape of the arguments) are the same ones, because this goes through the same entry point.
+    internal static int ApplyFixInProcess(string planPath, string planSha256, Paths paths, IProcessToken token, ILog log, Func<FixApplyRequest, FixApplyResult> run, IEnumerable<string>? environmentNames = null)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(log);
+        string? refusal = FixApplyPathsRefusal(paths);
+        if (refusal is not null)
+        {
+            log.Warn(refusal);
+            return ExitCodes.Refused;
+        }
+
+        return (int)RunFixApply([FixApply.Verb, planPath, planSha256], token, log, run, environmentNames);
     }
 
     internal static bool ProcessIsAlive(int processId)

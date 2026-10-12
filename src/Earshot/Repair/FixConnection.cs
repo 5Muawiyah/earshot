@@ -46,6 +46,8 @@ internal static class FixConnection
 {
     public const string Usage = "Usage: Earshot.exe fix [--out <path>]. Earshot asks on the screen before it changes anything, so it takes no yes, force or consent option.";
 
+    public const string NoProtectedFolderNote = "Fix connection could not make a folder that only administrators can reach for its plan, so nothing was changed.";
+
     public const string PlanOnlyNote = "Nothing was changed. Earshot asks on the screen before it changes anything, so run Fix connection where a person can answer.";
 
     // The only option: where the plan is printed. It is read by the caller that opens the output; here it is accepted and ignored.
