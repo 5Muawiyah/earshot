@@ -630,9 +630,9 @@ public sealed class WidgetCardScrollTests
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
             card.MaxHeight = 500;
-            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), 96);
+            CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), 96, order: true);
             int bodyTop = card.SettingsViewport.Top;
-            CardControl[] withTips = card.CurrentControls().Skip(1).Where(c => c.Tip is { Length: > 0 }).ToArray();
+            CardControl[] withTips = card.CurrentControls().Skip(1).Where(c => c.Tooltip is { Length: > 0 }).ToArray();
             int tried = 0;
 
             foreach (CardControl control in withTips)
@@ -649,7 +649,7 @@ public sealed class WidgetCardScrollTests
                 tried++;
                 int x = moved.Bounds.X + (moved.Bounds.Width / 2);
                 Assert.IsNull(card.TooltipAt(new Point(x, bodyTop - 2)), control.Name + ": the header is not the control's, though the control's top is up there.");
-                Assert.AreEqual(control.Tip, card.TooltipAt(new Point(x, bodyTop + 2))?.Text, control.Name + ": the part in view is.");
+                Assert.AreEqual(control.Tooltip, card.TooltipAt(new Point(x, bodyTop + 2))?.Text, control.Name + ": the part in view is.");
             }
 
             Assert.IsGreaterThan(3, tried, "Enough controls were scrolled under the header for this to prove something.");
