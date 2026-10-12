@@ -140,6 +140,9 @@ internal sealed class SetupFlow
 
     // Earshot's own exit code for a Fix connection the person said no to on the screen (ExitCodes.Declined).
     internal const int FixDeclinedExit = 76;
+
+    // The same for a no to the second question after the first one's changes were made (ExitCodes.DeclinedAfterChanges).
+    internal const int FixDeclinedAfterChangesExit = 79;
     internal static readonly TimeSpan FixWait = TimeSpan.FromHours(1);
 
     private readonly IPayload _payload;
@@ -334,6 +337,12 @@ internal sealed class SetupFlow
         {
             _ui.Show(MessageKind.Information, SetupText.FixDeclinedInstruction, SetupText.NothingChanged);
             return new SetupOutcome(SetupExit.Cancelled, SetupText.FixDeclinedInstruction, SetupText.NothingChanged);
+        }
+
+        if (action == SetupAction.FixConnection && result.ExitCode == FixDeclinedAfterChangesExit)
+        {
+            _ui.Show(MessageKind.Information, SetupText.FixDeclinedInstruction, SetupText.FirstChangesMade);
+            return new SetupOutcome(SetupExit.Cancelled, SetupText.FixDeclinedInstruction, SetupText.FirstChangesMade);
         }
 
         (string instruction, string content, bool ok) = SetupPlan.Describe(action, result.ExitCode);

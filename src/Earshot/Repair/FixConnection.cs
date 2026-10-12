@@ -27,6 +27,7 @@ internal enum FixOutcome
     Usage,
     PlanOnly,
     Declined,
+    DeclinedAfterChanges,
     Done,
     Failed,
 }
@@ -38,6 +39,7 @@ internal sealed record FixResult(FixOutcome Outcome, IReadOnlyList<string> Lines
         FixOutcome.Usage => Earshot.ExitCodes.Usage,
         FixOutcome.PlanOnly => Earshot.ExitCodes.PlanOnly,
         FixOutcome.Declined => Earshot.ExitCodes.Declined,
+        FixOutcome.DeclinedAfterChanges => Earshot.ExitCodes.DeclinedAfterChanges,
         FixOutcome.Failed => Earshot.ExitCodes.Software,
         _ => Earshot.ExitCodes.Ok,
     };
@@ -215,6 +217,12 @@ internal static class FixConnection
         FixConsent? second = dialog.AskRePair(target is null ? [] : [target.Name], removeFirst: target is not null);
         if (second is null)
         {
+            if (state.Touched)
+            {
+                lines.Add("Declined. The changes you agreed to first were made. The AirPods were not removed or paired again.");
+                return FixOutcome.DeclinedAfterChanges;
+            }
+
             lines.Add("Declined. The AirPods were left as they are.");
             return FixOutcome.Declined;
         }

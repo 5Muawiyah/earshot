@@ -1279,8 +1279,11 @@ session. It takes no option that says yes.
 Consent comes from the two dialogs and from nothing else: no flag, environment
 variable, standard input or setting makes one. That keeps accidents and scripts
 out. It is not a boundary against another program of the same user that can
-press a dialog's button or run the elevated mode itself. A person declining
-gives exit code 76; the install script says nothing was changed.
+press a dialog's button or run the elevated mode itself. A person declining the
+first question gives exit code 76, and the install script and Setup.exe say
+nothing was changed. Declining the second, after the first one's changes were
+made, gives 79, and they say those changes were made and the AirPods were not
+removed or paired again.
 
 It touches only the AirPods the identity rule finds. It works when Earshot is
 not installed. Removing the AirPods and pairing them again has not yet been
@@ -1460,7 +1463,8 @@ as the person, never elevated, so they work with Earshot not installed. They
 stop with a plain line when the latest release is older than 1.5.0, because an
 older program would take the unknown word as a request to start its tray, and
 both refuse in an administrator window. Fix shows the program's two questions on
-the screen; its exit code 76 ends with "nothing was changed".
+the screen; its exit code 76 ends with "nothing was changed", and 79 (a no to the
+second question) with what the first one changed.
 
 Uninstall downloads and checks the latest release too, even when a program is
 installed, because the installed program cannot vouch for its own folder:

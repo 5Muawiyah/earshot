@@ -350,6 +350,22 @@ public sealed class SetupFlowTests
         Assert.AreEqual(MessageKind.Information, w.Ui.Messages.Last().Kind);
     }
 
+    // A no to the second question after the first one's changes were made: Setup says what was done, not "nothing was changed".
+    [TestMethod]
+    public void AFixConnectionDeclinedAfterItsFirstChangesSaysWhatWasDone()
+    {
+        using var w = new World();
+        w.Launcher.ValuesJson = Values("usable", "1.5.0");
+        w.Ui.Choose = _ => SetupAction.FixConnection;
+        w.Launcher.Handler = (_, args) => new Earshot.Setup.LaunchResult(true, args[0] == "fix" ? Earshot.ExitCodes.DeclinedAfterChanges : 0, "");
+
+        SetupOutcome outcome = w.Run();
+
+        Assert.AreEqual(SetupExit.Cancelled, outcome.ExitCode, outcome.Detail);
+        Assert.AreEqual("The changes you agreed to first were made. The AirPods were not removed or paired again.", outcome.Detail);
+        Assert.AreEqual(MessageKind.Information, w.Ui.Messages.Last().Kind);
+    }
+
     [TestMethod]
     public void ABadExitCodeIsShownWithItsNumberAndTheWorkingFolderIsStillRemoved()
     {

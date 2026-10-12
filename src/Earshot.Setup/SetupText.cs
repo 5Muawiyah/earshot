@@ -57,6 +57,7 @@ internal static class SetupText
 
     public const string InstalledInstruction = "Earshot is installed";
     public const string FixDeclinedInstruction = "Fix connection stopped at your answer";
+    public const string FirstChangesMade = "The changes you agreed to first were made. The AirPods were not removed or paired again.";
 
     public const string NothingChanged = "Nothing was changed.";
     public const string InstalledContent = "Open Earshot from the Start menu.";

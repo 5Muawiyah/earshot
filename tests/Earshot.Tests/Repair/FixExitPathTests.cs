@@ -77,8 +77,12 @@ public sealed class FixExitPathTests
 
         FixResult result = await RunAsync(rig);
 
-        Assert.AreEqual(FixOutcome.Declined, result.Outcome);
-        Assert.AreEqual(Earshot.ExitCodes.Declined, result.ExitCode, "A no on the screen is not reported as a fix that worked.");
+        // The first OK's changes were made, so this is not "nothing was changed": it has its own outcome and exit code, and says
+        // what was done and what was not.
+        Assert.AreEqual(FixOutcome.DeclinedAfterChanges, result.Outcome);
+        Assert.AreEqual(Earshot.ExitCodes.DeclinedAfterChanges, result.ExitCode, "A no on the screen is not reported as a fix that worked.");
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("were not removed or paired again", StringComparison.Ordinal)), string.Join("; ", result.Lines));
+        Assert.IsFalse(result.Lines.Any(l => l.Contains("Nothing was changed", StringComparison.Ordinal)), string.Join("; ", result.Lines));
         Expect.Same(rig.GateFake.Calls, "block");
         Assert.IsEmpty(rig.Pairing.Calls, "Nothing was unpaired or scanned.");
         Assert.AreEqual(FixRecoveryState.None, rig.Recovery.Read().State);

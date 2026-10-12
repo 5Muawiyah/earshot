@@ -1094,6 +1094,8 @@ If Doctor and Fix do not explain the problem:
         if (Test-Path -LiteralPath $out) { foreach ($line in [IO.File]::ReadAllLines($out)) { Write-Line $line } }
         # 76 is the program's own code for a Fix connection the person said no to on the screen.
         if ($Verb -eq 'fix' -and $code -eq 76) { Stop-Run 'Fix connection stopped at your answer, so nothing was changed.' }
+        # 79: a no to the second question, after the changes agreed to at the first were made.
+        if ($Verb -eq 'fix' -and $code -eq 79) { Stop-Run 'Fix connection stopped at your second answer: the changes you agreed to first were made, and the AirPods were not removed or paired again.' }
         if ($code -ne 0) { Stop-Run ('The ' + $Verb + ' command did not finish (code ' + $code + ').') }
     }
 

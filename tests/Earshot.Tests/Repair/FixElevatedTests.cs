@@ -79,7 +79,7 @@ public sealed class FixElevatedTests
             Assert.HasCount(1, applied.Calls, "The apply step ran once, in this process.");
             Assert.IsEmpty(rig.Elevator.Calls, "No administrator prompt was raised.");
             Assert.HasCount(2, rig.Prompter.Asked, "Both questions were still asked on the screen.");
-            Assert.AreEqual(FixOutcome.Declined, result.Outcome);
+            Assert.AreEqual(FixOutcome.DeclinedAfterChanges, result.Outcome, "The first question's changes were applied before the no.");
             Assert.StartsWith(elevation.PlanRoot!, applied.Calls[0].Path, StringComparison.OrdinalIgnoreCase);
             Assert.IsTrue(FixPlanFileReader.IsPlanPath(applied.Calls[0].Path, out _));
             Assert.IsFalse(File.Exists(applied.Calls[0].Path), "The plan file is deleted after the run.");
