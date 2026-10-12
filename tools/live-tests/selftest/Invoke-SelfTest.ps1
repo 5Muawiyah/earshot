@@ -72,7 +72,7 @@ param(
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
         'exit-cut-short', 'pause-declined', 'chosen-rising',
         'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-        'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable')][string]$Case = '',
+        'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -190,6 +190,10 @@ $tests = @(
     [ordered]@{ Number = '22'; Id = '22-service-handback'; Script = '22-ServiceHandBack.ps1'; Halves = @('first', 'resume'); Extra = @()
         Cases = @('none', 'one', 'two', 'declined-start', 'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended',
             'service-block-sent', 'service-already-blocked', 'tray-unreadable') }
+    # not-reached: the owner can set up none of the states and does not restart, and says after the restart that there was
+    # none, so every state's criterion reads "not reached" and the run can only be inconclusive.
+    [ordered]@{ Number = '23'; Id = '23-connect-every-state'; Script = '23-ConnectEveryState.ps1'; Halves = @('first', 'resume'); Extra = @()
+        Cases = @('none', 'one', 'two', 'not-reached') }
 )
 
 $defaultCases = @('none', 'one', 'two')
@@ -403,6 +407,8 @@ function Invoke-Half
 #   17-handback-on-shutdown|resume        yes, 0, 0   stays Blocked; nothing to offer
 #   22-service-handback|first      no-on-purpose, 0, 0   the reason is always given once ready
 #   22-service-handback|resume            yes, 0, 0   stays Blocked; nothing to offer
+#   23-connect-every-state|first          yes, 0, 0   every leg ends with Earshot's Disconnect; nothing to offer
+#   23-connect-every-state|resume         yes, 0, 0   the same
 $script:AtRestDefaults = @{
     '00-restore|first'                   = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
     '01-a2dp-oneshot|first'              = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 1 }
@@ -435,6 +441,8 @@ $script:AtRestDefaults = @{
     '21-pause-on-leave|first'            = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '22-service-handback|first'          = @{ LeftAtRest = 'no-on-purpose'; BlockCount = 0; DisconnectCount = 0 }
     '22-service-handback|resume'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '23-connect-every-state|first'       = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '23-connect-every-state|resume'      = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
 }
 
 # What the expectations for one case say should have been recorded, against what was. The

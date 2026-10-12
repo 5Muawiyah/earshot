@@ -61,6 +61,10 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
     // 03-AllowPages.ps1 only: see the class comment's "Timing, not correctness" note.
     private static readonly TimeSpan LongHalfTimeout = TimeSpan.FromSeconds(200);
 
+    // 23-ConnectEveryState.ps1 only: its first half waits the real two minutes after each of three connects made in
+    // Windows, 360 s in all, because the two minutes are the figure the test exists to hold.
+    private static readonly TimeSpan ConnectEveryStateTimeout = TimeSpan.FromSeconds(480);
+
     // See the class comment's "Real, not faked" note. Keyed by "<script> <half>".
     private static readonly HashSet<string> RowsWhereOverallIsNotPinned = new(StringComparer.Ordinal)
     {
@@ -75,8 +79,8 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         "22-ServiceHandBack.ps1 resume|shutdown-was-clean",
     };
 
-    private const int ExpectedScriptCount = 23;
-    private const int ExpectedHalfCount = 31;
+    private const int ExpectedScriptCount = 24;
+    private const int ExpectedHalfCount = 33;
 
     [TestMethod]
     public void EveryScriptAndHalfIsDrivenThroughTheWindowWithMatchingEvidence()
@@ -180,7 +184,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         string liveTestRoot = Path.Combine(sandbox.Path, "local", "Earshot", "livetest");
         string runRoot = Path.Combine(liveTestRoot, "20260921T000000Z");
         string exePath = Path.Combine(sandbox.Path, "nowhere", "Earshot.exe");
-        TimeSpan timeout = row.Number == "03" ? LongHalfTimeout : DefaultHalfTimeout;
+        TimeSpan timeout = row.Number switch { "03" => LongHalfTimeout, "23" => ConnectEveryStateTimeout, _ => DefaultHalfTimeout };
 
         for (int index = 0; index < row.Halves.Count; index++)
         {

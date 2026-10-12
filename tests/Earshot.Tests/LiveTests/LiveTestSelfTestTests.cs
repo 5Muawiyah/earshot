@@ -43,8 +43,8 @@ public sealed class LiveTestSelfTestTests
 
     // Every shipped script, and the halves the self-test has to cover. A script or a half added
     // to tools\live-tests without being added here would otherwise be run by nothing.
-    private const int ExpectedScripts = 23;
-    private const int ExpectedHalves = 31;
+    private const int ExpectedScripts = 24;
+    private const int ExpectedHalves = 33;
     private const int ExpectedCases = 3;
 
     // Cases run on top of the shared three, one extra run per extra Cases entry (see the Cases
@@ -65,12 +65,13 @@ public sealed class LiveTestSelfTestTests
     // one half. Then the hand-back service: 17's service-not-run on both of its halves (2), and
     // 22-ServiceHandBack's declined-start, service-not-run, service-partial, service-over-budget,
     // tray-not-ended, service-block-sent, service-already-blocked and tray-unreadable on both of its
-    // halves (16). 2+2+9+2+6+3+1+1+1+4+2+16 = 49, printed by
-    // Invoke-SelfTest.ps1 itself (runs 142, halves 31, cases-per-half 3: 142 - 31*3 = 49)
+    // halves (16). 23-ConnectEveryState's not-reached, on both of its halves (2).
+    // 2+2+9+2+6+3+1+1+1+4+2+16+2 = 51, printed by
+    // Invoke-SelfTest.ps1 itself (runs 150, halves 33, cases-per-half 3: 150 - 33*3 = 51)
     // rather than re-derived here, because this arithmetic has been wrong before: a hand count
     // made before tests 17 and 18 existed on this tree did not match what the runner actually
     // printed once they did, and the count for the service test made before it was built was short.
-    private const int ExpectedExtraCases = 49;
+    private const int ExpectedExtraCases = 51;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()

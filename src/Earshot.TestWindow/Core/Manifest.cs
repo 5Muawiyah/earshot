@@ -8,8 +8,8 @@ namespace Earshot.TestWindow.Core;
 // context is not worth it for a file this shape reads once at start-up.
 internal static class Manifest
 {
-    internal const int ExpectedRowCount = 23;
-    internal const int ExpectedHalfSum = 31;
+    internal const int ExpectedRowCount = 24;
+    internal const int ExpectedHalfSum = 33;
 
     internal static string DefaultPath() => Path.Combine(AppContext.BaseDirectory, "Data", "tests.json");
 

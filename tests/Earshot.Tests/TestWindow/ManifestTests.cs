@@ -19,7 +19,7 @@ public sealed class ManifestTests
         Manifest.Load(Path.Combine(RepositoryLocator.RepositoryRoot(), "src", "Earshot.TestWindow", "Data", "tests.json"));
 
     [TestMethod]
-    public void TwentyThreeRowsSummingToThirtyOneHalves()
+    public void TwentyFourRowsSummingToThirtyThreeHalves()
     {
         IReadOnlyList<ManifestRow> rows = LoadManifest();
         Assert.AreEqual(Manifest.ExpectedRowCount, rows.Count);

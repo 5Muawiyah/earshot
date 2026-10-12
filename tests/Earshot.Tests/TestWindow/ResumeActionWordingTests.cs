@@ -25,9 +25,9 @@ public sealed class ResumeActionWordingTests
             .Where(e => e.Kind == WordingKind.Action && e.ScriptText.Contains("run the command", StringComparison.Ordinal))
             .ToList();
 
-        // Sanity: this must find the six entries the fix touches (04, 08, 09, 10, 17, 22), not zero
+        // Sanity: this must find the seven entries the fix touches (04, 08, 09, 10, 17, 22, 23), not zero
         // (which would mean the fixture query itself stopped matching anything).
-        Assert.AreEqual(6, resumeActions.Count, "expected one resume-action entry each for 04, 08, 09, 10, 17 and 22.");
+        Assert.AreEqual(7, resumeActions.Count, "expected one resume-action entry each for 04, 08, 09, 10, 17, 22 and 23.");
 
         foreach (WordingEntry entry in resumeActions)
         {
