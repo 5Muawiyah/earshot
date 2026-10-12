@@ -383,6 +383,60 @@ public sealed class ConnectEveryStateTests
         Assert.IsTrue(reports[2].FixOfferDue);
     }
 
+    private static CoordinatorHarness AllowedWithNoBlockAtBoot(FixOfferTracker? tracker)
+    {
+        var h = new CoordinatorHarness(fixOffer: tracker);
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        return h;
+    }
+
+    private static bool FailsOnThisPc(CoordinatorHarness h)
+    {
+        h.Connection.Connects.Enqueue(_ => Task.FromResult(AccessDenied()));
+        return Await(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)), out _).FixOfferDue;
+    }
+
+    [TestMethod]
+    public void TheFixOfferCountSurvivesARestartFromTheConnectHistory()
+    {
+        using CoordinatorHarness before = AllowedWithNoBlockAtBoot(null);
+        Assert.IsFalse(FailsOnThisPc(before), "The first failure on this PC is not yet an offer.");
+
+        // A new process reads the history the first one wrote.
+        using CoordinatorHarness after = AllowedWithNoBlockAtBoot(FixOfferTracker.Replay(before.History.Read()));
+
+        Assert.IsTrue(FailsOnThisPc(after), "The second in a row reaches the offer across the restart.");
+    }
+
+    [TestMethod]
+    public void AnOfferAlreadyRaisedBeforeARestartStartsTheCountAgain()
+    {
+        using CoordinatorHarness before = AllowedWithNoBlockAtBoot(null);
+        Assert.IsFalse(FailsOnThisPc(before));
+        Assert.IsTrue(FailsOnThisPc(before));
+
+        using CoordinatorHarness after = AllowedWithNoBlockAtBoot(FixOfferTracker.Replay(before.History.Read()));
+
+        Assert.IsFalse(FailsOnThisPc(after), "The offer was made once; the count starts again.");
+        Assert.IsTrue(FailsOnThisPc(after));
+    }
+
+    [TestMethod]
+    public void ASuccessBeforeARestartResetsTheCountAcrossIt()
+    {
+        using CoordinatorHarness before = AllowedWithNoBlockAtBoot(null);
+        Assert.IsFalse(FailsOnThisPc(before));
+        before.Connection.Connects.Enqueue(_ => Task.FromResult(Results.Connected()));
+        Await(before, before.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)), out _);
+        Assert.IsTrue(before.History.Read().Any(e => e.Outcome == ConnectHistoryOutcomes.Connected), "The success is in the history.");
+
+        using CoordinatorHarness after = AllowedWithNoBlockAtBoot(FixOfferTracker.Replay(before.History.Read()));
+
+        Assert.IsFalse(FailsOnThisPc(after), "The success ended the earlier failure's count.");
+    }
+
     [TestMethod]
     public void PcSideDeviceSidePcSideOffersFixOnTheThirdReport()
     {
