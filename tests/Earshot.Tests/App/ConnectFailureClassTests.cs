@@ -76,7 +76,6 @@ public sealed class ConnectFailureClassTests
     [DataRow("LidClosed", "Open the case near this PC.")]
     [DataRow("InUseElsewhere", "In use on your iPhone.")]
     [DataRow("NotHeard", "Not heard nearby.")]
-    [DataRow("Unknown", "Open the case near this PC.")]
     public void ARequestThatWasAcceptedAndNeverConnectedIsTheDevicesSideUnlessTheyAreHeardNearby(string hintName, string reason)
     {
         var hint = Enum.Parse<DeviceHint>(hintName);
@@ -85,6 +84,16 @@ public sealed class ConnectFailureClassTests
 
         Assert.AreEqual(FailureClass.DeviceSide, failure.Class);
         Assert.AreEqual(reason, failure.Reason);
+    }
+
+    [TestMethod]
+    public void ARequestThatWasAcceptedWithNothingHeardFromTheAirIsItsOwnClassAndNamesTheRepair()
+    {
+        ConnectFailure failure = ConnectFailureClassifier.Classify(
+            new ConnectResult(ConnectOutcome.AttemptedTimedOut, ConnectMessages.StillConnecting, []), DeviceHint.Unknown, retried: false);
+
+        Assert.AreEqual(FailureClass.Unknown, failure.Class);
+        Assert.AreEqual("Open the case near this PC, or try Fix connection.", failure.Reason);
     }
 
     [TestMethod]

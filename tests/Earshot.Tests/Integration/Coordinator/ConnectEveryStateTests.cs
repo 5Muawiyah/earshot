@@ -270,6 +270,29 @@ public sealed class ConnectEveryStateTests
     // ---- the Fix offer ----
 
     [TestMethod]
+    public void ThreeTimeoutsWithNoLinkedPairReachTheOfferAtTheThirdAndNotBefore()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        h.Hints.Hint = DeviceHint.Unknown;
+
+        var reports = new List<ToggleReport>();
+        for (int i = 0; i < 3; i++)
+        {
+            h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.TimedOut()));
+            reports.Add(Await(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)), out _));
+        }
+
+        Assert.IsTrue(reports.All(r => r.FailureClass == FailureClass.Unknown));
+        Assert.AreEqual("Open the case near this PC, or try Fix connection.", reports[0].UserMessage);
+        Assert.IsFalse(reports[0].FixOfferDue);
+        Assert.IsFalse(reports[1].FixOfferDue);
+        Assert.IsTrue(reports[2].FixOfferDue);
+    }
+
+    [TestMethod]
     public void PcSideDeviceSidePcSideOffersFixOnTheThirdReport()
     {
         using var h = new CoordinatorHarness();

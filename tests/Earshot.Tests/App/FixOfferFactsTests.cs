@@ -38,7 +38,7 @@ public sealed class FixOfferFactsTests
     {
         var timedOut = new ConnectResult(ConnectOutcome.AttemptedTimedOut, "", []);
 
-        foreach (DeviceHint hint in new[] { DeviceHint.NotHeard, DeviceHint.LidClosed, DeviceHint.InUseElsewhere, DeviceHint.Unknown })
+        foreach (DeviceHint hint in new[] { DeviceHint.NotHeard, DeviceHint.LidClosed, DeviceHint.InUseElsewhere })
         {
             ConnectFailure failure = ConnectFailureClassifier.Classify(timedOut, hint, retried: true);
             ToggleReport report = Failed(failure.Class, due: true);

@@ -3,13 +3,20 @@ using Earshot.Diagnostics;
 namespace Earshot.App;
 
 // Decides when the card should offer Fix connection. Two connects in a row that failed for a reason on this PC's side raise
-// the offer, once, and the count starts again. A success starts it again too. A failure on the AirPods' side (away, in the
-// case, in use on the phone) and a cancelled connect neither count nor reset: they say nothing about this PC's pairing.
+// the offer, once, and the count starts again; so do three in a row that failed for a reason on either side or on none that
+// could be heard (Unknown). A success starts the count again too. A failure on the AirPods' side (away, in the case, in use
+// on the phone) and a cancelled connect neither count nor reset: they say nothing about this PC's pairing.
 internal sealed class FixOfferTracker
 {
     // Consecutive PC-side failures that raise the offer.
     public const int FailuresForOffer = 2;
 
+    // Consecutive PC-side and Unknown failures that raise it when too few are known to be this PC's.
+    public const int UnknownFailuresForOffer = 3;
+
+    private int _pcSide;
+
+    // The PC-side and Unknown failures counted since the last success or offer.
     public int Consecutive { get; private set; }
 
     // Notes one finished connect. Returns true exactly when this one makes the offer due.
@@ -23,21 +30,28 @@ internal sealed class FixOfferTracker
         if (success)
         {
             Consecutive = 0;
+            _pcSide = 0;
             return false;
         }
 
-        if (failure != FailureClass.PcSide)
+        if (failure is not (FailureClass.PcSide or FailureClass.Unknown))
         {
             return false;
         }
 
         Consecutive++;
-        if (Consecutive < FailuresForOffer)
+        if (failure == FailureClass.PcSide)
+        {
+            _pcSide++;
+        }
+
+        if (_pcSide < FailuresForOffer && Consecutive < UnknownFailuresForOffer)
         {
             return false;
         }
 
         Consecutive = 0;
+        _pcSide = 0;
         return true;
     }
 
