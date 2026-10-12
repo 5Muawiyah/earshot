@@ -110,6 +110,8 @@ internal static class DoctorReport
         WriteStringOrNull(w, "version", string.IsNullOrEmpty(install?.Version) ? null : Safe(install.Version));
         w.WriteBoolean("installedAppsEntry", install?.AppsEntry == true);
         WriteStringOrNull(w, "installedAppsVersion", string.IsNullOrEmpty(install?.AppsVersion) ? null : Safe(install.AppsVersion));
+        w.WriteBoolean("startMenuShortcut", install?.StartMenuShortcut == true);
+        w.WriteBoolean("runValue", install?.RunValue == true);
         w.WriteEndObject();
 
         w.WriteStartObject("tray");

@@ -26,13 +26,16 @@ namespace Earshot;
 //   service                           TryRunService    App\Program.Service.cs (started by the service control manager only)
 //   doctor [--out <path>]             TryRunDoctor     Commands\Program.Commands.cs (read only report for a person or an AI)
 //   settings list|get|set             TryRunSettings  Commands\Program.Commands.cs (the settings page's options, from a terminal)
+//   fix                               TryRunFix        Fix connection, unelevated: plans, asks for the person's OKs
+//   fix-apply <plan>                  TryRunFixApply   the elevated step of Fix connection (through the UAC prompt only)
+//   uninstall-ui, repair-ui           TryRunUninstallUi, TryRunRepairUi  the per-user steps of the Installed apps entry
 //
 // Dispatch runs before WinForms is initialised and before the single-instance mutex, so the
 // headless modes never touch WinForms and install is never mistaken for a second tray.
 // A hook that is not implemented is removed by the compiler; the mode then logs
 // "Not available in this build." and exits with ExitCodes.Unavailable. That includes the tray.
 //
-// gate, gate-protect, install, install-zip, uninstall, update, repair and service change device nodes, Bluetooth services, scheduled tasks, the
+// gate, gate-protect, install, install-zip, uninstall, update, repair, fix-apply and service change device nodes, Bluetooth services, scheduled tasks, the
 // hand-back service and machine folders. They are refused before dispatch in safe mode (EARSHOT_SAFE_MODE) and whenever
 // EARSHOT_DATA_ROOT is set, because an elevated process started from a user session may inherit a
 // variable that user set, which would move install's writes to a folder the user controls while the
@@ -152,6 +155,10 @@ internal static partial class Program
             case "service":   label = mode; TryRunService(ctx); break;
             case "doctor":    label = mode; TryRunDoctor(ctx); break;
             case "settings":  label = mode; TryRunSettings(ctx); break;
+            case "fix":       label = mode; TryRunFix(ctx); break;
+            case "fix-apply": label = mode; TryRunFixApply(ctx); break;
+            case "uninstall-ui": label = mode; TryRunUninstallUi(ctx); break;
+            case "repair-ui": label = mode; TryRunRepairUi(ctx); break;
             default:          label = "tray"; TryRunTray(ctx); break;
         }
 
@@ -174,7 +181,7 @@ internal static partial class Program
     }
 
     internal static readonly IReadOnlySet<string> PrivilegedModes =
-        new HashSet<string>(StringComparer.Ordinal) { "gate", "gate-protect", "install", "install-zip", "uninstall", "update", "repair", "service" };
+        new HashSet<string>(StringComparer.Ordinal) { "gate", "gate-protect", "install", "install-zip", "uninstall", "update", "repair", "service", "fix-apply" };
 
     // Why a privileged mode must not run with these paths, or null when it may (or the mode is not
     // privileged). See the header comment.
@@ -215,6 +222,10 @@ internal static partial class Program
     static partial void TryRunService(RunContext ctx);
     static partial void TryRunDoctor(RunContext ctx);
     static partial void TryRunSettings(RunContext ctx);
+    static partial void TryRunFix(RunContext ctx);
+    static partial void TryRunFixApply(RunContext ctx);
+    static partial void TryRunUninstallUi(RunContext ctx);
+    static partial void TryRunRepairUi(RunContext ctx);
 
     // A failure before any mode runs. Written to the debugger output, and to the log ModeLog chooses when the
     // log folder can be resolved.

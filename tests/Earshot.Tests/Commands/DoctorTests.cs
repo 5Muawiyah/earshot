@@ -168,7 +168,7 @@ public sealed class DoctorTests
 
         string[] expected =
         [
-            "schema", "earshot", "earshot.installed", "earshot.folder", "earshot.version", "earshot.installedAppsEntry", "earshot.installedAppsVersion",
+            "schema", "earshot", "earshot.installed", "earshot.folder", "earshot.version", "earshot.installedAppsEntry", "earshot.installedAppsVersion", "earshot.startMenuShortcut", "earshot.runValue",
             "tray", "tray.running", "tray.processes", "tasks", "tasks[].name", "tasks[].present", "tasks[].state",
             "handBackService", "handBackService.present", "handBackService.state",
             "airpods", "airpods[].model", "airpods[].bus", "airpods[].present", "airpods[].status", "airpods[].problemCode", "airpods[].disabled",

@@ -22,7 +22,7 @@ internal static class DoctorFixture
     // (null) and its failure is in unreadable, so both languages report the same read that failed.
     internal static string Json() => """
         {
-          "install": { "folder": "C:\\Users\\jonathan\\AppData\\Local\\Programs\\Earshot", "installed": true, "version": "1.4.0", "appsEntry": true, "appsVersion": "1.4.0" },
+          "install": { "folder": "C:\\Users\\jonathan\\AppData\\Local\\Programs\\Earshot", "installed": true, "version": "1.4.0", "appsEntry": true, "appsVersion": "1.4.0", "startMenuShortcut": true, "runValue": false },
           "trayProcesses": null,
           "tasks": [
             { "name": "Gate", "present": true, "state": "Ready" },

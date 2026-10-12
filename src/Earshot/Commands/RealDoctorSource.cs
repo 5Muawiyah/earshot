@@ -17,7 +17,9 @@ namespace Earshot.Commands;
 internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
 {
     private const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Earshot";
-    private const string BluetoothClass = "{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}";
+    // The Bluetooth device setup class.
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/system-defined-device-setup-classes-available-to-vendors
+    private const string BluetoothClass ="{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}";
     private const string EnumKey = @"SYSTEM\CurrentControlSet\Enum";
 
     private static readonly string[] BluetoothServiceNames = ["bthserv", "BTAGService", "BthAvctpSvc"];
@@ -78,7 +80,16 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
             }
         }
 
-        return new InstallFacts { Folder = paths.InstallFolder, Installed = installed, Version = version, AppsEntry = entry, AppsVersion = shown };
+        // The shortcut the toast route needs, in the per-user Start menu, and the sign-in entry. Both are only looked for.
+        string programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+        bool shortcut = programs.Length > 0 && File.Exists(Path.Combine(programs, Widget.Alert.NotificationRegistration.ShortcutFileName));
+        bool run;
+        using (RegistryKey? runKey = Registry.CurrentUser.OpenSubKey(Tray.CurrentUserStartupRegistry.RunKey))
+        {
+            run = runKey?.GetValue("Earshot") is not null;
+        }
+
+        return new InstallFacts { Folder = paths.InstallFolder, Installed = installed, Version = version, AppsEntry = entry, AppsVersion = shown, StartMenuShortcut = shortcut, RunValue = run };
     }
 
     // major.minor.patch of a program file's product version, or null when it has none.

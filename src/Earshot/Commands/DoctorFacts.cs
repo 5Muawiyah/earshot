@@ -40,6 +40,10 @@ internal sealed class InstallFacts
     public bool AppsEntry { get; set; }
 
     public string? AppsVersion { get; set; }
+
+    public bool StartMenuShortcut { get; set; }
+
+    public bool RunValue { get; set; }
 }
 
 internal sealed class TaskFact
