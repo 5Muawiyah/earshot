@@ -358,14 +358,15 @@ internal static partial class Program
             {
                 var settings = new JsonSettingsStore(paths.SettingsFile, log);
 
-                // A change to settings.json by another program (the settings command, an edit by hand) is taken up live.
-                settingsWatcher = new SettingsFileWatcher(settings, log);
-
                 // The frame and UI stall log: every action posted to the UI thread is timed, and a wait or a run over two
                 // refresh intervals is kept (with the card's window calls) for Copy diagnostics.
                 (TimeSpan refreshInterval, string refreshSource) = RefreshInterval.Read();
                 var stallLog = new UiStallMonitor(TimeProvider.System, refreshInterval, refreshSource);
                 registry = CompositionRoot.Build(log, settings, action => ui.Post(static state => ((Action)state!)(), stallLog.Wrap(action)), paths.IsSafeMode);
+
+                // A change to settings.json by another program (the settings command, an edit by hand) is taken up live, on the UI
+                // thread: the store's Changed reaches the block coordinator and the alert latch, which belong to it.
+                settingsWatcher = new SettingsFileWatcher(settings, log, registry.UiPost);
                 coordinator = new BlockCoordinator(
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
