@@ -409,11 +409,16 @@ param([string]$Action, [switch]$DryRun, [switch]$RemoveSettings, [hashtable]$Roo
         $info = New-Object IO.DirectoryInfo($Folder)
         if ($PSVersionTable.PSEdition -eq 'Core') { [void][IO.FileSystemAclExtensions]::Create($info, $acl) }
         else { $info.Create($acl) }
-        $back = Get-Acl -LiteralPath $Folder
-        $holders = @($back.Access | ForEach-Object { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } | Sort-Object -Unique)
+        # Read back through .NET's own methods, not Get-Acl's Access property: that property is PowerShell type data, and in a
+        # runspace that has not loaded it (PowerShell 7, a runspace a host opened itself) it reads as nothing.
+        # https://learn.microsoft.com/en-us/dotnet/api/system.security.accesscontrol.commonobjectsecurity.getaccessrules
+        if ($PSVersionTable.PSEdition -eq 'Core') { $back = [IO.FileSystemAclExtensions]::GetAccessControl($info) }
+        else { $back = $info.GetAccessControl() }
+        $rules = @($back.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+        $holders = @($rules | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique)
         $expected = @($person.Value, $system.Value | Sort-Object -Unique)
-        $inherited = @($back.Access | Where-Object { $_.IsInherited })
-        $denied = @($back.Access | Where-Object { $_.AccessControlType -ne 'Allow' })
+        $inherited = @($rules | Where-Object { $_.IsInherited })
+        $denied = @($rules | Where-Object { $_.AccessControlType -ne 'Allow' })
         if (-not $back.AreAccessRulesProtected -or $inherited.Count -ne 0 -or $denied.Count -ne 0 -or ($holders -join ',') -ne ($expected -join ',')) {
             Stop-Run ('The folder ' + $Folder + ' could not be made private to you, so nothing was downloaded into it.')
         }
@@ -1085,7 +1090,11 @@ If Doctor and Fix do not explain the problem:
         else {
             $style = 'Normal'
             if ($Hidden) { $style = 'Hidden' }
-            $process = Start-Process -FilePath $copy.Exe -ArgumentList (ConvertTo-ArgumentLine @($Verb)) -RedirectStandardOutput $out -PassThru -WindowStyle $style
+            # The program's input is an empty file, so it is the same in both editions. Without one, a stand-in that reads its
+            # input ended at once under Windows PowerShell 5.1 but waited out the test's three minutes under PowerShell 7.
+            $in = Join-Path $copy.Folder ($Verb + '-in.txt')
+            [IO.File]::WriteAllBytes($in, [byte[]]@())
+            $process = Start-Process -FilePath $copy.Exe -ArgumentList (ConvertTo-ArgumentLine @($Verb)) -RedirectStandardInput $in -RedirectStandardOutput $out -PassThru -WindowStyle $style
             # Reading the handle first keeps the exit code readable after the wait in Windows PowerShell 5.1.
             [void]$process.Handle
             $process.WaitForExit()
