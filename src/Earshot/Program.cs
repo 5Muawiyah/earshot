@@ -26,8 +26,8 @@ namespace Earshot;
 //   service                           TryRunService    App\Program.Service.cs (started by the service control manager only)
 //   doctor [--out <path>]             TryRunDoctor     Commands\Program.Commands.cs (read only report for a person or an AI)
 //   settings list|get|set             TryRunSettings  Commands\Program.Commands.cs (the settings page's options, from a terminal)
-//   fix                               TryRunFix        Fix connection, unelevated: plans, asks for the person's OKs
-//   fix-apply <plan>                  TryRunFixApply   the elevated step of Fix connection (through the UAC prompt only)
+//   fix                               TryRunFix        not implemented in this build: exits with Unavailable
+//   fix-apply <plan>                  TryRunFixApply   not implemented in this build: refused in safe mode, otherwise Unavailable
 //   uninstall-ui, repair-ui           TryRunUninstallUi, TryRunRepairUi  the per-user steps of the Installed apps entry
 //
 // Dispatch runs before WinForms is initialised and before the single-instance mutex, so the

@@ -443,7 +443,7 @@ a model and one for the case, learned from the owner's own live readings by
 within two minutes of the reading before it, the last below 100%, 15 minutes to
 3 hours apart; a new sample replaces the rate held) and kept beside the last readings.
 There is no case estimate until a charge of the case has been learned. The buds of
-one model have a seed from the fast-charge figure Apple's AirPods Pro 3 tech specs page (https://support.apple.com/en-us/125135) is said to give (about one hour of listening, of up to eight, in five minutes; worked out as 150 points an hour). That wording could not be fetched here and is unconfirmed, so the seed is off until the owner has read it (`ChargeRates.UseAppleBudSeed`).
+one model have a seed from the fast-charge figure on Apple's AirPods Pro 3 tech specs page (https://support.apple.com/en-us/125135): about one hour of listening, of up to eight, in five minutes, worked out as 150 points an hour. The wording was confirmed against that page on 12 October 2026, and the seed is on (`ChargeRates.UseAppleBudSeed`).
 
 *The gauge.* On this PC its number is the lower bud, live or else last or estimated
 in tertiary ink, or Windows' own figure while that is current and no bud is live.
