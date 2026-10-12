@@ -14,6 +14,14 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
 
+        // --render <folder>: draws the window's views to PNG files from made-up data and exits. It starts no test and reads
+        // no device, and it refuses any desktop that is not a private one.
+        int renderAt = Array.IndexOf(args, TesterPictures.FlagName);
+        if (renderAt >= 0)
+        {
+            return RenderPictures(renderAt + 1 < args.Length ? args[renderAt + 1] : null);
+        }
+
         // --sandbox's presence and its actual, valid folder are decided together, once, here.
         // sandboxRequested (used both by the refusal below and to build the real SandboxOptions
         // MainForm gets) is true only when a valid folder was actually parsed; the switch present
@@ -56,6 +64,24 @@ internal static class Program
             Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Earshot", "Earshot.exe");
 
         Application.Run(new MainForm(repoRoot!, rows, wording, sandbox, exePath));
+        return 0;
+    }
+
+    // Exit 0 when the pictures are written, 1 for a missing folder, 2 when the desktop is not a private one. No message box
+    // for either: a box shown on the desktop in use is what the refusal exists to prevent.
+    private static int RenderPictures(string? folder)
+    {
+        if (!TesterPictures.OnPrivateDesktop())
+        {
+            return 2;
+        }
+
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return 1;
+        }
+
+        TesterPictures.RenderAll(folder);
         return 0;
     }
 
