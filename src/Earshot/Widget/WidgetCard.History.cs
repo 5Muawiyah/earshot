@@ -39,12 +39,20 @@ internal sealed partial class WidgetCard
         }
 
         // The time labels every 6 hours under the plot, each centred on its tick and kept inside the surface.
-        int labelWidth = CardPlacement.Scale(40, _dpi);
+        // A label is as wide as its figures need at the text size, so at the larger sizes one that would touch the last drawn is left out.
+        int labelWidth = TextFit.Grow(HistoryPageLayout.XLabelWidthAt96, _dpi, _look.TextScale);
+        int drawnRight = int.MinValue;
         foreach (HistoryLabel x in chart.XLabels)
         {
             int left = (int)Math.Round(x.Position) - (labelWidth / 2);
             left = Math.Clamp(left, page.XLabels.Left, Math.Max(page.XLabels.Left, page.XLabels.Right - labelWidth));
+            if (left < drawnRight)
+            {
+                continue;
+            }
+
             DrawTabular(g, x.Text, new Rectangle(left, page.XLabels.Y, labelWidth, page.XLabels.Height), twelve, colours.TextSecondary, StringAlignment.Center);
+            drawnRight = left + labelWidth;
         }
 
         SmoothingMode before = g.SmoothingMode;
@@ -174,6 +182,7 @@ internal sealed partial class WidgetCard
         };
         float height = g.MeasureString("0", font, PointF.Empty, format).Height;
         float y = bounds.Y + ((bounds.Height - height) / 2f);
+        CardPaint.NoteTabular(text, bounds, x, total, height);
         foreach (char c in text)
         {
             float advance = Advance(c);
