@@ -615,10 +615,10 @@ public sealed class BlockControllerTests
         Assert.AreEqual(BlockState.Unknown, (await h.Controller.GetStatusAsync()).State);
     }
 
-    // The check before the gate and the read after it follow the same rule, so a node that is not present and
-    // not marked disabled gives the same answer every time rather than alternating with "already blocked".
+    // A node that is not present cannot be disabled, but it is marked disabled, so it cannot come back enabled. The check
+    // before the gate and the read after it follow the same rule, so the second click is already blocked.
     [TestMethod]
-    public async Task RepeatedBlocksWithANodeThatIsNotPresentSayTheSameThing()
+    public async Task ANodeThatIsNotPresentIsMarkedDisabledByTheFirstBlockAndTheSecondIsAlreadyBlocked()
     {
         using var h = new Harness();
         h.Nodes[RecordedNodes.AirPodsTargets[2]].Present = false;
@@ -626,12 +626,13 @@ public sealed class BlockControllerTests
         ControllerResult first = await h.Controller.BlockAsync();
         ControllerResult second = await h.Controller.BlockAsync();
 
-        Assert.AreEqual(OpStatus.Partial, first.Status, first.UserMessage);
-        Assert.AreEqual(BlockController.NotPresentBlockMessage, first.UserMessage);
-        Assert.AreEqual(first.Status, second.Status);
-        Assert.AreEqual(first.UserMessage, second.UserMessage);
-        Assert.HasCount(2, h.Tasks.Runs, "Neither click short-circuits.");
-        Assert.HasCount(8, h.Nodes.Calls.Where(c => c.Kind == "disable" && c.InstanceId != RecordedNodes.AirPodsTargets[2]).Select(c => c.InstanceId).Distinct());
+        Assert.AreEqual(OpStatus.Success, first.Status, first.UserMessage);
+        Assert.AreEqual(BlockController.BlockedMessage, first.UserMessage);
+        Assert.AreEqual(OpStatus.AlreadyInState, second.Status);
+        Assert.HasCount(1, h.Tasks.Runs, "The second click finds every node blocked and sends nothing.");
+        Assert.HasCount(1, h.Nodes.Calls.Where(c => c.Kind == "set-flag"));
+        Assert.HasCount(8, h.Nodes.Calls.Where(c => c.Kind == "disable").Select(c => c.InstanceId).Distinct());
+        Assert.IsEmpty(h.Nodes.Calls.Where(c => c.Kind == "disable-phantom"));
     }
 
     [TestMethod]

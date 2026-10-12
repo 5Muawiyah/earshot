@@ -13,6 +13,18 @@ public static class GateVerbs
     public const string SetDevice  = "set-device";   // the ONLY verb that carries an address arg
     public const string Boot       = "boot";         // supplied by the BootBlock trigger, no nonce
 
+    // Block only if the AirPods are not connected (the idle rule, and the connect clean-up fallback). Refuses with the InUse
+    // exit code when the device node reports a live link, instead of cutting it.
+    public const string BlockIdle  = "block-idle";
+
+    // Puts back exactly what one allow changed: the allow's status file (its nonce is the second argument) lists the nodes.
+    // Takes a nonce of 32 lower-case hex characters where set-device takes an address.
+    public const string UndoAllow  = "undo-allow";
+
+    // Pins the AirPods with this address (12 upper-case hex) when the identity rule accepts them, and blocks them, in one
+    // elevated run. For a replacement pair after Fix connection.
+    public const string AdoptDevice = "adopt-device";
+
     // Write the hand-back setting into config.json, for the service that hands the AirPods back at shut down.
     public const string SetHandBackOn  = "sethandback-on";
     public const string SetHandBackOff = "sethandback-off";
@@ -22,7 +34,7 @@ public static class GateVerbs
     public const string Preshutdown = "preshutdown";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
-        { Block, Allow, Status, SetBootOn, SetBootOff, ProtectOn, ProtectOff, SetDevice, Boot, SetHandBackOn, SetHandBackOff, Preshutdown };
+        { Block, Allow, Status, SetBootOn, SetBootOff, ProtectOn, ProtectOff, SetDevice, Boot, SetHandBackOn, SetHandBackOff, Preshutdown, BlockIdle, UndoAllow, AdoptDevice };
 }
 
 public static class BoundaryValidation

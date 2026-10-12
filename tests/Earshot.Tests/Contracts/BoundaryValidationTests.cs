@@ -12,10 +12,10 @@ namespace Earshot.Tests.Contracts;
 public sealed class GateVerbsTests
 {
     private static readonly string[] Expected =
-        ["block", "allow", "status", "setboot-on", "setboot-off", "protect-on", "protect-off", "set-device", "boot", "sethandback-on", "sethandback-off", "preshutdown"];
+        ["block", "allow", "status", "setboot-on", "setboot-off", "protect-on", "protect-off", "set-device", "boot", "sethandback-on", "sethandback-off", "preshutdown", "block-idle", "undo-allow", "adopt-device"];
 
     [TestMethod]
-    public void AllHoldsExactlyTheTwelveVerbs()
+    public void AllHoldsExactlyTheFifteenVerbs()
     {
         Assert.HasCount(Expected.Length, GateVerbs.All);
         foreach (string verb in Expected)

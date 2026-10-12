@@ -27,7 +27,38 @@ internal sealed record GateStatusFile(
     int ExitCode,
     string? State,
     IReadOnlyList<StepOutcome> Steps,
-    bool StepsTruncated);
+    bool StepsTruncated,
+    IReadOnlyList<GateChange>? Changed = null);
+
+// What an allow changed on a node, as it stood before.
+//   DisabledPresent  the node was in the tree at problem 22 (disabled), and the allow enabled it
+//   FlaggedAbsent    the node was out of the tree with CONFIGFLAG_DISABLED set, came back, and the allow enabled it
+// The list is what undo-allow puts back, and nothing else.
+internal enum GateChangeFrom
+{
+    DisabledPresent,
+    FlaggedAbsent,
+}
+
+internal sealed record GateChange(string Id, GateChangeFrom From)
+{
+    internal static string Name(GateChangeFrom from) => from == GateChangeFrom.DisabledPresent ? "disabled-present" : "flagged-absent";
+
+    internal static bool TryParse(string name, out GateChangeFrom from)
+    {
+        from = GateChangeFrom.DisabledPresent;
+        switch (name)
+        {
+            case "disabled-present":
+                return true;
+            case "flagged-absent":
+                from = GateChangeFrom.FlaggedAbsent;
+                return true;
+            default:
+                return false;
+        }
+    }
+}
 
 // The SYSTEM-owned files in %ProgramData%\Earshot: config.json, device.json, protection.json and the
 // per-request status-<nonce>.json files.
@@ -42,6 +73,10 @@ internal sealed record GateStatusFile(
 internal sealed partial class GateStore
 {
     public const int SchemaVersion = 1;
+
+    // The status file is version 2: it carries the Changed list. A version 1 file (an older build's) has none and still reads.
+    public const int StatusSchemaVersion = 2;
+    public const int MaxStatusChanges = 16;
     public const int MaxFileBytes = 64 * 1024;
     public const int MaxStatusSteps = 48;
     public const int MaxStepText = 300;
@@ -244,8 +279,9 @@ internal sealed partial class GateStore
         string path = StatusFile(nonce);
         return Read<GateStatusFile>(path, "read-status", root =>
         {
-            string? shape = RequireShape(
-                root,
+            bool hasChanged = root.TryGetProperty(ChangedMember, out _);
+            var shapeMembers = new List<(string Name, JsonValueKind Kind)>
+            {
                 ("SchemaVersion", JsonValueKind.Number),
                 ("Nonce", JsonValueKind.String),
                 ("Verb", JsonValueKind.String),
@@ -255,15 +291,23 @@ internal sealed partial class GateStore
                 ("ExitCode", JsonValueKind.Number),
                 ("State", JsonValueKind.String),
                 ("Steps", JsonValueKind.Array),
-                ("StepsTruncated", JsonValueKind.True));
+                ("StepsTruncated", JsonValueKind.True),
+            };
+            if (hasChanged)
+            {
+                shapeMembers.Add((ChangedMember, JsonValueKind.Array));
+            }
+
+            string? shape = RequireShape(root, shapeMembers.ToArray());
             if (shape is not null)
             {
                 return (null, shape);
             }
 
-            if (!root.GetProperty("SchemaVersion").TryGetInt32(out int version) || version != SchemaVersion)
+            if (!root.GetProperty("SchemaVersion").TryGetInt32(out int version) || version is not (SchemaVersion or StatusSchemaVersion) ||
+                (hasChanged && version != StatusSchemaVersion))
             {
-                return (null, "SchemaVersion is not " + SchemaVersion + ".");
+                return (null, "SchemaVersion is not " + SchemaVersion + " or " + StatusSchemaVersion + ", or a version " + SchemaVersion + " file carries Changed.");
             }
 
             string fileNonce = root.GetProperty("Nonce").GetString() ?? "";
@@ -318,10 +362,45 @@ internal sealed partial class GateStore
                 steps.Add(step);
             }
 
+            List<GateChange>? changed = null;
+            if (hasChanged)
+            {
+                JsonElement changedElement = root.GetProperty(ChangedMember);
+                if (changedElement.GetArrayLength() > MaxStatusChanges)
+                {
+                    return (null, "Too many changes.");
+                }
+
+                changed = [];
+                foreach (JsonElement item in changedElement.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object)
+                    {
+                        return (null, "A change is not an object.");
+                    }
+
+                    string? changeShape = RequireShape(item, ("Id", JsonValueKind.String), ("From", JsonValueKind.String));
+                    if (changeShape is not null)
+                    {
+                        return (null, changeShape);
+                    }
+
+                    string id = item.GetProperty("Id").GetString() ?? "";
+                    if (id.Length is 0 or > MaxStepText || !GateChange.TryParse(item.GetProperty("From").GetString() ?? "", out GateChangeFrom from))
+                    {
+                        return (null, "A change has an empty or long id, or an unknown origin.");
+                    }
+
+                    changed.Add(new GateChange(id, from));
+                }
+            }
+
             return (new GateStatusFile(version, fileNonce, verb, started, finished, result, exitCode,
-                state.Length == 0 ? null : state, steps, root.GetProperty("StepsTruncated").GetBoolean()), null);
+                state.Length == 0 ? null : state, steps, root.GetProperty("StepsTruncated").GetBoolean(), changed), null);
         });
     }
+
+    private const string ChangedMember = "Changed";
 
     // Writes the status file within MaxFileBytes. Steps beyond MaxStatusSteps are dropped and StepsTruncated
     // is set; if the result is still too large (long or escaped details), details are shortened and then
@@ -339,7 +418,7 @@ internal sealed partial class GateStore
             bytes = Serialize(w =>
             {
                 w.WriteStartObject();
-                w.WriteNumber("SchemaVersion", SchemaVersion);
+                w.WriteNumber("SchemaVersion", StatusSchemaVersion);
                 w.WriteString("Nonce", status.Nonce);
                 w.WriteString("Verb", status.Verb);
                 w.WriteString("StartedUtc", FormatTime(status.StartedUtc));
@@ -361,6 +440,16 @@ internal sealed partial class GateStore
 
                 w.WriteEndArray();
                 w.WriteBoolean("StepsTruncated", truncated);
+                w.WriteStartArray(ChangedMember);
+                foreach (GateChange change in (status.Changed ?? []).Take(MaxStatusChanges))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("Id", Bound(change.Id));
+                    w.WriteString("From", GateChange.Name(change.From));
+                    w.WriteEndObject();
+                }
+
+                w.WriteEndArray();
                 w.WriteEndObject();
             });
             if (bytes.Length <= MaxFileBytes)

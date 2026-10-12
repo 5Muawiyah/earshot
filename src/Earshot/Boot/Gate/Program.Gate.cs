@@ -584,11 +584,11 @@ internal static partial class Program
             return false;
         }
 
-        if (verb == GateVerbs.SetDevice)
+        if (verb is GateVerbs.SetDevice or GateVerbs.AdoptDevice)
         {
             if (!BoundaryValidation.IsAddress12(address))
             {
-                problem = "set-device needs a 12 character upper-case hex address";
+                problem = verb + " needs a 12 character upper-case hex address";
                 return false;
             }
 
@@ -597,9 +597,24 @@ internal static partial class Program
             return true;
         }
 
+        // undo-allow names the allow it puts back by that allow's own nonce, where set-device carries an address.
+        if (verb == GateVerbs.UndoAllow)
+        {
+            string allowNonce = args.Count == 4 ? args[3] : "";
+            if (!BoundaryValidation.IsNonce(allowNonce))
+            {
+                problem = "undo-allow needs the nonce of the allow it undoes";
+                return false;
+            }
+
+            request = new GateRequest(verb, nonce, null, GateMode.Gate, allowNonce);
+            problem = null;
+            return true;
+        }
+
         if (address.Length != 0)
         {
-            problem = "only set-device takes an address";
+            problem = "only set-device and adopt-device take an address, and undo-allow an allow nonce";
             return false;
         }
 

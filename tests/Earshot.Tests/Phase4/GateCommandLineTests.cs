@@ -179,7 +179,7 @@ public sealed class GateCommandLineTests
 
             string verb = new(chars);
             bool parsed = Program.TryParseGateArgs(["gate", verb, Nonce], out _, out _);
-            bool expected = GateVerbs.All.Contains(verb) && verb is not (GateVerbs.Boot or GateVerbs.SetDevice or GateVerbs.ProtectOn or GateVerbs.ProtectOff);
+            bool expected = GateVerbs.All.Contains(verb) && verb is not (GateVerbs.Boot or GateVerbs.SetDevice or GateVerbs.AdoptDevice or GateVerbs.UndoAllow or GateVerbs.ProtectOn or GateVerbs.ProtectOff);
             Assert.AreEqual(expected, parsed, verb);
 
             bool parsedProtect = Program.TryParseGateArgs(["gate-protect", verb, Nonce], out _, out _);

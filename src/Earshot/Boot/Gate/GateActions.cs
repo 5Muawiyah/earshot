@@ -14,13 +14,31 @@ internal interface INodeApi : INodeReader
 
     // CM_Enable_DevNode with ulFlags 0. https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_enable_devnode
     uint Enable(uint devInst);
+
+    // CONFIGFLAG_DISABLED on a node by instance id, present or not (SetupAPI; see SetupApiConfigFlags). The only way to
+    // change a node that has left the tree.
+    ConfigFlagsChange ClearDisabledFlag(string instanceId);
+
+    ConfigFlagsChange SetDisabledFlag(string instanceId);
+
+    // Pauses between two polls of the tree. Returning false ends the wait at once. A real machine sleeps; a test moves its
+    // own clock.
+    bool Pause(TimeSpan delay);
 }
 
 internal sealed class CfgMgr32NodeApi : CfgMgr32NodeReader, INodeApi
 {
+    private readonly SetupApiConfigFlagsWriter _flags = new();
+
     public uint Disable(uint devInst, uint flags) => CfgMgr32.CM_Disable_DevNode(devInst, flags);
 
     public uint Enable(uint devInst) => CfgMgr32.CM_Enable_DevNode(devInst, 0);
+
+    public ConfigFlagsChange ClearDisabledFlag(string instanceId) => _flags.ClearDisabledFlag(instanceId);
+
+    public ConfigFlagsChange SetDisabledFlag(string instanceId) => _flags.SetDisabledFlag(instanceId);
+
+    public bool Pause(TimeSpan delay) => DeviceChangeLock.SleepAndContinue(delay);
 }
 
 // Exit codes of gate, install and uninstall. They stay clear of the sysexits values in ExitCodes, and the
@@ -51,6 +69,10 @@ internal enum GateExitCode
     NotAService = 23,        // the service run mode started by anything other than the service control manager
     NotFromInstallFolder = 24, // the service run mode from an image outside %ProgramFiles%\Earshot
     Busy = 25,               // install, update or repair while another of them still holds the machine-wide lock; nothing was changed
+    // 26 (AlreadyInstalled) and 27 (StillRunning) belong to the installer.
+    InUse = 28,              // an automatic block (idle, undo-allow) found the AirPods connected; nothing was changed
+    InProgress = 29,         // only in a status file: an allow wrote its change list and has not finished
+    NotAirPods = 30,         // adopt-device for an address that is not AirPods by the identity rule
 }
 
 internal static class GateExitCodes
@@ -80,6 +102,9 @@ internal static class GateExitCodes
         [GateExitCode.NotAService] = "not-a-service",
         [GateExitCode.NotFromInstallFolder] = "not-from-install-folder",
         [GateExitCode.Busy] = "busy",
+        [GateExitCode.InUse] = "in-use",
+        [GateExitCode.InProgress] = "in-progress",
+        [GateExitCode.NotAirPods] = "not-airpods",
     };
 
     public static string ResultName(GateExitCode code) =>
@@ -115,7 +140,7 @@ internal static class GateModes
     public static string TokenOf(GateMode mode) => mode == GateMode.Protect ? ProtectToken : GateToken;
 }
 
-internal sealed record GateRequest(string Verb, string Nonce, string? Address, GateMode Mode = GateMode.Gate);
+internal sealed record GateRequest(string Verb, string Nonce, string? Address, GateMode Mode = GateMode.Gate, string? AllowNonce = null);
 
 // What a gate verb implemented elsewhere receives (the protect verbs and the protection restore hook).
 // Identity is the validated device.json. Every native call is appended to Steps as a StepOutcome; the
@@ -174,6 +199,9 @@ internal sealed class GateRunContext
 
 internal sealed record NodeChangeSummary(int Total, int Changed, int Already, int NotPresent, int Failed)
 {
+    // The nodes an allow changed, in order, with how each stood before. Empty for every other call.
+    public IReadOnlyList<GateChange> Changes { get; init; } = Array.Empty<GateChange>();
+
     public GateExitCode Outcome =>
         Total == 0 ? GateExitCode.NotFound
         : Changed + Already == Total ? GateExitCode.Success
@@ -267,7 +295,8 @@ internal sealed partial class GateActions
     // For tests: the wait between device change lock attempts. Returning false stops waiting at once.
     internal Func<TimeSpan, bool> LockWait { get; init; } = DeviceChangeLock.SleepAndContinue;
 
-    private sealed record VerbResult(GateExitCode Outcome, string? State);
+    // Changes is what an allow changed, kept for the status file; null for every other verb.
+    private sealed record VerbResult(GateExitCode Outcome, string? State, IReadOnlyList<GateChange>? Changes = null);
 
     public GateExitCode Run(GateRequest request)
     {
@@ -304,8 +333,11 @@ internal sealed partial class GateActions
                 : NeedsConfig(request.Verb) && !ConfigPresent(steps) ? new VerbResult(GateExitCode.NoConfig, null)
                 : request.Verb switch
                 {
-                    GateVerbs.Block => Block(steps),
-                    GateVerbs.Allow => Allow(steps),
+                    GateVerbs.Block => Block(steps, onlyIfIdle: false),
+                    GateVerbs.BlockIdle => Block(steps, onlyIfIdle: true),
+                    GateVerbs.Allow => Allow(request, started, steps),
+                    GateVerbs.UndoAllow => UndoAllow(request, steps),
+                    GateVerbs.AdoptDevice => AdoptDevice(request.Address ?? "", steps),
                     GateVerbs.Status => Status(steps),
                     GateVerbs.SetBootOn => SetBoot(true, steps),
                     GateVerbs.SetBootOff => SetBoot(false, steps),
@@ -322,7 +354,9 @@ internal sealed partial class GateActions
         {
             steps.Add(ElevatedFailure.Step(request.Verb, ex));
             _log.Error("gate " + request.Verb + " stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
-            result = new VerbResult(GateExitCode.Failed, null);
+
+            // An allow that stopped part-way still names what it had changed, so undo-allow can put exactly that back.
+            result = new VerbResult(GateExitCode.Failed, null, request.Verb == GateVerbs.Allow ? _allowChanges : null);
         }
 
         if (held is not null)
@@ -332,8 +366,8 @@ internal sealed partial class GateActions
 
         GateExitCode outcome = result.Outcome;
         var status = new GateStatusFile(
-            GateStore.SchemaVersion, request.Nonce, request.Verb, started, _time.GetUtcNow(),
-            GateExitCodes.ResultName(outcome), (int)outcome, result.State, steps, StepsTruncated: false);
+            GateStore.StatusSchemaVersion, request.Nonce, request.Verb, started, _time.GetUtcNow(),
+            GateExitCodes.ResultName(outcome), (int)outcome, result.State, steps, StepsTruncated: false, result.Changes);
         StepOutcome written = _store.WriteStatus(status);
         if (!written.Ok)
         {
@@ -377,8 +411,8 @@ internal sealed partial class GateActions
     // hand-back setting is not: a request queued behind uninstall must not make a config.json again, which the
     // hand-back service would take as the sign that Earshot is set up.
     private static bool NeedsConfig(string verb) =>
-        verb is GateVerbs.Block or GateVerbs.Allow or GateVerbs.SetDevice or GateVerbs.ProtectOn or GateVerbs.ProtectOff
-            or GateVerbs.SetHandBackOn or GateVerbs.SetHandBackOff;
+        verb is GateVerbs.Block or GateVerbs.BlockIdle or GateVerbs.Allow or GateVerbs.UndoAllow or GateVerbs.SetDevice
+            or GateVerbs.AdoptDevice or GateVerbs.ProtectOn or GateVerbs.ProtectOff or GateVerbs.SetHandBackOn or GateVerbs.SetHandBackOff;
 
     // Install writes config.json, and uninstall deletes it. An uninstall that could not restore everything keeps only
     // device.json and protection.json, so a run that was queued behind it, or one started although setup never
@@ -404,7 +438,9 @@ internal sealed partial class GateActions
         return read.IsOk ? read.Value : null;
     }
 
-    private VerbResult Block(List<StepOutcome> steps)
+    // onlyIfIdle: an automatic block (the idle rule) that must not cut a live link. It reads the device node's link bit
+    // under the device change lock, just before the first disable, and refuses with InUse instead.
+    private VerbResult Block(List<StepOutcome> steps, bool onlyIfIdle)
     {
         using DeviceChangeLock? changing = AcquireForNodeChange(steps);
         if (changing is null)
@@ -430,8 +466,57 @@ internal sealed partial class GateActions
             return NoTargets(scan);
         }
 
+        if (onlyIfIdle && LinkIsUp(scan, steps))
+        {
+            return new VerbResult(GateExitCode.InUse, ReadState(identity));
+        }
+
         NodeChangeSummary summary = ApplyBlock(_nodes, scan.Targets, steps);
         return new VerbResult(WithUnreadable(summary.Outcome, scan), ReadState(identity));
+    }
+
+    // The step LinkIsUp records.
+    internal const string InUseStep = "in-use-check";
+
+    // True when the device node reports a live link: it is in the tree, not disabled, and DN_DEVICE_DISCONNECTED is clear.
+    // The bit comes from a header comment ("the function driver ... reported that the device is not connected"), seen to
+    // follow the link on this PC, not a documented contract. So it is a veto the tray corroborates and caps, never a
+    // reason to leave the nodes enabled for good, and a node that is disabled, absent or whose status cannot be read is
+    // not taken as connected.
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/retrieving-the-status-and-problem-code-for-a-device-instance
+    private bool LinkIsUp(NodeScanResult scan, List<StepOutcome> steps)
+    {
+        TargetNode? device = scan.Targets.FirstOrDefault(t => t.IsDeviceNode);
+        if (device is null)
+        {
+            return false;
+        }
+
+        uint cr = _nodes.Locate(device.InstanceId, includeNonPresent: false, out uint devInst);
+        if (cr == CfgMgr32.CR_NO_SUCH_DEVNODE)
+        {
+            return false;
+        }
+
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet(InUseStep, cr, "The device node could not be located, so a live link was not checked."));
+            return false;
+        }
+
+        cr = _nodes.GetStatus(devInst, out uint status, out uint problem);
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet(InUseStep, cr, "The device node status could not be read, so a live link was not checked."));
+            return false;
+        }
+
+        bool disabled = (status & CfgMgr32.DN_HAS_PROBLEM) != 0 && problem == CfgMgr32.CM_PROB_DISABLED;
+        bool connected = !disabled && (status & CfgMgr32.DN_DEVICE_DISCONNECTED) == 0;
+        steps.Add(new StepOutcome(
+            InUseStep, !connected, connected ? (int)GateExitCode.InUse : 0, connected ? "in-use" : "S_OK",
+            connected ? "The AirPods are connected, so nothing was changed." : "The AirPods are not connected."));
+        return connected;
     }
 
     // No node to change: NotFound, unless a node that may belong to the device could not be read.
@@ -445,7 +530,23 @@ internal sealed partial class GateActions
     private static GateExitCode WithUnreadable(GateExitCode outcome, NodeScanResult scan) =>
         outcome == GateExitCode.Success && scan.Unreadable.Count > 0 ? GateExitCode.Partial : outcome;
 
-    private VerbResult Allow(List<StepOutcome> steps)
+    // The change list of the allow in progress, as last written ahead, for a run that stops with an exception.
+    private IReadOnlyList<GateChange>? _allowChanges;
+
+    // The longest an allow's change list is trusted by undo-allow. A waiting budget, not a measured figure: a connect
+    // ends within a minute, so a list older than this belongs to a run nobody is waiting on.
+    internal static readonly TimeSpan UndoAllowMaxAge = TimeSpan.FromMinutes(10);
+
+    // How long an allow waits for nodes that were not in the tree to be reported once the device node is enabled. Not
+    // measured: the only observation is that they were back "within about 10 s". The time each one takes is written to
+    // its step, so a live run can replace this with a figure.
+    internal static readonly TimeSpan AppearWait = TimeSpan.FromSeconds(10);
+
+    internal static readonly TimeSpan AppearPoll = TimeSpan.FromMilliseconds(100);
+
+    // Allows the pinned device. The change list is written to the status file before each change, so a run that dies
+    // part-way still leaves the list undo-allow needs.
+    private VerbResult Allow(GateRequest request, DateTimeOffset started, List<StepOutcome> steps)
     {
         using DeviceChangeLock? changing = AcquireForNodeChange(steps);
         if (changing is null)
@@ -471,8 +572,193 @@ internal sealed partial class GateActions
             return NoTargets(scan);
         }
 
-        NodeChangeSummary summary = ApplyAllow(_nodes, scan.Targets, steps);
-        return new VerbResult(WithUnreadable(summary.Outcome, scan), ReadState(identity));
+        var options = new AllowOptions
+        {
+            Time = _time,
+            BeforeChange = changes =>
+            {
+                _allowChanges = changes.ToList();
+                var snapshot = new GateStatusFile(
+                    GateStore.StatusSchemaVersion, request.Nonce, request.Verb, started, _time.GetUtcNow(),
+                    GateExitCodes.ResultName(GateExitCode.InProgress), (int)GateExitCode.InProgress, null, steps.ToList(), StepsTruncated: false, changes);
+                return _store.WriteStatus(snapshot);
+            },
+        };
+        NodeChangeSummary summary = ApplyAllow(_nodes, scan.Targets, steps, options);
+        return new VerbResult(WithUnreadable(summary.Outcome, scan), ReadState(identity), summary.Changes);
+    }
+
+    // Puts the AirPods' nodes back as they stood before one allow, and nothing the allow did not change. The nodes come
+    // from that allow's status file (second argument): present ones are disabled again with CM_DISABLE_PERSIST, ones that
+    // had left the tree get the flag back. Each listed id must still pass the identity rule for the pinned device, or it is
+    // left alone. Then the state is read, and anything the allow did not account for (a node that was enabled before it, or
+    // one that is absent and unflagged) is blocked by the full block. A status file that is missing, not an allow's, or
+    // older than UndoAllowMaxAge makes it the full block at once. Like the idle block it refuses with InUse, changing
+    // nothing, when the AirPods are connected.
+    private VerbResult UndoAllow(GateRequest request, List<StepOutcome> steps)
+    {
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        DeviceIdentity? identity = ReadIdentity(steps);
+        if (identity is null)
+        {
+            return new VerbResult(GateExitCode.NoIdentity, null);
+        }
+
+        NodeScanResult scan = NodeScan.FindTargets(_nodes, identity.ContainerId, identity.Address);
+        steps.AddRange(scan.Steps);
+        if (!scan.Listed)
+        {
+            return new VerbResult(GateExitCode.Failed, nameof(BlockState.Unknown));
+        }
+
+        if (scan.Targets.Count == 0)
+        {
+            return NoTargets(scan);
+        }
+
+        if (LinkIsUp(scan, steps))
+        {
+            return new VerbResult(GateExitCode.InUse, ReadState(identity));
+        }
+
+        IReadOnlyList<GateChange>? listed = ReadAllowChanges(request.AllowNonce ?? "", steps);
+        NodeChangeSummary summary;
+        if (listed is null)
+        {
+            steps.Add(StepOutcomes.NotAttempted(UndoStep, "No usable allow record, so every node is blocked."));
+            summary = ApplyBlock(_nodes, scan.Targets, steps);
+        }
+        else
+        {
+            var wanted = new List<TargetNode>();
+            foreach (GateChange change in listed)
+            {
+                TargetNode? target = scan.Targets.FirstOrDefault(t => string.Equals(t.InstanceId, change.Id, StringComparison.OrdinalIgnoreCase));
+                if (target is null)
+                {
+                    steps.Add(StepOutcomes.NotAttempted(UndoStep, "A listed node is not one of this device's nodes, so it was left alone."));
+                    continue;
+                }
+
+                wanted.Add(target);
+            }
+
+            summary = wanted.Count == 0 ? new NodeChangeSummary(0, 0, 0, 0, 0) : ApplyBlock(_nodes, wanted, steps);
+            NodeReadResult after = new NodeStateReader(_nodes).Read(identity.ContainerId, identity.Address);
+            if (after.Listed && !BlockStateClassifier.IsFullyBlocked(after))
+            {
+                steps.Add(StepOutcomes.NotAttempted(UndoStep, "The nodes are not all blocked after the undo, so the rest are blocked too."));
+                summary = ApplyBlock(_nodes, scan.Targets, steps);
+            }
+        }
+
+        GateExitCode outcome = summary.Total == 0 ? GateExitCode.Success : WithUnreadable(summary.Outcome, scan);
+        return new VerbResult(outcome, ReadState(identity));
+    }
+
+    internal const string UndoStep = "undo-allow";
+
+    // The change list of the allow with this nonce, or null when there is no usable one: the file is missing or unreadable,
+    // is not an allow's, carries no list (a version 1 file), or is older than UndoAllowMaxAge.
+    private IReadOnlyList<GateChange>? ReadAllowChanges(string allowNonce, List<StepOutcome> steps)
+    {
+        if (!BoundaryValidation.IsNonce(allowNonce))
+        {
+            steps.Add(StepOutcomes.NotAttempted(UndoStep, "The allow nonce is not valid."));
+            return null;
+        }
+
+        GateRead<GateStatusFile> read = _store.ReadStatus(allowNonce);
+        steps.Add(read.Step);
+        if (!read.IsOk || read.Value is null)
+        {
+            return null;
+        }
+
+        GateStatusFile allow = read.Value;
+        if (allow.Verb != GateVerbs.Allow || allow.Changed is null)
+        {
+            steps.Add(StepOutcomes.NotAttempted(UndoStep, "That status file is not an allow's, or lists no changes."));
+            return null;
+        }
+
+        if (_time.GetUtcNow() - allow.FinishedUtc > UndoAllowMaxAge)
+        {
+            steps.Add(StepOutcomes.NotAttempted(UndoStep, "That allow is older than " + UndoAllowMaxAge.TotalMinutes.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " minutes."));
+            return null;
+        }
+
+        return allow.Changed;
+    }
+
+    // Pins the AirPods with this address and blocks them, in one elevated run. The device must be AirPods by the identity
+    // rule. The pin moves under the same guards as set-device (the device pinned now must not be left blocked with nothing
+    // able to allow it, or hold services Earshot turned off). The new pair's nodes are then blocked, and the result is the
+    // block's: a pin that moved with a block that failed is Partial, never Success.
+    private VerbResult AdoptDevice(string address, List<StepOutcome> steps)
+    {
+        if (!BoundaryValidation.IsAddress12(address))
+        {
+            steps.Add(StepOutcomes.NotAttempted(GateVerbs.AdoptDevice, "The address is not 12 upper-case hex characters."));
+            return new VerbResult(GateExitCode.Rejected, null);
+        }
+
+        using DeviceChangeLock? changing = AcquireForNodeChange(steps);
+        if (changing is null)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        AirPodsDiscoveryResult found = AirPodsDiscovery.Find(_nodes);
+        steps.AddRange(found.Steps.Where(s => !s.Ok));
+        if (!found.Listed)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        List<AirPodsCandidate> matches = found.Candidates.Where(c => c.Address == address).ToList();
+        if (matches.Count == 0)
+        {
+            steps.Add(StepOutcomes.NotAttempted(GateVerbs.AdoptDevice, "No device with this address is AirPods by the identity rule, so nothing was pinned."));
+            return new VerbResult(GateExitCode.NotAirPods, null);
+        }
+
+        if (matches.Count > 1)
+        {
+            steps.Add(StepOutcomes.NotAttempted(GateVerbs.AdoptDevice, "More than one container holds AirPods nodes with this address, so nothing was pinned."));
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        Guid container = matches[0].ContainerId;
+        GateExitCode move = CheckPinMove(_nodes, _bluetooth, _store, address, container, GateVerbs.AdoptDevice, steps, _log);
+        if (move != GateExitCode.Success)
+        {
+            return new VerbResult(move, null);
+        }
+
+        var identity = new DeviceIdentity { Address = address, ContainerId = container };
+        StepOutcome written = _store.WriteDevice(identity);
+        steps.Add(written);
+        if (!written.Ok)
+        {
+            return new VerbResult(GateExitCode.Failed, null);
+        }
+
+        NodeScanResult scan = NodeScan.FindTargets(_nodes, container, address);
+        steps.AddRange(scan.Steps);
+        if (!scan.Listed || scan.Targets.Count == 0)
+        {
+            return new VerbResult(GateExitCode.Partial, nameof(BlockState.Unknown));
+        }
+
+        NodeChangeSummary summary = ApplyBlock(_nodes, scan.Targets, steps);
+        GateExitCode outcome = WithUnreadable(summary.Outcome, scan);
+        return new VerbResult(outcome == GateExitCode.Success ? GateExitCode.Success : GateExitCode.Partial, ReadState(identity));
     }
 
     private VerbResult Status(List<StepOutcome> steps)
@@ -807,7 +1093,7 @@ internal sealed partial class GateActions
             return new VerbResult(GateExitCode.Success, null);
         }
 
-        return Block(steps);
+        return Block(steps, onlyIfIdle: false);
     }
 
     private VerbResult Protect(GateRequest request, bool protect, List<StepOutcome> steps)
@@ -856,121 +1142,360 @@ internal sealed partial class GateActions
         return BlockStateClassifier.Classify(tasksInstalled: true, identityKnown: true, after).ToString();
     }
 
-    // Persistently disables each target. Service nodes go first and the device node last; that order is a
-    // choice (the device node stays up while its services go), not a documented requirement. A node already
-    // disabled with the persistent flag is left alone; one disabled without it is disabled again with
-    // CM_DISABLE_PERSIST.
+    // Persistently disables each target. Present service nodes go first and the device node after them; that order is a
+    // choice (the device node stays up while its services go), not a documented requirement. A node already disabled
+    // with the persistent flag is left alone; one disabled without it is disabled again with CM_DISABLE_PERSIST.
+    //
+    // A node that is not in the tree cannot be disabled (CM_Disable_DevNode needs a present node), but it keeps
+    // CONFIGFLAG_DISABLED while it is away, and that flag decides what it does when Windows reports it again. So the
+    // absent ones that are not flagged get the flag, last: the present nodes, which the time-capped paths (hand-back at
+    // shut down and sleep) need first, are done before any SetupAPI write. Then every absent node is looked for again,
+    // since one may have been reported meanwhile, and a node that is back and not disabled is disabled like any other.
+    // A node with the flag already set is left alone.
+    // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_disable_devnode
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-device-configflags
     public static NodeChangeSummary ApplyBlock(INodeApi nodes, IReadOnlyList<TargetNode> targets, IList<StepOutcome> steps)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(steps);
         int changed = 0, already = 0, notPresent = 0, failed = 0;
+        var absent = new List<TargetNode>();
         foreach (TargetNode target in targets.OrderBy(t => t.IsDeviceNode).ThenBy(t => t.InstanceId, StringComparer.Ordinal))
         {
             string id = target.InstanceId;
-            if (!TryLocatePresent(nodes, id, "cm-disable:", steps, ref notPresent, ref failed, out uint devInst, out bool disabled))
+            NodeProbe probe = Probe(nodes, id, "cm-disable:", steps, ref failed, out uint devInst, out bool disabled);
+            if (probe == NodeProbe.Absent)
+            {
+                absent.Add(target);
+                continue;
+            }
+
+            if (probe == NodeProbe.Failed)
             {
                 continue;
             }
 
-            if (disabled)
+            DisablePresent(nodes, id, devInst, disabled, steps, ref changed, ref already, ref failed);
+        }
+
+        // Each absent node counts once: as changed, already blocked or failed, whichever it ends as.
+        var absentResult = new Dictionary<string, AbsentResult>(StringComparer.Ordinal);
+        foreach (TargetNode target in absent)
+        {
+            string id = target.InstanceId;
+            bool? flagged = ReadFlag(nodes, target.PhantomDevInst, "cm-configflags:" + id, steps);
+            if (flagged is null)
             {
-                uint flagsCr = nodes.GetConfigFlags(devInst, out uint flags);
-                if (flagsCr == CfgMgr32.CR_SUCCESS && (flags & CfgMgr32.CONFIGFLAG_DISABLED) != 0)
-                {
-                    steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, flagsCr, "Already disabled."));
-                    already++;
-                    continue;
-                }
+                absentResult[id] = AbsentResult.Failed;
+                continue;
             }
 
-            uint cr = nodes.Disable(devInst, BlockDisableFlags);
-            steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, cr, DescribeDisable(cr)));
-            if (cr == CfgMgr32.CR_SUCCESS)
+            if (flagged.Value)
             {
-                changed++;
+                steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, CfgMgr32.CR_SUCCESS, "Not present, and already marked disabled."));
+                absentResult[id] = AbsentResult.Already;
+                continue;
             }
-            else
+
+            ConfigFlagsChange set = nodes.SetDisabledFlag(id);
+            bool took = set.Ok && set.DisabledAfter;
+            steps.Add(FlagStep("cfg-set:" + id, set, took, "Not present, so it was marked disabled and stays disabled when Windows reports it."));
+            absentResult[id] = took ? AbsentResult.Changed : AbsentResult.Failed;
+        }
+
+        // A node reported while the others were being changed is present now. Locating it again with the normal flag
+        // is the only way to a CM_Disable_DevNode call, which is never made on a phantom instance.
+        foreach (TargetNode target in absent)
+        {
+            string id = target.InstanceId;
+            uint cr = nodes.Locate(id, includeNonPresent: false, out uint devInst);
+            if (cr == CfgMgr32.CR_NO_SUCH_DEVNODE)
             {
-                failed++;
+                continue;
+            }
+
+            if (cr != CfgMgr32.CR_SUCCESS)
+            {
+                steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, cr, "Could not be located again after it was marked disabled."));
+                absentResult[id] = AbsentResult.Failed;
+                continue;
+            }
+
+            cr = nodes.GetStatus(devInst, out uint status, out uint problem);
+            if (cr != CfgMgr32.CR_SUCCESS)
+            {
+                steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, cr, "Status unreadable after it was reported, so it was not disabled."));
+                absentResult[id] = AbsentResult.Failed;
+                continue;
+            }
+
+            bool nowDisabled = (status & CfgMgr32.DN_HAS_PROBLEM) != 0 && problem == CfgMgr32.CM_PROB_DISABLED;
+            int c = 0, a = 0, f = 0;
+            DisablePresent(nodes, id, devInst, nowDisabled, steps, ref c, ref a, ref f);
+            if (f > 0)
+            {
+                absentResult[id] = AbsentResult.Failed;
+            }
+            else if (c > 0 && absentResult.TryGetValue(id, out AbsentResult before) && before == AbsentResult.Already)
+            {
+                absentResult[id] = AbsentResult.Changed;
             }
         }
 
+        changed += absentResult.Values.Count(r => r == AbsentResult.Changed);
+        already += absentResult.Values.Count(r => r == AbsentResult.Already);
+        failed += absentResult.Values.Count(r => r == AbsentResult.Failed);
         return new NodeChangeSummary(targets.Count, changed, already, notPresent, failed);
     }
 
-    // Enables each target at problem 22 (CM_PROB_DISABLED), and each enabled target that still carries
-    // CONFIGFLAG_DISABLED, which would come back disabled at the next restart. The device node goes first, then
-    // its services. After each enable the flag is read again: an enable that leaves it set is a failure, since
-    // the allow may not last a restart. A non-present target cannot be enabled: without the flag it comes back
-    // enabled and counts as not present; with the flag it would come back disabled and counts as failed.
-    // CM_DISABLE_PERSIST works by setting CONFIGFLAG_DISABLED (cfgmgr32.h); that CM_Enable_DevNode clears it is
-    // checked here rather than assumed.
+    private enum AbsentResult
+    {
+        Changed,
+        Already,
+        Failed,
+    }
+
+    private static void DisablePresent(
+        INodeApi nodes, string id, uint devInst, bool disabled, IList<StepOutcome> steps,
+        ref int changed, ref int already, ref int failed)
+    {
+        if (disabled)
+        {
+            uint flagsCr = nodes.GetConfigFlags(devInst, out uint flags);
+            if (flagsCr == CfgMgr32.CR_SUCCESS && (flags & CfgMgr32.CONFIGFLAG_DISABLED) != 0)
+            {
+                steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, flagsCr, "Already disabled."));
+                already++;
+                return;
+            }
+        }
+
+        uint cr = nodes.Disable(devInst, BlockDisableFlags);
+        steps.Add(StepOutcomes.FromConfigRet("cm-disable:" + id, cr, DescribeDisable(cr)));
+        if (cr == CfgMgr32.CR_SUCCESS)
+        {
+            changed++;
+        }
+        else
+        {
+            failed++;
+        }
+    }
+
+    // A SetupAPI flag change as a step: the raw Win32 error and where it stopped.
+    private static StepOutcome FlagStep(string step, ConfigFlagsChange change, bool took, string done) =>
+        StepOutcomes.FromWin32(
+            step, change.Win32Error,
+            took ? done : change.Ok
+                ? "The flag change did not show when read back (flags " + change.Before.ToString("X", System.Globalization.CultureInfo.InvariantCulture) +
+                  " then " + change.After.ToString("X", System.Globalization.CultureInfo.InvariantCulture) + ")."
+                : "Stopped at " + change.Stage + ".",
+            ok: took);
+
+    // How an allow goes about it, and what it needs from its caller.
+    //   Time          the clock the appear wait is measured on
+    //   AppearWait    how long to wait for absent nodes to be reported once the device node is enabled
+    //   PollInterval  the pause between two looks (INodeApi.Pause)
+    //   BeforeChange  called with the whole change list, including the change about to be made, BEFORE each change, so the
+    //                 caller can write it down; a failing step is recorded and the change is still made, since the
+    //                 undo then falls back to the full block
+    internal sealed class AllowOptions
+    {
+        public TimeProvider Time { get; init; } = TimeProvider.System;
+
+        public TimeSpan AppearWait { get; init; } = GateActions.AppearWait;
+
+        public TimeSpan PollInterval { get; init; } = GateActions.AppearPoll;
+
+        public Func<IReadOnlyList<GateChange>, StepOutcome?>? BeforeChange { get; init; }
+    }
+
+    // Enables each target. The device node goes first, then its services, and each node that is in the tree at problem 22
+    // (CM_PROB_DISABLED), or enabled with CONFIGFLAG_DISABLED still set (which would send it back to disabled at the next
+    // restart), is enabled with CM_Enable_DevNode and its flag read back: an enable that leaves the flag set is a failure.
+    //
+    // A node that is not in the tree cannot be enabled, and nothing here clears its flag: enabling the device node is what
+    // makes Windows report its services again, so they are waited for (AppearWait, polled with INodeApi.Pause; the time
+    // each took is in its step), and each that comes back at problem 22 or with the flag set is enabled like any other,
+    // which clears the flag. A node that is absent and not flagged comes back enabled by itself, so it counts as already
+    // allowed. One that is absent and flagged and never comes back is a failure: it would come back disabled. With no node
+    // present at all, nothing is waited for.
+    //
+    // The change list (GateChange) names every node this call changed and how it stood before, in order; it is what
+    // undo-allow puts back.
     // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_enable_devnode
     // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-device-configflags
-    public static NodeChangeSummary ApplyAllow(INodeApi nodes, IReadOnlyList<TargetNode> targets, IList<StepOutcome> steps)
+    public static NodeChangeSummary ApplyAllow(INodeApi nodes, IReadOnlyList<TargetNode> targets, IList<StepOutcome> steps, AllowOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(targets);
         ArgumentNullException.ThrowIfNull(steps);
-        int changed = 0, already = 0, notPresent = 0, failed = 0;
+        var pass = new AllowPass(nodes, steps, options ?? new AllowOptions());
+        var absent = new List<TargetNode>();
+        bool anyPresent = false;
         foreach (TargetNode target in targets.OrderBy(t => !t.IsDeviceNode).ThenBy(t => t.InstanceId, StringComparer.Ordinal))
         {
             string id = target.InstanceId;
-            int notPresentBefore = notPresent;
-            if (!TryLocatePresent(nodes, id, "cm-enable:", steps, ref notPresent, ref failed, out uint devInst, out bool disabled))
+            NodeProbe probe = Probe(nodes, id, "cm-enable:", steps, ref pass.Failed, out uint devInst, out bool disabled);
+            if (probe == NodeProbe.Failed)
             {
-                if (notPresent > notPresentBefore && ReadFlag(nodes, target.PhantomDevInst, "cm-configflags:" + id, steps) is not false)
-                {
-                    // Flagged (or unreadable): it would come back disabled, so the allow is not complete.
-                    notPresent--;
-                    failed++;
-                    steps.Add(StepOutcomes.NotAttempted("cm-enable:" + id,
-                        "Not present and still marked disabled, so it may come back disabled. Connect the device to this PC once."));
-                }
-
                 continue;
             }
 
+            if (probe == NodeProbe.Absent)
+            {
+                bool? flagged = ReadFlag(nodes, target.PhantomDevInst, "cm-configflags:" + id, steps);
+                if (flagged is null)
+                {
+                    pass.Failed++;
+                    continue;
+                }
+
+                if (!flagged.Value)
+                {
+                    // Not marked disabled: it comes back enabled by itself, so there is nothing to wait for.
+                    steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, CfgMgr32.CR_SUCCESS, "Not present and not marked disabled, so it starts enabled when Windows reports it."));
+                    pass.Already++;
+                    continue;
+                }
+
+                absent.Add(target);
+                continue;
+            }
+
+            anyPresent = true;
+            pass.EnablePresent(id, devInst, disabled, GateChangeFrom.DisabledPresent);
+        }
+
+        if (absent.Count > 0)
+        {
+            pass.WaitForAbsent(absent, anyPresent);
+        }
+
+        return new NodeChangeSummary(targets.Count, pass.Changed, pass.Already, 0, pass.Failed) { Changes = pass.Changes };
+    }
+
+    // The counters and change list of one allow.
+    private sealed class AllowPass(INodeApi nodes, IList<StepOutcome> steps, AllowOptions options)
+    {
+        public int Changed;
+        public int Already;
+        public int Failed;
+        public List<GateChange> Changes { get; } = [];
+
+        // Enables a node that is in the tree, unless it is enabled and carries no flag.
+        public void EnablePresent(string id, uint devInst, bool disabled, GateChangeFrom from)
+        {
             if (!disabled)
             {
                 bool? flagged = ReadFlag(nodes, devInst, "cm-configflags:" + id, steps);
                 if (flagged is false)
                 {
                     steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, CfgMgr32.CR_SUCCESS, "Already enabled."));
-                    already++;
-                    continue;
+                    Already++;
+                    return;
                 }
 
                 if (flagged is null)
                 {
                     steps.Add(StepOutcomes.NotAttempted("cm-enable:" + id,
                         "Enabled, but whether it stays enabled after a restart could not be read, so it was not changed."));
-                    failed++;
-                    continue;
+                    Failed++;
+                    return;
                 }
+            }
+
+            // Written down before the node is touched.
+            Changes.Add(new GateChange(id, from));
+            if (options.BeforeChange?.Invoke(Changes) is { Ok: false } writeFailed)
+            {
+                steps.Add(writeFailed);
             }
 
             uint cr = nodes.Enable(devInst);
             steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, cr, DescribeEnable(cr) + (disabled ? "" : " It was enabled but still marked disabled.")));
             if (cr != CfgMgr32.CR_SUCCESS)
             {
-                failed++;
-                continue;
+                Failed++;
+                return;
             }
 
             if (ReadFlag(nodes, devInst, "cm-configflags:" + id, steps) is not false)
             {
                 steps.Add(StepOutcomes.NotAttempted("cm-enable:" + id, "Enabled, but still marked disabled, so it may be disabled again after a restart."));
-                failed++;
-                continue;
+                Failed++;
+                return;
             }
 
-            changed++;
+            Changed++;
         }
 
-        return new NodeChangeSummary(targets.Count, changed, already, notPresent, failed);
+        // Waits for the nodes that were not in the tree. With no node present there is nothing that would bring them back.
+        // Every node in absent carries CONFIGFLAG_DISABLED.
+        public void WaitForAbsent(List<TargetNode> absent, bool anyPresent)
+        {
+            var waiting = new List<TargetNode>(absent);
+            long start = options.Time.GetTimestamp();
+
+            // The clock and the pauses both count, and the longer is the time spent: a pause that sleeps for real moves
+            // both, and one that a test replaces moves only the pauses, so the wait always ends.
+            TimeSpan paused = TimeSpan.Zero;
+            TimeSpan Spent() => paused > options.Time.GetElapsedTime(start) ? paused : options.Time.GetElapsedTime(start);
+            while (anyPresent && waiting.Count > 0 && Spent() < options.AppearWait)
+            {
+                if (!nodes.Pause(options.PollInterval))
+                {
+                    break;
+                }
+
+                paused += options.PollInterval;
+
+                foreach (TargetNode item in waiting.ToList())
+                {
+                    string id = item.InstanceId;
+                    uint cr = nodes.Locate(id, includeNonPresent: false, out uint devInst);
+                    if (cr == CfgMgr32.CR_NO_SUCH_DEVNODE)
+                    {
+                        continue;
+                    }
+
+                    waiting.Remove(item);
+                    if (cr != CfgMgr32.CR_SUCCESS)
+                    {
+                        steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, cr, "Could not be located after it was reported."));
+                        Failed++;
+                        continue;
+                    }
+
+                    cr = nodes.GetStatus(devInst, out uint status, out uint problem);
+                    if (cr != CfgMgr32.CR_SUCCESS)
+                    {
+                        steps.Add(StepOutcomes.FromConfigRet("cm-enable:" + id, cr, "Status unreadable after it was reported, so it was not changed."));
+                        Failed++;
+                        continue;
+                    }
+
+                    TimeSpan took = Spent();
+                    steps.Add(StepOutcomes.FromConfigRet(
+                        "cm-appear:" + id, CfgMgr32.CR_SUCCESS,
+                        "Reported " + ((long)took.TotalMilliseconds).ToString(System.Globalization.CultureInfo.InvariantCulture) +
+                        " ms after the others were changed (the wait allows " + options.AppearWait.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) +
+                        " s, a budget that has not been measured)."));
+                    bool nowDisabled = (status & CfgMgr32.DN_HAS_PROBLEM) != 0 && problem == CfgMgr32.CM_PROB_DISABLED;
+                    EnablePresent(id, devInst, nowDisabled, GateChangeFrom.FlaggedAbsent);
+                }
+            }
+
+            foreach (TargetNode item in waiting)
+            {
+                steps.Add(StepOutcomes.NotAttempted("cm-enable:" + item.InstanceId,
+                    anyPresent
+                        ? "Not reported within " + options.AppearWait.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " s and still marked disabled, so it comes back disabled."
+                        : "Not present and still marked disabled, so it comes back disabled."));
+                Failed++;
+            }
+        }
     }
 
     // CONFIGFLAG_DISABLED on a node: true or false, or null when the flags could not be read (recorded as a
@@ -992,26 +1517,31 @@ internal sealed partial class GateActions
         return (flags & CfgMgr32.CONFIGFLAG_DISABLED) != 0;
     }
 
-    // Locates a target in the live tree and reads whether it is at CM_PROB_DISABLED. A node that is not
-    // present (CR_NO_SUCH_DEVNODE with CM_LOCATE_DEVNODE_NORMAL) cannot be changed and is reported as such.
-    private static bool TryLocatePresent(
-        INodeApi nodes, string id, string stepPrefix, IList<StepOutcome> steps,
-        ref int notPresent, ref int failed, out uint devInst, out bool disabled)
+    private enum NodeProbe
+    {
+        Present,
+        Absent,   // CR_NO_SUCH_DEVNODE with the normal locate: not in the tree now
+        Failed,   // a failed step was recorded and the failure counted
+    }
+
+    // Locates a target in the live tree and reads whether it is at CM_PROB_DISABLED. A node that is not present
+    // (CR_NO_SUCH_DEVNODE with CM_LOCATE_DEVNODE_NORMAL) is reported as Absent, with no step: what to do about it differs
+    // between a block and an allow.
+    private static NodeProbe Probe(
+        INodeApi nodes, string id, string stepPrefix, IList<StepOutcome> steps, ref int failed, out uint devInst, out bool disabled)
     {
         disabled = false;
         uint cr = nodes.Locate(id, includeNonPresent: false, out devInst);
         if (cr == CfgMgr32.CR_NO_SUCH_DEVNODE)
         {
-            steps.Add(StepOutcomes.FromConfigRet(stepPrefix + id, cr, "Not present, so it cannot be changed. Connect the device to this PC once."));
-            notPresent++;
-            return false;
+            return NodeProbe.Absent;
         }
 
         if (cr != CfgMgr32.CR_SUCCESS)
         {
             steps.Add(StepOutcomes.FromConfigRet(stepPrefix + id, cr, "Could not be located."));
             failed++;
-            return false;
+            return NodeProbe.Failed;
         }
 
         cr = nodes.GetStatus(devInst, out uint status, out uint problem);
@@ -1019,11 +1549,11 @@ internal sealed partial class GateActions
         {
             steps.Add(StepOutcomes.FromConfigRet(stepPrefix + id, cr, "Status unreadable, so it was not changed."));
             failed++;
-            return false;
+            return NodeProbe.Failed;
         }
 
         disabled = (status & CfgMgr32.DN_HAS_PROBLEM) != 0 && problem == CfgMgr32.CM_PROB_DISABLED;
-        return true;
+        return NodeProbe.Present;
     }
 
     internal static string? DescribeDisable(uint cr) => cr switch

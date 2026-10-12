@@ -49,6 +49,25 @@ internal sealed class FakeNode
     // located, or is gone by then.
     public uint PhantomLocateResult { get; set; }
 
+    // The node is reported (becomes present) once the fake's own clock has passed this, counted from the start of the
+    // table. It then reads as disabled (problem 22) when it carries CONFIGFLAG_DISABLED and as enabled otherwise, as a
+    // node that comes back after its device node is enabled does.
+    public TimeSpan? AppearsAfter { get; set; }
+
+    // The node is reported the moment a flag is written to it, as one that comes back while the others are being changed.
+    public bool AppearsOnFlagWrite { get; set; }
+
+    // When it is reported it is enabled whatever its flag says (a node that came back before the flag was read again).
+    public bool AppearsEnabled { get; set; }
+
+    // Win32 errors SetupAPI returns for a flag change on this node (0 for success).
+    public uint ClearFlagError { get; set; }
+
+    public uint SetFlagError { get; set; }
+
+    // The flag write succeeds but does not show when read back.
+    public bool FlagWriteDoesNotStick { get; set; }
+
     public bool IsDisabled => (Status & CfgMgr32.DN_HAS_PROBLEM) != 0 && Problem == CfgMgr32.CM_PROB_DISABLED;
 
     public void MarkDisabled(bool persistent)
@@ -67,9 +86,90 @@ internal sealed class FakeNodeApi : INodeApi
 {
     private readonly List<FakeNode> _nodes;
 
-    public FakeNodeApi(IEnumerable<FakeNode> nodes)
+    public FakeNodeApi(IEnumerable<FakeNode> nodes, ManualTime? time = null)
     {
         _nodes = nodes.ToList();
+        _time = time;
+    }
+
+    private readonly ManualTime? _time;
+
+    // Time the fake has been paused for, which is what AppearsAfter is counted in.
+    public TimeSpan Elapsed { get; private set; }
+
+    public List<TimeSpan> Pauses { get; } = new();
+
+    // When true the next Pause ends the wait (returns false).
+    public bool StopPausing { get; set; }
+
+    public bool Pause(TimeSpan delay)
+    {
+        Pauses.Add(delay);
+        Elapsed += delay;
+        _time?.Advance(delay);
+        return !StopPausing;
+    }
+
+    private void ApplyAppearances()
+    {
+        foreach (FakeNode node in _nodes.Where(n => !n.Present && n.AppearsAfter is { } at && Elapsed >= at))
+        {
+            Report(node);
+        }
+    }
+
+    private static void Report(FakeNode node)
+    {
+        node.Present = true;
+        node.AppearsAfter = null;
+        node.AppearsOnFlagWrite = false;
+        if (!node.AppearsEnabled && (node.ConfigFlags & CfgMgr32.CONFIGFLAG_DISABLED) != 0)
+        {
+            node.Status |= CfgMgr32.DN_HAS_PROBLEM;
+            node.Problem = CfgMgr32.CM_PROB_DISABLED;
+        }
+    }
+
+    // Called with the instance id just before an enable is applied.
+    public Action<string>? BeforeEnable { get; set; }
+
+    public ConfigFlagsChange ClearDisabledFlag(string instanceId) => ChangeFlag(instanceId, disabled: false);
+
+    public ConfigFlagsChange SetDisabledFlag(string instanceId) => ChangeFlag(instanceId, disabled: true);
+
+    private ConfigFlagsChange ChangeFlag(string instanceId, bool disabled)
+    {
+        FakeNode? node = _nodes.FirstOrDefault(n => string.Equals(n.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
+        Calls.Add(new NodeCall(disabled ? "set-flag" : "clear-flag", instanceId, 0));
+        if (node is null)
+        {
+            return new ConfigFlagsChange(1168, 0, 0, false, ConfigFlagsStage.Open);
+        }
+
+        uint error = disabled ? node.SetFlagError : node.ClearFlagError;
+        uint before = node.ConfigFlags;
+        if (error != 0)
+        {
+            return new ConfigFlagsChange(error, before, before, false, ConfigFlagsStage.Write);
+        }
+
+        uint wanted = disabled ? before | CfgMgr32.CONFIGFLAG_DISABLED : before & ~CfgMgr32.CONFIGFLAG_DISABLED;
+        if (wanted == before)
+        {
+            return new ConfigFlagsChange(0, before, before, false, ConfigFlagsStage.None);
+        }
+
+        if (!node.FlagWriteDoesNotStick)
+        {
+            node.ConfigFlags = wanted;
+        }
+
+        if (node.AppearsOnFlagWrite)
+        {
+            Report(node);
+        }
+
+        return new ConfigFlagsChange(0, before, node.ConfigFlags, true, ConfigFlagsStage.None);
     }
 
     public List<NodeCall> Calls { get; } = new();
@@ -88,6 +188,7 @@ internal sealed class FakeNodeApi : INodeApi
 
     public uint Locate(string instanceId, bool includeNonPresent, out uint devInst)
     {
+        ApplyAppearances();
         int index = _nodes.FindIndex(n => string.Equals(n.InstanceId, instanceId, StringComparison.OrdinalIgnoreCase));
         devInst = 0;
         if (index < 0 || (!includeNonPresent && !_nodes[index].Present))
@@ -152,6 +253,13 @@ internal sealed class FakeNodeApi : INodeApi
     public uint Disable(uint devInst, uint flags)
     {
         FakeNode node = Node(devInst);
+        if (!node.Present)
+        {
+            // CM_Disable_DevNode needs a node that is in the tree; a test that asserts on this finds the call.
+            Calls.Add(new NodeCall("disable-phantom", node.InstanceId, flags));
+            return CfgMgr32.CR_NO_SUCH_DEVNODE;
+        }
+
         Calls.Add(new NodeCall("disable", node.InstanceId, flags));
         if (node.DisableResult == CfgMgr32.CR_SUCCESS)
         {
@@ -164,6 +272,13 @@ internal sealed class FakeNodeApi : INodeApi
     public uint Enable(uint devInst)
     {
         FakeNode node = Node(devInst);
+        if (!node.Present)
+        {
+            Calls.Add(new NodeCall("enable-phantom", node.InstanceId, 0));
+            return CfgMgr32.CR_NO_SUCH_DEVNODE;
+        }
+
+        BeforeEnable?.Invoke(node.InstanceId);
         Calls.Add(new NodeCall("enable", node.InstanceId, 0));
         if (node.EnableResult == CfgMgr32.CR_SUCCESS)
         {

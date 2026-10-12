@@ -165,7 +165,7 @@ public sealed class GateActionsTests
     }
 
     [TestMethod]
-    public void NodesThatAreNotPresentCannotBeBlockedAndSaySo()
+    public void NodesThatAreNotPresentAreMarkedDisabledSoTheyCannotComeBackEnabled()
     {
         using var h = new Harness();
         h.Pin(RecordedNodes.AirPods());
@@ -176,23 +176,25 @@ public sealed class GateActionsTests
 
         GateExitCode exit = h.Run(GateVerbs.Block);
 
-        Assert.AreEqual(GateExitCode.NotPresent, exit);
-        Assert.IsEmpty(h.Nodes.Calls);
+        Assert.AreEqual(GateExitCode.Success, exit);
+        Assert.IsTrue(h.Nodes.Calls.All(c => c.Kind == "set-flag"), "A node that is not in the tree is never disabled, only marked.");
+        Assert.HasCount(9, h.Nodes.Calls);
+        Assert.IsTrue(RecordedNodes.AirPodsTargets.All(id => (h.Nodes[id].ConfigFlags & CfgMgr32.CONFIGFLAG_DISABLED) != 0));
         GateStatusFile status = h.Status();
-        Assert.AreEqual("not-present", status.Result);
-        Assert.AreEqual(nameof(BlockState.Unknown), status.State);
-        Assert.HasCount(9, status.Steps.Where(s => s.CodeName == "CR_NO_SUCH_DEVNODE" && s.Step.StartsWith("cm-disable:", StringComparison.Ordinal)));
+        Assert.AreEqual("success", status.Result);
+        Assert.HasCount(9, status.Steps.Where(s => s.Step.StartsWith("cfg-set:", StringComparison.Ordinal) && s.Ok));
     }
 
     [TestMethod]
-    public void SomeNodesNotPresentIsPartial()
+    public void SomeNodesNotPresentAreMarkedAndTheRestDisabled()
     {
         using var h = new Harness();
         h.Pin(RecordedNodes.AirPods());
         h.Nodes[RecordedNodes.AirPodsTargets[2]].Present = false;
 
-        Assert.AreEqual(GateExitCode.Partial, h.Run(GateVerbs.Block));
-        Assert.HasCount(8, h.Nodes.Calls);
+        Assert.AreEqual(GateExitCode.Success, h.Run(GateVerbs.Block));
+        Assert.HasCount(8, h.Nodes.Calls.Where(c => c.Kind == "disable"));
+        Assert.HasCount(1, h.Nodes.Calls.Where(c => c.Kind == "set-flag"));
     }
 
     [TestMethod]
@@ -351,7 +353,7 @@ public sealed class GateActionsTests
 
         Assert.AreEqual(GateExitCode.Partial, h.Run(GateVerbs.Allow));
 
-        Assert.Contains("may come back disabled", h.Status().Steps.Last(s => s.Step == "cm-enable:" + node.InstanceId).Detail!);
+        Assert.Contains("comes back disabled", h.Status().Steps.Last(s => s.Step == "cm-enable:" + node.InstanceId).Detail!);
     }
 
     [TestMethod]
@@ -740,6 +742,12 @@ public sealed class GateActionsTests
         public uint Disable(uint devInst, uint flags) => throw new InvalidOperationException("no disable");
 
         public uint Enable(uint devInst) => throw new InvalidOperationException("no enable");
+
+        public ConfigFlagsChange ClearDisabledFlag(string instanceId) => throw new InvalidOperationException("no clear");
+
+        public ConfigFlagsChange SetDisabledFlag(string instanceId) => throw new InvalidOperationException("no set");
+
+        public bool Pause(TimeSpan delay) => throw new InvalidOperationException("no pause");
     }
 
     [TestMethod]

@@ -137,6 +137,12 @@ public sealed class GateActionsPreshutdownTests
         }
 
         public uint Enable(uint devInst) => inner.Enable(devInst);
+
+        public ConfigFlagsChange ClearDisabledFlag(string id) => inner.ClearDisabledFlag(id);
+
+        public ConfigFlagsChange SetDisabledFlag(string id) => inner.SetDisabledFlag(id);
+
+        public bool Pause(TimeSpan delay) => inner.Pause(delay);
     }
 
     private sealed class BusyRunLock : IGateRunLock
