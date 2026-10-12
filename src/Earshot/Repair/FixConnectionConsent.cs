@@ -151,7 +151,7 @@ internal static class FixPromptText
             return new FixPrompt(
                 Title,
                 "Remove the AirPods from Windows and pair them again",
-                "Windows will forget " + names + ", then Earshot will look for them so you can pair them again. They stop working with this PC until they are paired.",
+                "Windows will forget " + names + ", then Earshot will look for them so you can pair them again. They stop working with this PC until they are paired. This has not yet been proved on real AirPods.",
                 [],
                 [],
                 "Remove and pair again");

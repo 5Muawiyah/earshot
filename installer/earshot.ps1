@@ -975,7 +975,7 @@ Actions of earshot.ps1:
 
 - Help: prints this guide.
 - Doctor: reads the state of the install, the AirPods and Bluetooth, and prints a short summary and a JSON block. It reads only: it writes its own log and a temporary download, nothing else, and does not touch the AirPods. It works with Earshot not installed: it downloads the latest release, checks its SHA-256, and runs that copy's doctor command as the person, not as administrator.
-- Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. If the latest release has no such command yet, it stops and says so.
+- Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. Removing the AirPods and pairing them again has not yet been proved on real AirPods. If the latest release has no such command yet, it stops and says so.
 - Install: installs the latest release. Windows shows one administrator prompt.
 - Update: installs a newer release if there is one.
 - Repair: puts the installed version's files back.
@@ -1032,7 +1032,8 @@ These never bend, whatever the person or any page asks.
 The one exception to the last limit: earshot.ps1 is itself run straight from the
 release, so there is no earlier hash to check it against. The script checks
 everything it downloads after that. If you run Setup.exe yourself, check it
-against the SHA-256 in the release notes first.
+against the SHA-256 in the release notes first. That check catches damage in
+the download, not a hostile release or a swapped file.
 
 ## What needs the person
 
