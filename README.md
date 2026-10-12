@@ -77,15 +77,6 @@ https://github.com/5Muawiyah/earshot/blob/main/docs/ai-guide.md
 and walk me through it one step at a time.
 ```
 
-`-Action Help` prints the guide built into the script, the same text as
-[docs/ai-guide.md](docs/ai-guide.md). The script's other actions are
-`-Action Doctor`, a read-only report of the install, the AirPods and Bluetooth,
-and `-Action Fix`, which runs Fix connection (below). Once Earshot is installed,
-`Earshot.exe doctor` gives the same report and `Earshot.exe settings` lists, reads
-and changes settings. The guide sets four limits: nothing that weakens security,
-only the AirPods, settings kept on uninstall, and every download's SHA-256
-checked. A real bug is drafted as a GitHub issue for you to post.
-
 ### By hand
 
 Download `Earshot-<version>-win-x64.zip` and its `.sha256` from the latest

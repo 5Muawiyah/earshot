@@ -121,7 +121,7 @@ public sealed class TrayStreamingTests
                     "Speak status", "-",
                     "Show on the taskbar", "Left click connects straight away", "Low battery alert", "Threshold",
                     "Name your other device...", "-",
-                    "Choose device...", "Repair Earshot...", "-",
+                    "Choose device...", "Repair Earshot...", "Fix connection...", "-",
                     "Check for updates", "Check automatically", "-",
                     "Copy diagnostics", "Exit"),
                 texts);
