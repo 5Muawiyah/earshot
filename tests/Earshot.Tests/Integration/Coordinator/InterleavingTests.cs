@@ -352,7 +352,12 @@ public sealed class InterleavingTests
         h.Start();
         h.Connection.Connects.Enqueue(_ => Task.FromResult(Results.NodesBlocked()));
         var allowing = new TaskCompletionSource<ControllerResult>();
-        h.Block.OnAllow = _ => allowing.Task;
+        CancellationToken allowToken = default;
+        h.Block.OnAllow = ct =>
+        {
+            allowToken = ct;
+            return allowing.Task;
+        };
 
         using var cancel = new CancellationTokenSource();
         Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true), cancel.Token);
@@ -361,6 +366,7 @@ public sealed class InterleavingTests
         // Another device is chosen while the gate is enabling the current one's nodes.
         cancel.Cancel();
         h.Pump();
+        Assert.IsFalse(allowToken.IsCancellationRequested, "The caller's cancel stopped the wait for the gate.");
         Task<ControllerResult> pin = h.Coordinator.ChangeDeviceAsync("A1B2C3D4E5F6");
         h.Pump();
         Assert.IsFalse(pin.IsCompleted, "The pin moved while the allow was still running.");
@@ -374,7 +380,7 @@ public sealed class InterleavingTests
         Assert.IsTrue(toggle.IsCompleted);
         Assert.IsTrue(pin.IsCompleted);
         CollectionAssert.AreEqual(AllowBlockSetDevice, h.Block.Calls, "The old device's nodes were left enabled when the pin moved.");
-        Assert.IsEmpty(h.Block.CancellableChanges);
+        Assert.IsTrue(h.Block.CancellableChanges.All(c => c == "allow"), "Only the allow carries a token, and it is the budget's.");
     }
 
     [TestMethod]

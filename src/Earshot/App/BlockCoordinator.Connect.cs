@@ -34,6 +34,11 @@ internal sealed partial class BlockCoordinator
     // blocked and reported. A waiting budget, not a measured figure.
     public static readonly TimeSpan UnconfirmedLinkCap = TimeSpan.FromMinutes(2);
 
+    // How long a device node that reads connected while its endpoint is still not playing is given before the bit is taken as
+    // stuck. A connect raises the bit some seconds before A2DP reaches ACTIVE, so the two disagree for a while on a good link.
+    // A waiting budget, not a measured figure.
+    public static readonly TimeSpan LinkSettle = TimeSpan.FromSeconds(8);
+
     // How long a link that formed with no one connecting it waits before it is blocked.
     public static readonly TimeSpan ForeignLinkDelay = TimeSpan.FromSeconds(2);
 
@@ -48,10 +53,6 @@ internal sealed partial class BlockCoordinator
     // A link that formed with the owner at the PC (or by the owner's own connect) and has not dropped since.
     private bool _ownerLink;
 
-    // The nodes were enabled by this coordinator's own allow, and no block has taken since: the grace in which a link is the
-    // owner's.
-    private bool _enabledByUs;
-
     // When a link that reads connected with no endpoint to confirm it was first held back from the idle block.
     private DateTimeOffset? _unconfirmedSince;
 
@@ -61,10 +62,10 @@ internal sealed partial class BlockCoordinator
     // What a connect knows as it goes, for the report and the history.
     private sealed class ConnectAttempt
     {
-        public ConnectAttempt(TimeProvider time, string startState)
+        public ConnectAttempt(TimeProvider time, string startState, DateTimeOffset started)
         {
             Time = time;
-            Started = time.GetUtcNow();
+            Started = started;
             StartState = startState;
         }
 
@@ -94,10 +95,10 @@ internal sealed partial class BlockCoordinator
         public bool RoomToRetry => Remaining >= RetryRoom;
     }
 
-    private async Task<ToggleReport> ConnectCoreAsync(ToggleRequest request, CancellationToken ct)
+    private async Task<ToggleReport> ConnectCoreAsync(ToggleRequest request, DateTimeOffset accepted, CancellationToken ct)
     {
-        var attempt = new ConnectAttempt(_time, StartStateOf(FreshStatus ?? _blockStatus));
-        using var limit = new CancellationTokenSource(ConnectBudget, _time);
+        var attempt = new ConnectAttempt(_time, StartStateOf(FreshStatus ?? _blockStatus), accepted);
+        using var limit = new CancellationTokenSource(attempt.Remaining, _time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
         ToggleReport report = await ConnectBodyAsync(request, attempt, linked.Token, ct, limit.Token);
         return SealConnect(request, attempt, report);
@@ -204,7 +205,7 @@ internal sealed partial class BlockCoordinator
             if (result.Outcome == ConnectOutcome.NodesBlocked)
             {
                 attempt.Path = "allow-first";
-                (ToggleReport? early, ConnectResult? afterAllow) = await AllowThenConnectAsync(request, attempt, cleanup, steps, linked, ct);
+                (ToggleReport? early, ConnectResult? afterAllow) = await AllowThenConnectAsync(request, attempt, cleanup, steps, linked, ct, limitToken);
                 if (early is not null)
                 {
                     return early;
@@ -220,7 +221,7 @@ internal sealed partial class BlockCoordinator
 
             // A temporary failure is tried once more when the time allows; whatever follows is judged with the retry spent.
             ConnectFailure first = ConnectFailureClassifier.Classify(result, _services.Hints.Read(), retried: false);
-            if (first.IsTemporary && attempt.RoomToRetry)
+            if (first.IsTemporary && !attempt.Retried && attempt.RoomToRetry)
             {
                 attempt.Retried = true;
                 Progress(request, attempt, TryingAgainStatus);
@@ -287,7 +288,8 @@ internal sealed partial class BlockCoordinator
     // Steps 2 of the connect: the allow, the wait for a render endpoint, and the request. Returns a finished report when the
     // connect ended here, otherwise the result of the request after the allow.
     private async Task<(ToggleReport? Early, ConnectResult? Result)> AllowThenConnectAsync(
-        ToggleRequest request, ConnectAttempt attempt, ConnectCleanup cleanup, List<StepOutcome> steps, CancellationToken linked, CancellationToken ct)
+        ToggleRequest request, ConnectAttempt attempt, ConnectCleanup cleanup, List<StepOutcome> steps, CancellationToken linked, CancellationToken ct,
+        CancellationToken limitToken)
     {
         if (PinMayMove)
         {
@@ -298,7 +300,7 @@ internal sealed partial class BlockCoordinator
         }
 
         long mark = request.Timeline?.Mark() ?? -1;
-        BootBlockStatus? status = await ReadBlockStatusAsync(ct);
+        BootBlockStatus? status = await ReadBlockStatusAsync(linked);
         request.Timeline?.Record(SwitchPhase.Status, mark);
         string? refusal = CoordinatorRules.AllowFirstRefusal(status, request.Container);
         if (refusal is not null)
@@ -316,7 +318,7 @@ internal sealed partial class BlockCoordinator
         Progress(request, attempt, AllowingStatus);
         cleanup.AllowIssued = true;
         mark = request.Timeline?.Mark() ?? -1;
-        ControllerResult allow = await SendAllowAsync("allow (connect)", steps);
+        ControllerResult allow = await SendAllowAsync("allow (connect)", steps, limitToken);
         request.Timeline?.Record(SwitchPhase.Allow, mark);
         cleanup.AllowNonce = allow.GateNonce;
         if (IsSessionEndRefusal(allow))
@@ -329,12 +331,18 @@ internal sealed partial class BlockCoordinator
 
         if (allow.Status is OpStatus.Failed or OpStatus.NotAttempted)
         {
+            if (limitToken.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                // The budget ended while the gate's run was waited for: reported as the time limit, like any other wait it cut.
+                throw new OperationCanceledException(limitToken);
+            }
+
             return (await FailAsync(request, attempt, cleanup, steps, ConnectFailureClassifier.AllowFailed(allow), ct), null);
         }
 
         // The nodes are in the tree now, or on their way: from here the wait is for the endpoints, and it is cut by the limit.
         mark = request.Timeline?.Mark() ?? -1;
-        await ReadBlockStatusAsync(ct);
+        await ReadBlockStatusAsync(linked);
         Progress(request, attempt, WaitingStatus);
         bool endpointCame = await WaitForSnapshotAsync(request.Container, CoordinatorRules.RenderEndpointPresent, Shorter(EndpointWait, attempt.Remaining), ct);
         if (!endpointCame && attempt.RoomToRetry)
@@ -443,7 +451,7 @@ internal sealed partial class BlockCoordinator
 
             ct.ThrowIfCancellationRequested();
             ShowCard(request, AllowingStatus);
-            ControllerResult allow = await SendAllowAsync("allow (connect in windows)", steps);
+            ControllerResult allow = await SendAllowAsync("allow (connect in windows)", steps, CancellationToken.None);
             if (IsSessionEndRefusal(allow))
             {
                 return RefusedAtSessionEnd(request, steps);
@@ -521,9 +529,10 @@ internal sealed partial class BlockCoordinator
 
     // ---- who made the link ----
 
-    // The link is the owner's when the session is unlocked, or when it formed while Earshot had the nodes enabled for the owner
-    // (a connect in flight, the grace after one, or a Connect in Windows window), and it stays the owner's until it drops. A
-    // link that first appears with none of those, while the session is locked or its state cannot be read, is not.
+    // The link is the owner's when it first appears with the session unlocked, and it stays the owner's until it drops, so
+    // locking the PC while listening cuts nothing. A link that first appears while the session is locked or its state cannot
+    // be read is not, whether or not a Connect in Windows window or a connect of Earshot's own is open: someone at the PC
+    // made those unlocked, and a link made after the lock is not theirs.
     private void NoteLinkOwner(DeviceSnapshot snapshot)
     {
         RenderState render = CoordinatorRules.RenderOf(snapshot, WatchedContainer());
@@ -545,12 +554,12 @@ internal sealed partial class BlockCoordinator
             return;
         }
 
-        bool ownConnect = _current is not null && _currentName is "connect" or "connect in windows";
-        bool window = ownConnect || WindowsConnectOpen || _enabledByUs;
-        if (_services.Session.Current != SessionLockState.Unlocked && !window)
+        if (_services.Session.Current != SessionLockState.Unlocked)
         {
             return;
         }
+
+        bool ownConnect = _current is not null && _currentName is "connect" or "connect in windows";
 
         _ownerLink = true;
         if (!ownConnect)

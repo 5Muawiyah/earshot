@@ -22,8 +22,9 @@ internal sealed class CoordinatorHarness : IDisposable
 {
     private readonly SynchronizationContext? _previous;
 
-    public CoordinatorHarness(bool safeMode = false, bool startedAtLogon = false, bool protectAudio = false, IDeviceHints? hints = null)
+    public CoordinatorHarness(bool safeMode = false, bool startedAtLogon = false, bool protectAudio = false, IDeviceHints? hints = null, FixOfferTracker? fixOffer = null)
     {
+        FixOffer = fixOffer ?? new FixOfferTracker();
         _previous = SynchronizationContext.Current;
         Ui = new ManualUiContext();
         SynchronizationContext.SetSynchronizationContext(Ui);
@@ -70,7 +71,7 @@ internal sealed class CoordinatorHarness : IDisposable
 
     public ConnectHistory History { get; }
 
-    public FixOfferTracker FixOffer { get; } = new();
+    public FixOfferTracker FixOffer { get; }
 
     public ManualUiContext Ui { get; }
 

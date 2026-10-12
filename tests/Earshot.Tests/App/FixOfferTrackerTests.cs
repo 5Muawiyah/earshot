@@ -20,6 +20,44 @@ public sealed class FixOfferTrackerTests
     }
 
     [TestMethod]
+    public void ThreeUnknownInARowRaiseTheOfferOnTheThirdAndTwoDoNot()
+    {
+        var t = new FixOfferTracker();
+
+        Assert.IsFalse(Note(t, FailureClass.Unknown));
+        Assert.IsFalse(Note(t, FailureClass.Unknown));
+        Assert.IsTrue(Note(t, FailureClass.Unknown));
+        Assert.AreEqual(0, t.Consecutive);
+    }
+
+    [TestMethod]
+    public void TwoPcSideStillRaiseItAtTwoAndAnUnknownBetweenThemDoesNotDelayIt()
+    {
+        var t = new FixOfferTracker();
+
+        Assert.IsFalse(Note(t, FailureClass.PcSide));
+        Assert.IsTrue(Note(t, FailureClass.PcSide));
+
+        Assert.IsFalse(Note(t, FailureClass.PcSide));
+        Assert.IsFalse(Note(t, FailureClass.Unknown));
+        Assert.IsTrue(Note(t, FailureClass.PcSide), "Three counted failures, two of them known to be this PC's.");
+    }
+
+    [TestMethod]
+    public void ASuccessAndTheAirPodsSideLeaveTheUnknownCountAsTheyDoThePcSideCount()
+    {
+        var t = new FixOfferTracker();
+        Note(t, FailureClass.Unknown);
+        Note(t, FailureClass.Unknown);
+        Assert.IsFalse(Note(t, FailureClass.DeviceSide), "The AirPods' side neither counts nor resets.");
+        Assert.AreEqual(2, t.Consecutive);
+
+        Assert.IsFalse(Note(t, FailureClass.None, success: true));
+        Assert.IsFalse(Note(t, FailureClass.Unknown));
+        Assert.IsFalse(Note(t, FailureClass.Unknown));
+    }
+
+    [TestMethod]
     public void PcSideSuccessPcSideGivesNone()
     {
         var t = new FixOfferTracker();
