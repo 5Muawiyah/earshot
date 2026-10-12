@@ -36,14 +36,18 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 //      has stopped (and its process has gone) the folder can be deleted now instead of at the next restart;
 //   1. read %ProgramData%\Earshot's security back; a folder that fails the check is not trusted, so its
 //      files are not read, no node or service is changed from them, and the folder is not deleted;
-//   2. enable every target node that is disabled or still carries the persistent disable flag, using the
-//      identity in device.json;
+//   2. put back every target node that is disabled or still carries the persistent disable flag: enable it when it is in
+//      the tree, clear the flag when it has left the tree. The targets are the identity in device.json; when there is none,
+//      the AirPods Windows knows by the identity rule, but only when Earshot left a footprint on this machine (files, tasks,
+//      the hand-back service, the install folder), only the one pair when several are paired and the user chose it, and
+//      only ever to restore, never to disable;
 //   3. re-enable the Bluetooth services protection.json lists (the protection feature's hook);
 //      steps 2 and 3 run inside the machine-wide gate run lock and the device change lock, so they never
 //      overlap a gate run, a node change or a service change; without both locks neither step runs;
 //   4. once both finished, and still inside both locks, delete device.json, config.json, protection.json and
 //      protection-intent.json, so no later gate run has an identity or a setting to act on;
-//   5. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder. A
+//   5. delete \Earshot\Gate, \Earshot\Protect, \Earshot\BootBlock, anything else in \Earshot, and the folder, and the
+//      first version's \AirPodsGate when it runs exactly the installed Earshot.exe. A
 //      shut down that starts during the uninstall finds the service already gone; and were it still to come, it reads the
 //      same run lock as every elevated run, which this uninstall holds until the machine folder is gone, so it would find
 //      it held, or find no config.json, and change nothing;
@@ -52,7 +56,8 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 //      folder (still protected) is kept with those two files and everything else in it is removed, and
 //      uninstall can be run again;
 //   7. remove %ProgramFiles%\Earshot after the same kind of check, or schedule it for the next restart when
-//      it is in use (for example when uninstall runs from that copy).
+//      it is in use (for example when uninstall runs from that copy);
+//   8. remove the Installed apps entry (RemoveInstalledAppsEntry, once the install side writes one).
 // The gate run lock is held from before device.json is read until step 6 has finished. A gate run that was
 // already waiting for it (a block from the tray, the session-end block, the boot block or a protect verb) gets
 // in only once the records and the folder are gone, so it changes nothing, and it can never undo the restore
@@ -64,7 +69,7 @@ internal sealed class MoveFileRebootDelete : IRebootDelete
 // user. The Open on startup value is the tray's and is not touched here: the owner turns it off in Earshot first
 // (Program.RunUninstall logs this), and the tray removes one left behind whose program is gone when it next starts
 // with the setting off.
-internal sealed class UninstallActions
+internal sealed partial class UninstallActions
 {
     private readonly InstallLayout _layout;
     private readonly IFolderSecurity _folders;
@@ -82,6 +87,13 @@ internal sealed class UninstallActions
 
     private readonly IBluetoothServiceApi? _bluetooth;
     private readonly IServiceControl? _service;
+
+    // The report of the current run, whether the hand-back service was registered when the run began, and what the caller
+    // knows that this elevated run cannot read.
+    private UninstallReportBuilder _report = new();
+    private bool _serviceWasRegistered;
+
+    internal UninstallOptions Options { get; init; } = new();
 
     // The files kept when a node or a service could not be restored.
     internal static readonly IReadOnlySet<string> KeptRecords =
@@ -130,18 +142,25 @@ internal sealed class UninstallActions
     internal IServiceControl? Service => _service;
 
     // As in install, an unexpected failure is logged and returned with the steps taken so far.
-    public InstallResult Run()
+    public InstallResult Run() => RunWithReport().Result;
+
+    // Run, with the plain-words report of what was put back and what could not be.
+    public UninstallRun RunWithReport()
     {
+        _report = new UninstallReportBuilder();
+        _prototype = null;
+        _serviceWasRegistered = false;
         var steps = new List<StepOutcome>();
         try
         {
-            return RunSteps(steps);
+            InstallResult result = RunSteps(steps);
+            return new UninstallRun(result, _report.Build());
         }
         catch (Exception ex)
         {
             steps.Add(ElevatedFailure.Step("uninstall", ex));
             _log.Error("uninstall stopped with " + ex.GetType().Name + " after " + steps.Count + " steps.", ex);
-            return new InstallResult(GateExitCode.Failed, steps);
+            return new UninstallRun(new InstallResult(GateExitCode.Failed, steps), _report.Build());
         }
     }
 
@@ -149,7 +168,9 @@ internal sealed class UninstallActions
     {
         // First of all, so nothing can block again what the steps below enable. A service that will not stop is still
         // deleted and goes at the next restart, and makes the result partial.
+        int serviceFrom = steps.Count;
         bool complete = RemoveService(steps);
+        _serviceWasRegistered = steps.Skip(serviceFrom).Any(s => s.Step == ServiceSteps.Delete && s.Code != NativeCodes.NotAttempted);
         string machine = _layout.MachineFolder;
         bool machineExists = Directory.Exists(machine) || File.Exists(machine);
         bool machineTrusted = machineExists &&
@@ -169,6 +190,10 @@ internal sealed class UninstallActions
                     machine + " is not safe, so device.json and protection.json were not used and no node or service was changed."));
                 complete = false;
             }
+            else
+            {
+                complete &= RestoreWithoutMachineFolder(machine, steps);
+            }
 
             complete &= RemoveTasks(steps);
 
@@ -180,9 +205,37 @@ internal sealed class UninstallActions
         }
 
         complete &= RemoveInstallFolder(steps);
+        complete &= RemoveEntry(steps);
 
         _log.Info("uninstall: " + (complete ? "complete" : "partial") + ".");
         return new InstallResult(complete ? GateExitCode.Success : GateExitCode.Partial, steps);
+    }
+
+    // The Installed apps entry is removed by the part of this class that knows how it is written; the call is dropped when
+    // there is none. Any step it adds that failed makes the result partial.
+    partial void RemoveInstalledAppsEntry(IList<StepOutcome> steps);
+
+    private bool RemoveEntry(List<StepOutcome> steps)
+    {
+        int from = steps.Count;
+        RemoveInstalledAppsEntry(steps);
+        return steps.Skip(from).All(s => s.Ok);
+    }
+
+    // No machine folder means no device.json, but the AirPods nodes may still carry what an earlier version did to them
+    // (the folder is removed by a Remove device in Windows, a manual clean-up, or an uninstall that finished the folder and
+    // not the nodes). The gate run lock is a named mutex, not a file in that folder, so it can still be held; the device
+    // change lock is a file in the folder, and with the folder gone nothing else is changing nodes.
+    private bool RestoreWithoutMachineFolder(string machine, List<StepOutcome> steps)
+    {
+        using IDisposable? running = _runLock.TryEnter(_lockWait, steps);
+        if (running is null)
+        {
+            steps.Add(StepOutcomes.NotAttempted("allow-nodes", "Another Earshot run held the gate run lock, so no node was changed. Run uninstall again."));
+            return false;
+        }
+
+        return RestoreWithoutRecords(machine, steps);
     }
 
     // Steps 2 to 6 for a machine folder whose security passed the check. runLockHeld: the gate run lock was
@@ -233,6 +286,21 @@ internal sealed class UninstallActions
         }
         else
         {
+            if (runLockHeld)
+            {
+                using DeviceChangeLock? changing = DeviceChangeLock.TryAcquire(machine, DeviceChangeLockAccess.For(_nodes), _lockWait, _wait, steps);
+                if (changing is null)
+                {
+                    steps.Add(StepOutcomes.NotAttempted("allow-nodes",
+                        "The Earshot change locks could not be taken, so no node was changed. Run uninstall again."));
+                    nodesRestored = false;
+                }
+                else
+                {
+                    nodesRestored = RestoreWithoutRecords(machine, steps);
+                }
+            }
+
             servicesRestored = ProtectionRecordIsEmpty(store, steps);
             if (!servicesRestored)
             {
@@ -316,15 +384,21 @@ internal sealed class UninstallActions
             return scan.Unreadable.Count == 0;
         }
 
-        NodeChangeSummary summary = GateActions.ApplyAllow(_nodes, scan.Targets, steps);
-        return summary.Failed == 0 && scan.Unreadable.Count == 0;
+        return RestoreNodes(scan.Targets, steps) && scan.Unreadable.Count == 0;
     }
 
     private bool RestoreProtection(DeviceIdentity identity, GateStore store, List<StepOutcome> steps)
     {
         var ctx = new GateRunContext("uninstall", Guid.NewGuid().ToString("N"), identity, _nodes, store, _log, steps, _bluetooth);
+        int from = steps.Count;
         if (GateActions.TryRestoreProtection(ctx))
         {
+            if (ctx.Outcome != GateExitCode.Success && PairingIsGone(identity, store, steps, from))
+            {
+                return true;
+            }
+
+            ReportServices(steps, from);
             return ctx.Outcome == GateExitCode.Success;
         }
 
@@ -335,6 +409,86 @@ internal sealed class UninstallActions
 
         steps.Add(StepOutcomes.NotAvailable("protection-restore", "This build cannot re-enable the services in protection.json."));
         return false;
+    }
+
+    // The services Earshot turned off belong to a pairing, and go with it when the device is removed from Windows. When
+    // the device is not paired (the paired list, read in full, does not have it) or the call itself answered
+    // ERROR_NOT_FOUND for every service it failed on, there is nothing left to turn on: the list is emptied and the step
+    // says why, with the code. A failure of any other kind is not this, and the record stays.
+    // https://learn.microsoft.com/en-us/windows/win32/api/bluetoothapis/nf-bluetoothapis-bluetoothsetservicestate
+    private bool PairingIsGone(DeviceIdentity identity, GateStore store, List<StepOutcome> steps, int from)
+    {
+        GateRead<ProtectionRecord> record = store.ReadProtection();
+        if (!record.IsOk || record.Value is not { DisabledServices.Count: > 0 })
+        {
+            return false;
+        }
+
+        List<int> failedCalls = [];
+        for (int i = from; i < steps.Count; i++)
+        {
+            if (steps[i].Step.StartsWith("bt-service-enable:", StringComparison.Ordinal) && !steps[i].Ok)
+            {
+                failedCalls.Add(i);
+            }
+        }
+
+        bool callsNotFound = failedCalls.Count > 0 && failedCalls.All(i => steps[i].Code == (int)BluetoothApis.ERROR_NOT_FOUND);
+        bool unpaired = false;
+        if (!callsNotFound && _bluetooth is not null)
+        {
+            BluetoothDeviceEntry? paired = BluetoothDeviceLookup.Find(_bluetooth, identity.Address, new List<StepOutcome>(), out bool listFailed);
+            unpaired = paired is null && !listFailed;
+        }
+
+        if (!callsNotFound && !unpaired)
+        {
+            return false;
+        }
+
+        foreach (int i in failedCalls)
+        {
+            steps[i] = steps[i] with { Ok = true, Detail = steps[i].Detail + " The device is no longer paired, so there was nothing to turn back on." };
+        }
+
+        StepOutcome emptied = store.WriteProtection(new ProtectionRecord());
+        steps.Add(emptied);
+        if (!emptied.Ok)
+        {
+            return false;
+        }
+
+        steps.Add(StepOutcomes.FromWin32("protection-restore", BluetoothApis.ERROR_NOT_FOUND,
+            "The AirPods are no longer paired, so the services Earshot turned off went with the pairing and there is nothing to turn back on.", ok: true));
+        _report.Note("The AirPods are no longer paired, so there was nothing to turn back on for call audio.");
+        return true;
+    }
+
+    // What the services step did, in plain words: call audio turned back on, or not.
+    private void ReportServices(List<StepOutcome> steps, int from)
+    {
+        bool on = false;
+        bool failed = false;
+        for (int i = from; i < steps.Count; i++)
+        {
+            if (!steps[i].Step.StartsWith("bt-service-enable:", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            on |= steps[i].Ok && steps[i].Code == 0;
+            failed |= !steps[i].Ok;
+        }
+
+        if (on)
+        {
+            _report.PutBack("Call audio was turned back on.");
+        }
+
+        if (failed)
+        {
+            _report.NotPutBack("Call audio could not be turned back on.");
+        }
     }
 
     // True when protection.json is missing or lists no service. An unreadable or invalid file is not empty: it
@@ -409,12 +563,12 @@ internal sealed class UninstallActions
 
     private bool RemoveTasks(List<StepOutcome> steps)
     {
-        bool ok = true;
+        bool ok = RemovePrototypeTask(steps);
         int hr = _tasks.ListTasks(TaskPlan.FolderPath, out IReadOnlyList<string> names);
         if (hr == TaskSchedulerCom.HRESULT_ERROR_FILE_NOT_FOUND)
         {
             steps.Add(StepOutcomes.FromHResult("task-folder-list", hr, "No task folder.", ok: true));
-            return true;
+            return ok;
         }
 
         steps.Add(StepOutcomes.FromHResult("task-folder-list", hr));
