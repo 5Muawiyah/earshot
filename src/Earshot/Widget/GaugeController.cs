@@ -82,9 +82,13 @@ internal readonly record struct GaugeControllerSettings(bool Enabled, bool LeftC
 // whenever the gauge leaves Shown for any reason. Checked on every OnLayout call rather than a separate
 // timer, so tests drive it with ManualTime instead of a real clock.
 //
-// A failed read keeps the gauge where it was. Only "no Shell_TrayWnd" is a definite sign that there is no
-// bar to sit on; any other failure (a UI Automation read that timed out while the shell was busy, a thrown
-// read) counts, and the gauge hides after ReadFailureTolerance failures in a row.
+// One read of the taskbar decides nothing about a gauge that is on screen (GaugeStability). A hide for no room, no taskbar or a
+// failed read, and a move to another position, each wait until the same verdict has been read ReadFailureTolerance times in a
+// row over the verdict's window; a gauge hidden for no room waits for a shorter run before it is shown again. While a verdict
+// is pending the gauge stays where it is, and the first read that disagrees with the gauge asks (requestRead) for two more, so
+// the answer comes inside the window and not at the next poll. A read that agrees with the gauge ends whatever was pending.
+// Not readings of the bar, and so immediate: a full-screen notice or state, a covered bar, a window call that failed, the setting
+// off, and a change of the Gauge position or of the display's scale.
 //
 // Being put back on top: the gauge is the taskbar's owned window (EnsureOwner), and an owned window is always above its
 // owner in the z-order, so wherever the shell raises the taskbar the system raises the gauge with it, in the same step
@@ -108,9 +112,8 @@ internal sealed class GaugeController : IDisposable
 {
     public static readonly TimeSpan IconHideDebounce = TimeSpan.FromSeconds(2);
 
-    // Three is one poll interval more than the longest read seen while a full-screen state changed (606 ms
-    // in the field log), and few enough that a real loss is noticed in about three seconds.
-    public const int ReadFailureTolerance = 3;
+    // How many reads in a row must agree before a hide, whatever the cause (GaugeStability.HideReads).
+    public const int ReadFailureTolerance = GaugeStability.HideReads;
 
     // The gap between the two looks at what is over the gauge after an event.
     public static readonly TimeSpan SecondLookDelay = TimeSpan.FromMilliseconds(250);
@@ -158,6 +161,15 @@ internal sealed class GaugeController : IDisposable
     private readonly IGaugeCoverProbe? _coverProbe;
     private readonly Action<Action> _uiPost;
     private readonly Func<ForegroundWindowReading?>? _foregroundProbe;
+    private readonly Action? _requestRead;
+
+    // The one verdict that is waiting to hold, if any (see GaugeStability), and what the gauge on screen was placed with.
+    private readonly HeldVerdict<Verdict> _gate;
+    private ITimer[]? _confirmTimers;
+    private int _gateEpoch;
+    private string _gateWhat = "";
+    private GaugePosition _placedPosition;
+    private int _placedDpi;
 
     // The display the last layout was read for, and how many displays there were: what a full-screen signal is
     // judged against. One display until a layout says otherwise, so a signal that comes first hides as it always did.
@@ -195,12 +207,22 @@ internal sealed class GaugeController : IDisposable
 
     private readonly record struct CoverTrigger(CoverTriggerKind Kind, string Class);
 
+    // What a read says the gauge should do, for the verdicts that have to hold first. Which no-room failure it was, or which
+    // failing step, is only for the log, so a change of code inside one run of the same kind does not start it again.
+    private enum VerdictKind { Hide, Move, ShowBack }
+
+    private readonly record struct Verdict(VerdictKind Kind, HiddenReason Reason, Rectangle Bounds);
+
+    private enum Held { Started, Waiting, Settled }
+
     // coverProbe: what is at the gauge's centre; null means the foreground-change path has nothing to look
     // with and does nothing (the poll still works). uiPost: how a timer callback, which runs on a pool
     // thread, gets back to the UI thread; null runs it where it is called from (a test's manual clock).
+    // requestRead: asks for a read of the taskbar now (the watcher's Poke), called on the UI thread for the confirming reads of
+    // a verdict that is waiting to hold; null asks for none and leaves the verdict to the ordinary poll.
     public GaugeController(
         Func<IGaugeSurface> createSurface, ITrayIconVisibility trayIcon, Func<GaugeControllerSettings> settings, ILog log, TimeProvider time,
-        IGaugeCoverProbe? coverProbe = null, Action<Action>? uiPost = null, Func<ForegroundWindowReading?>? foregroundProbe = null)
+        IGaugeCoverProbe? coverProbe = null, Action<Action>? uiPost = null, Func<ForegroundWindowReading?>? foregroundProbe = null, Action? requestRead = null)
     {
         ArgumentNullException.ThrowIfNull(createSurface);
         ArgumentNullException.ThrowIfNull(trayIcon);
@@ -215,6 +237,8 @@ internal sealed class GaugeController : IDisposable
         _coverProbe = coverProbe;
         _uiPost = uiPost ?? (static action => action());
         _foregroundProbe = foregroundProbe;
+        _requestRead = requestRead;
+        _gate = new HeldVerdict<Verdict>(time, GaugeStability.HideWindow, GaugeStability.HideReads);
     }
 
     public GaugeState State => _state;
@@ -292,33 +316,219 @@ internal sealed class GaugeController : IDisposable
         PlacementResult placed = GaugePlacement.Place(layout, gauge, settings.Position);
         if (placed.Bounds is not { } bounds)
         {
-            if (!(_state is GaugeState.Hidden { Reason: HiddenReason.NoFreeSpace } && _lastHideKey == "NoFreeSpace " + placed.Failure))
-            {
-                _log.Write(LogLevel.Debug, GaugeEventLog.PlacementFailed(placed.Failure));
-            }
-
-            TransitionHidden(HiddenReason.NoFreeSpace, "NoFreeSpace " + placed.Failure, GaugeEventLog.HiddenNoFreeSpace(), outcome: null);
+            OnNoPlacement(placed.Failure);
             return;
         }
 
-        ShowOrMove(bounds, layout);
+        if (!DecideBounds(ref bounds, layout, settings))
+        {
+            return;
+        }
+
+        ShowOrMove(bounds, layout, settings.Position);
         CheckIconDebounce();
     }
 
-    // A read failed. No Shell_TrayWnd is definite: there is no bar to sit on. Anything else is counted, and
-    // while the gauge is on screen it stays where it is until ReadFailureTolerance failures in a row.
-    private void OnFailedRead(TaskbarReadFailure failure)
+    // No room. A gauge on screen waits for the verdict to hold; one that is not on screen has nothing to keep, so this says so now.
+    private void OnNoPlacement(PlacementFailure failure)
     {
-        if (failure.Step == TaskbarReadFailureStep.NoTaskbar)
+        string key = "NoFreeSpace " + failure;
+        if (_state is GaugeState.Shown shown)
         {
-            TransitionHidden(HiddenReason.NoTaskbar, "NoTaskbar", GaugeEventLog.HiddenNoTaskbar(), failure.Outcome);
+            Held held = Observe(new Verdict(VerdictKind.Hide, HiddenReason.NoFreeSpace, Rectangle.Empty), GaugeStability.HideWindow, GaugeStability.HideReads, failure.ToString());
+            if (held == Held.Started)
+            {
+                _log.Write(LogLevel.Debug, GaugeEventLog.PlacementFailed(failure));
+                _log.Write(LogLevel.Debug, GaugeEventLog.KeptPendingHide(shown.Bounds, failure.ToString(), GaugeStability.HideWindow));
+            }
+
+            if (held != Held.Settled)
+            {
+                return;
+            }
+
+            ClearGate(lapsed: false);
+        }
+        else
+        {
+            // A room verdict that was waiting to show the gauge again did not last.
+            ClearGate(lapsed: true);
+            if (!(_state is GaugeState.Hidden { Reason: HiddenReason.NoFreeSpace } && _lastHideKey == key))
+            {
+                _log.Write(LogLevel.Debug, GaugeEventLog.PlacementFailed(failure));
+            }
+        }
+
+        TransitionHidden(HiddenReason.NoFreeSpace, key, GaugeEventLog.HiddenNoFreeSpace(), outcome: null);
+    }
+
+    // The read found room at these bounds. What the gauge does about it depends on where it is: shown where the read says, shown
+    // somewhere else, hidden because there was no room, or hidden for another reason or not yet shown. Returns false while the gauge
+    // is to stay hidden. Otherwise bounds is where the gauge is to be: its own, while a move is waiting to hold.
+    private bool DecideBounds(ref Rectangle bounds, TaskbarLayout layout, GaugeControllerSettings settings)
+    {
+        switch (_state)
+        {
+            case GaugeState.Shown shown when shown.Bounds == bounds:
+                ClearGate(lapsed: true);
+                _placedPosition = settings.Position;
+                _placedDpi = layout.Dpi;
+                return true;
+
+            case GaugeState.Shown shown:
+                // The setting or the display's scale changed: not a reading of the bar, so the gauge goes there now.
+                if (_placedPosition != settings.Position || _placedDpi != layout.Dpi)
+                {
+                    ClearGate(lapsed: false);
+                    return true;
+                }
+
+                Held held = Observe(
+                    new Verdict(VerdictKind.Move, HiddenReason.NoFreeSpace, bounds), GaugeStability.MoveWindow, GaugeStability.MoveReads,
+                    "a move to " + GaugeEventLog.Rect(bounds));
+                if (held == Held.Started)
+                {
+                    _log.Write(LogLevel.Debug, GaugeEventLog.KeptPendingMove(shown.Bounds, bounds, GaugeStability.MoveWindow));
+                }
+
+                if (held == Held.Settled)
+                {
+                    ClearGate(lapsed: false);
+                    return true;
+                }
+
+                bounds = shown.Bounds;
+                return true;
+
+            case GaugeState.Hidden { Reason: HiddenReason.NoFreeSpace }:
+                Held back = Observe(
+                    new Verdict(VerdictKind.ShowBack, HiddenReason.NoFreeSpace, Rectangle.Empty), GaugeStability.RoomBackWindow, GaugeStability.RoomBackReads, "room");
+                if (back == Held.Started)
+                {
+                    _log.Write(LogLevel.Debug, GaugeEventLog.HeldBackShow(GaugeStability.RoomBackWindow));
+                }
+
+                if (back != Held.Settled)
+                {
+                    return false;
+                }
+
+                ClearGate(lapsed: false);
+                return true;
+
+            default:
+                return true;
+        }
+    }
+
+    // Records that this read says this verdict, and whether it has now held. The first read of a verdict arms the confirming reads;
+    // a different verdict from the one waiting ends that one (it did not last) and starts this.
+    private Held Observe(Verdict verdict, TimeSpan window, int reads, string what)
+    {
+        if (_gate.Pending && !EqualityComparer<Verdict>.Default.Equals(_gate.Candidate, verdict))
+        {
+            ClearGate(lapsed: true);
+        }
+
+        bool starting = !_gate.Pending;
+        bool held = _gate.Observe(verdict, window, reads);
+        if (starting)
+        {
+            _gateWhat = what;
+            ArmConfirmReads();
+            return held ? Held.Settled : Held.Started;
+        }
+
+        return held ? Held.Settled : Held.Waiting;
+    }
+
+    // Ends whatever is waiting. lapsed: the gauge stays as it is because the bar stopped saying otherwise, and the log says so.
+    private void ClearGate(bool lapsed)
+    {
+        if (_gate.Pending && lapsed)
+        {
+            _log.Write(
+                LogLevel.Debug,
+                GaugeEventLog.PendingLapsed(_gateWhat, _gate.Count, _gate.Span, hidden: _gate.Candidate.Kind == VerdictKind.ShowBack));
+        }
+
+        _gate.Clear();
+        DisposeConfirmTimers();
+    }
+
+    // Two more reads, at ConfirmReadDelays from now, so the verdict is settled inside its window. Each asks through the post, as a
+    // timer's callback runs on a pool thread; one that arrives after its verdict has ended does nothing.
+    private void ArmConfirmReads()
+    {
+        DisposeConfirmTimers();
+        if (_requestRead is null)
+        {
             return;
         }
 
-        _consecutiveReadFailures++;
-        if (_state is GaugeState.Shown shown && _consecutiveReadFailures < ReadFailureTolerance)
+        int epoch = _gateEpoch;
+        var timers = new ITimer[GaugeStability.ConfirmReadDelays.Length];
+        for (int i = 0; i < timers.Length; i++)
         {
-            _log.Write(LogLevel.Debug, GaugeEventLog.KeptAfterFailedRead(shown.Bounds, failure.Step.ToString(), failure.Outcome, _consecutiveReadFailures, ReadFailureTolerance));
+            timers[i] = _time.CreateTimer(_ => _uiPost(() => OnConfirmDue(epoch)), null, GaugeStability.ConfirmReadDelays[i], Timeout.InfiniteTimeSpan);
+        }
+
+        _confirmTimers = timers;
+    }
+
+    private void OnConfirmDue(int epoch)
+    {
+        if (_disposed || epoch != _gateEpoch || !_gate.Pending)
+        {
+            return;
+        }
+
+        _requestRead?.Invoke();
+    }
+
+    private void DisposeConfirmTimers()
+    {
+        _gateEpoch++;
+        if (_confirmTimers is not { } timers)
+        {
+            return;
+        }
+
+        _confirmTimers = null;
+        foreach (ITimer timer in timers)
+        {
+            timer.Dispose();
+        }
+    }
+
+    // A read failed. A gauge on screen stays where it is until the same failure has held (GaugeStability.HideWindow, HideReads): a
+    // bar Explorer is laying out again, or a UI Automation read that timed out while it was busy, passes in a second or two. No
+    // Shell_TrayWnd is no different in that: it is missing for the same moment. A gauge that is not on screen has nothing to keep.
+    private void OnFailedRead(TaskbarReadFailure failure)
+    {
+        bool noTaskbar = failure.Step == TaskbarReadFailureStep.NoTaskbar;
+        _consecutiveReadFailures++;
+        if (_state is GaugeState.Shown shown)
+        {
+            var verdict = new Verdict(VerdictKind.Hide, noTaskbar ? HiddenReason.NoTaskbar : HiddenReason.ReadFailed, Rectangle.Empty);
+            string what = noTaskbar ? "NoTaskbar" : "ReadFailed " + failure.Step;
+            Held held = Observe(verdict, GaugeStability.HideWindow, GaugeStability.HideReads, what);
+            if (held == Held.Started)
+            {
+                _log.Write(LogLevel.Debug, GaugeEventLog.KeptAfterFailedRead(shown.Bounds, failure.Step.ToString(), failure.Outcome, _consecutiveReadFailures, ReadFailureTolerance));
+            }
+
+            if (held != Held.Settled)
+            {
+                return;
+            }
+
+            ClearGate(lapsed: false);
+        }
+
+        if (noTaskbar)
+        {
+            TransitionHidden(HiddenReason.NoTaskbar, "NoTaskbar", GaugeEventLog.HiddenNoTaskbar(), failure.Outcome);
             return;
         }
 
@@ -503,6 +713,7 @@ internal sealed class GaugeController : IDisposable
         _secondLook?.Dispose();
         _secondLook = null;
         StopFastChecks();
+        ClearGate(lapsed: false);
         DisposeSurface();
     }
 
@@ -701,7 +912,7 @@ internal sealed class GaugeController : IDisposable
         _log.Warn(GaugeEventLog.OwnerFailed(outcome));
     }
 
-    private void ShowOrMove(Rectangle bounds, TaskbarLayout layout)
+    private void ShowOrMove(Rectangle bounds, TaskbarLayout layout, GaugePosition position)
     {
         IGaugeSurface surface = EnsureSurface();
         EnsureOwner(surface, layout);
@@ -719,6 +930,8 @@ internal sealed class GaugeController : IDisposable
             }
 
             _log.Info(GaugeEventLog.Shown(bounds, reason));
+            _placedPosition = position;
+            _placedDpi = layout.Dpi;
         }
         else if (previous != bounds)
         {
@@ -730,6 +943,8 @@ internal sealed class GaugeController : IDisposable
             }
 
             _log.Info(GaugeEventLog.Moved(bounds));
+            _placedPosition = position;
+            _placedDpi = layout.Dpi;
         }
         else if (layout.GaugeCentreIsGauge == false && layout.WindowAtGaugeCentre is not { BelongsToThisProcess: true })
         {
@@ -823,6 +1038,7 @@ internal sealed class GaugeController : IDisposable
         _iconHiddenForShown = false;
         _trayIcon.Visible = true;
         StopFastChecks();
+        ClearGate(lapsed: false);
         _unheldRaises = 0;
         _surface?.HideWindow();
         if (changed)
@@ -842,6 +1058,7 @@ internal sealed class GaugeController : IDisposable
         _consecutiveReadFailures = 0;
         _trayIcon.Visible = true;
         StopFastChecks();
+        ClearGate(lapsed: false);
         _unheldRaises = 0;
         DisposeSurface();
         if (!wasOff)

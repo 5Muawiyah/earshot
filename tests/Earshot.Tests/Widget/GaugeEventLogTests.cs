@@ -213,8 +213,13 @@ public sealed class GaugeEventLogTests
         var rig = new Rig();
         rig.Layout(FreeSpace());
 
-        rig.Controller.OnLayout(ITaskbarReader.Result.Fail(new TaskbarReadFailure(
-            TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false))));
+        for (int i = 0; i < 3; i++)
+        {
+            rig.Controller.OnLayout(ITaskbarReader.Result.Fail(new TaskbarReadFailure(
+                TaskbarReadFailureStep.NoTaskbar, StepOutcomes.FromWin32("find-window:Shell_TrayWnd", 0, ok: false))));
+            rig.Time.Advance(TimeSpan.FromSeconds(2.5));
+        }
+
         rig.Layout(FreeSpace());
 
         Assert.AreEqual("Gauge hidden (NoTaskbar).", rig.OnlyLine("Gauge hidden"));
@@ -229,7 +234,12 @@ public sealed class GaugeEventLogTests
         TaskbarLayout tight = FreeSpace() with { Occupied = [Start, new Rectangle(807, 1032, 813, 48), new Rectangle(1678, 1032, 242, 48)] };
 
         rig.Layout(tight);
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
         rig.Layout(tight);
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
+        rig.Layout(tight);
+        rig.Layout(FreeSpace());
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
         rig.Layout(FreeSpace());
 
         Assert.AreEqual("Gauge hidden (NoFreeSpace).", rig.OnlyLine("Gauge hidden"));
@@ -269,7 +279,12 @@ public sealed class GaugeEventLogTests
         var rig = new Rig { Position = GaugePosition.NextToApps };
         rig.Layout(FreeSpace());
 
-        rig.Layout(FreeSpace() with { Occupied = [Start, new Rectangle(807, 1032, 88, 48), new Rectangle(1678, 1032, 242, 48)] });
+        TaskbarLayout moved = FreeSpace() with { Occupied = [Start, new Rectangle(807, 1032, 88, 48), new Rectangle(1678, 1032, 242, 48)] };
+        rig.Layout(moved);
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
+        rig.Layout(moved);
+        rig.Time.Advance(TimeSpan.FromSeconds(2.5));
+        rig.Layout(moved);
 
         StringAssert.StartsWith(rig.OnlyLine("Gauge moved"), "Gauge moved to ");
     }

@@ -29,8 +29,9 @@ public sealed class TrayWidgetWiringTests
     }
 
     // The gauge is drawn the moment a setting that changes how it is drawn is saved, not when the taskbar poll next answers.
-    // The next read is made to find no taskbar before the setting is saved, so the poke the same change makes brings back a
-    // layout that hides the gauge: whatever is drawn after the save was drawn by the change itself, before that layout came.
+    // The next read is made to find the bar covered (a hide that is not held back) before the setting is saved, so the poke the same
+    // change makes brings back a layout that hides the gauge: whatever is drawn after the save was drawn by the change itself,
+    // before that layout came.
     [TestMethod]
     public void ASettingThatChangesHowTheGaugeIsDrawnRedrawsItAtOnceNotAtTheNextPoll()
     {
@@ -48,8 +49,7 @@ public sealed class TrayWidgetWiringTests
             Assert.IsNotEmpty(surface.Renders, "Sanity: the gauge was drawn when it was shown.");
             int before = surface.Renders.Count;
 
-            tray.LastTaskbarReader.SetNextResult(ITaskbarReader.Result.Fail(
-                new TaskbarReadFailure(TaskbarReadFailureStep.NoTaskbar, new StepOutcome("fake", false, 0, "S_OK", null))));
+            tray.LastTaskbarReader.SetNextResult(ITaskbarReader.Result.Ok(FreeSpaceLayout() with { Covered = true }));
             tray.Settings.Update(s => s.Widget = s.Widget with { GaugeOrder = GaugeOrder.NumberRingBolt });
             tray.PumpUntilIdle();
 

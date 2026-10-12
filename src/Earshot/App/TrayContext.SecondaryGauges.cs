@@ -44,6 +44,30 @@ internal sealed partial class TrayContext
         _secondaryGauges.Reconcile(wanted);
     }
 
+    // Explorer created its taskbar again, or the displays changed: the set looks now and again a moment later, since the new
+    // secondary taskbar is not there at once. Before the set exists, this is the ordinary reconcile.
+    private void SecondaryGaugesTaskbarCreated()
+    {
+        if (_secondaryGauges is { } set)
+        {
+            set.OnTaskbarCreated();
+            return;
+        }
+
+        ReconcileSecondaryGauges();
+    }
+
+    private void SecondaryGaugesDisplayChanged()
+    {
+        if (_secondaryGauges is { } set)
+        {
+            set.OnDisplayChanged();
+            return;
+        }
+
+        ReconcileSecondaryGauges();
+    }
+
     private SecondaryGaugeSet BuildSecondaryGauges(TrayIconVotes votes)
     {
         var parts = new SecondaryGaugeParts(
