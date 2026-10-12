@@ -66,10 +66,10 @@ internal sealed partial class BlockCoordinator
     // What a connect knows as it goes, for the report and the history.
     private sealed class ConnectAttempt
     {
-        public ConnectAttempt(TimeProvider time, string startState)
+        public ConnectAttempt(TimeProvider time, string startState, DateTimeOffset started)
         {
             Time = time;
-            Started = time.GetUtcNow();
+            Started = started;
             StartState = startState;
         }
 
@@ -99,10 +99,10 @@ internal sealed partial class BlockCoordinator
         public bool RoomToRetry => Remaining >= RetryRoom;
     }
 
-    private async Task<ToggleReport> ConnectCoreAsync(ToggleRequest request, CancellationToken ct)
+    private async Task<ToggleReport> ConnectCoreAsync(ToggleRequest request, DateTimeOffset accepted, CancellationToken ct)
     {
-        var attempt = new ConnectAttempt(_time, StartStateOf(FreshStatus ?? _blockStatus));
-        using var limit = new CancellationTokenSource(ConnectBudget, _time);
+        var attempt = new ConnectAttempt(_time, StartStateOf(FreshStatus ?? _blockStatus), accepted);
+        using var limit = new CancellationTokenSource(attempt.Remaining, _time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
         ToggleReport report = await ConnectBodyAsync(request, attempt, linked.Token, ct, limit.Token);
         return SealConnect(request, attempt, report);
@@ -209,7 +209,7 @@ internal sealed partial class BlockCoordinator
             if (result.Outcome == ConnectOutcome.NodesBlocked)
             {
                 attempt.Path = "allow-first";
-                (ToggleReport? early, ConnectResult? afterAllow) = await AllowThenConnectAsync(request, attempt, cleanup, steps, linked, ct);
+                (ToggleReport? early, ConnectResult? afterAllow) = await AllowThenConnectAsync(request, attempt, cleanup, steps, linked, ct, limitToken);
                 if (early is not null)
                 {
                     return early;
@@ -292,7 +292,8 @@ internal sealed partial class BlockCoordinator
     // Steps 2 of the connect: the allow, the wait for a render endpoint, and the request. Returns a finished report when the
     // connect ended here, otherwise the result of the request after the allow.
     private async Task<(ToggleReport? Early, ConnectResult? Result)> AllowThenConnectAsync(
-        ToggleRequest request, ConnectAttempt attempt, ConnectCleanup cleanup, List<StepOutcome> steps, CancellationToken linked, CancellationToken ct)
+        ToggleRequest request, ConnectAttempt attempt, ConnectCleanup cleanup, List<StepOutcome> steps, CancellationToken linked, CancellationToken ct,
+        CancellationToken limitToken)
     {
         if (PinMayMove)
         {
@@ -303,7 +304,7 @@ internal sealed partial class BlockCoordinator
         }
 
         long mark = request.Timeline?.Mark() ?? -1;
-        BootBlockStatus? status = await ReadBlockStatusAsync(ct);
+        BootBlockStatus? status = await ReadBlockStatusAsync(linked);
         request.Timeline?.Record(SwitchPhase.Status, mark);
         string? refusal = CoordinatorRules.AllowFirstRefusal(status, request.Container);
         if (refusal is not null)
@@ -321,7 +322,7 @@ internal sealed partial class BlockCoordinator
         Progress(request, attempt, AllowingStatus);
         cleanup.AllowIssued = true;
         mark = request.Timeline?.Mark() ?? -1;
-        ControllerResult allow = await SendAllowAsync("allow (connect)", steps);
+        ControllerResult allow = await SendAllowAsync("allow (connect)", steps, limitToken);
         request.Timeline?.Record(SwitchPhase.Allow, mark);
         cleanup.AllowNonce = allow.GateNonce;
         if (IsSessionEndRefusal(allow))
@@ -334,12 +335,18 @@ internal sealed partial class BlockCoordinator
 
         if (allow.Status is OpStatus.Failed or OpStatus.NotAttempted)
         {
+            if (limitToken.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                // The budget ended while the gate's run was waited for: reported as the time limit, like any other wait it cut.
+                throw new OperationCanceledException(limitToken);
+            }
+
             return (await FailAsync(request, attempt, cleanup, steps, ConnectFailureClassifier.AllowFailed(allow), ct), null);
         }
 
         // The nodes are in the tree now, or on their way: from here the wait is for the endpoints, and it is cut by the limit.
         mark = request.Timeline?.Mark() ?? -1;
-        await ReadBlockStatusAsync(ct);
+        await ReadBlockStatusAsync(linked);
         Progress(request, attempt, WaitingStatus);
         bool endpointCame = await WaitForSnapshotAsync(request.Container, CoordinatorRules.RenderEndpointPresent, Shorter(EndpointWait, attempt.Remaining), ct);
         if (!endpointCame && attempt.RoomToRetry)
@@ -448,7 +455,7 @@ internal sealed partial class BlockCoordinator
 
             ct.ThrowIfCancellationRequested();
             ShowCard(request, AllowingStatus);
-            ControllerResult allow = await SendAllowAsync("allow (connect in windows)", steps);
+            ControllerResult allow = await SendAllowAsync("allow (connect in windows)", steps, CancellationToken.None);
             if (IsSessionEndRefusal(allow))
             {
                 return RefusedAtSessionEnd(request, steps);

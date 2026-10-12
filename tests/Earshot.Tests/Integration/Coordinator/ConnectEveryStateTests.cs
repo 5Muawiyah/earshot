@@ -264,6 +264,81 @@ public sealed class ConnectEveryStateTests
     }
 
     [TestMethod]
+    public void AnAllowWhoseGateRunIsSlowIsCutByWhatIsLeftOfTheBudget()
+    {
+        using var h = NodesBlockedAndAway();
+        bool cut = false;
+        h.Block.OnAllow = async ct =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMinutes(1), h.Time, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                cut = true;
+                return ControllerResult.Fail("Stopped waiting for the gate", []);
+            }
+
+            return ControllerResult.Ok("Allowed");
+        };
+
+        ToggleReport report = Await(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)), out TimeSpan elapsed, within: TimeSpan.FromMinutes(2));
+
+        Assert.IsTrue(cut, "The gate run was given a token that the budget ends.");
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        Assert.IsFalse(report.Cancelled, "The budget is a failure, not a cancel by the caller.");
+        Assert.IsLessThanOrEqualTo(Limit + TimeSpan.FromSeconds(1), elapsed);
+    }
+
+    [TestMethod]
+    public void AStatusReadThatStallsIsCutByTheBudgetNotByItsOwnLongerOne()
+    {
+        using var h = NodesBlockedAndAway();
+        h.Block.StatusStalls = true;
+        int before = h.Block.StatusReads;
+
+        Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true));
+        h.Pump();
+        Assert.AreEqual(before + 1, h.Block.StatusReads, "The connect's own read of the nodes is waiting.");
+        Assert.IsFalse(toggle.IsCompleted);
+
+        h.Advance(Limit + TimeSpan.FromSeconds(1));
+
+        Assert.IsLessThan(BlockCoordinator.StatusReadBudget, Limit);
+        Assert.IsTrue(toggle.IsCompleted, "The budget ended the wait for the read; the read's own budget is longer.");
+        Assert.AreEqual(OpStatus.Failed, toggle.GetAwaiter().GetResult().Status);
+    }
+
+    [TestMethod]
+    public void TheBudgetStartsWhenTheConnectIsAskedForSoTimeSpentQueuedCounts()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        h.Hints.Hint = DeviceHint.LidClosed;
+        h.Connection.Connects.Enqueue(async ct =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(12), h.Time, ct);
+            return Results.TimedOut();
+        });
+        h.Connection.Connects.Enqueue(async ct =>
+        {
+            await Task.Delay(TimeSpan.FromMinutes(5), h.Time, ct);
+            return Results.Connected();
+        });
+
+        Task<ToggleReport> first = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true));
+        Task<ToggleReport> second = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true));
+        ToggleReport report = Await(h, second, out TimeSpan elapsed, within: TimeSpan.FromMinutes(2));
+
+        Assert.IsTrue(first.IsCompleted);
+        Assert.AreEqual(OpStatus.Failed, report.Status);
+        Assert.IsLessThanOrEqualTo(Limit + TimeSpan.FromSeconds(1), elapsed, "Twelve seconds of the twenty went to the connect ahead of it.");
+    }
+
+    [TestMethod]
     public void WhenTheAirPodsAreNotHeardTheFailureIsTheDevicesAndNeverOffersFix()
     {
         using var h = new CoordinatorHarness();

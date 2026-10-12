@@ -152,7 +152,12 @@ public sealed class ConnectSequenceTests
 
         // The gate takes a while to enable the nodes, and has already been started when the click is cancelled.
         var allowing = new TaskCompletionSource<ControllerResult>();
-        h.Block.OnAllow = _ => allowing.Task;
+        CancellationToken allowToken = default;
+        h.Block.OnAllow = ct =>
+        {
+            allowToken = ct;
+            return allowing.Task;
+        };
 
         using var cancel = new CancellationTokenSource();
         Task<ToggleReport> toggle = h.Coordinator.ToggleAsync(CoordinatorHarness.Request(connect: true), cancel.Token);
@@ -162,7 +167,8 @@ public sealed class ConnectSequenceTests
 
         Assert.IsFalse(toggle.IsCompleted, "The connect ended before the allow it sent.");
         CollectionAssert.AreEqual(Allow, h.Block.Calls, "A node read before the allow ends still says Blocked, so nothing is blocked yet.");
-        Assert.IsEmpty(h.Block.CancellableChanges, "A gate change was given a token that stops the wait for it.");
+        Assert.IsFalse(allowToken.IsCancellationRequested, "The caller's cancel stopped the wait for the gate.");
+        Assert.IsTrue(h.Block.CancellableChanges.All(c => c == "allow"), "Only the allow carries a token, and it is the budget's.");
 
         // The allow lands.
         h.Block.Status = Statuses.Allowed();

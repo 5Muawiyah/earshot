@@ -663,7 +663,9 @@ internal sealed partial class BlockCoordinator : IDisposable
         ArgumentNullException.ThrowIfNull(request);
         string name = request.Connect ? "connect" : "disconnect";
 
-        // Measured from acceptance, before anything can make it wait. The stamps below only read a clock.
+        // Measured from acceptance, before anything can make it wait. The stamps below only read a clock. A connect's budget
+        // runs from the same moment, so time spent queued behind another operation is spent.
+        DateTimeOffset accepted = _time.GetUtcNow();
         var timeline = new SwitchTimeline(_time, _log, request.Connect, request.Trigger);
         request = request with { Timeline = timeline };
 
@@ -689,7 +691,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         {
             ToggleReport report = await RunExclusiveAsync(
                 name,
-                token => request.Connect ? ConnectCoreAsync(request, token) : DisconnectCoreAsync(request, token),
+                token => request.Connect ? ConnectCoreAsync(request, accepted, token) : DisconnectCoreAsync(request, token),
                 ct,
                 refused);
             return Timed(report, timeline);
@@ -1894,7 +1896,7 @@ internal sealed partial class BlockCoordinator : IDisposable
                     undo.BlockAtBoot = status.BlockAtBoot;
                     undo.Container = status.TargetContainerId;
                     _log.Info("set-device: the device pinned now is blocked (" + Describe(status) + "), so it is allowed before the pin moves.");
-                    ControllerResult allow = await SendAllowAsync("allow (device change)", steps);
+                    ControllerResult allow = await SendAllowAsync("allow (device change)", steps, CancellationToken.None);
                     if (IsSessionEndRefusal(allow))
                     {
                         undo.AllowIssued = false;
@@ -2578,7 +2580,7 @@ internal sealed partial class BlockCoordinator : IDisposable
                 }
 
                 case ProtectionAction.AllowNodes:
-                    run.NodeChange = await SendAllowAsync("allow (" + goal + ")", run.Steps);
+                    run.NodeChange = await SendAllowAsync("allow (" + goal + ")", run.Steps, CancellationToken.None);
                     break;
             }
 
@@ -2616,7 +2618,9 @@ internal sealed partial class BlockCoordinator : IDisposable
     // before: an operation that was already past its own checks (a status read still running when
     // WM_QUERYENDSESSION arrived, say) is refused here with the session-ending result. An allow already sent when
     // the message arrives is not affected: the session-end block queues behind it and the clean-up blocks again.
-    private async Task<ControllerResult> SendAllowAsync(string action, List<StepOutcome> steps)
+    // cap ends the wait for the gate's run, which then reports that it may still be running; a connect passes what is left of
+    // its budget, the others wait for the gate's own time limit.
+    private async Task<ControllerResult> SendAllowAsync(string action, List<StepOutcome> steps, CancellationToken cap)
     {
         if (_sessionEnding)
         {
@@ -2630,7 +2634,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         _allowsRunning++;
         try
         {
-            allow = await _block.AllowAsync(CancellationToken.None);
+            allow = await _block.AllowAsync(cap);
         }
         catch (Exception ex)
         {
