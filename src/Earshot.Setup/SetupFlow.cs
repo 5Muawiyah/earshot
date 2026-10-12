@@ -42,6 +42,14 @@ internal interface ISetupHost
 
     // %ProgramFiles%\Earshot\Earshot.exe.
     string InstalledExe { get; }
+
+    // The SID of the account this process runs as, and of the person signed in to this session; null when unreadable.
+    string? OwnUserSid { get; }
+
+    string? SignedInUserSid { get; }
+
+    // Why SignedInUserSid is null, with the raw code, or empty.
+    string SignedInUserProblem { get; }
 }
 
 internal static class SetupExit
@@ -55,6 +63,7 @@ internal static class SetupExit
     public const int NoAirPods = 6;
     public const int NoStaging = 7;
     public const int NoPayload = 8;
+    public const int NotThePersonSignedIn = 9;
 }
 
 internal sealed record SetupOutcome(int ExitCode, string Instruction, string Detail);
@@ -166,6 +175,15 @@ internal sealed class SetupFlow
         if (!_host.IsElevated)
         {
             return new SetupOutcome(SetupExit.NotElevated, SetupText.NotElevatedInstruction, SetupText.NotElevatedContent);
+        }
+
+        // Everything Setup registers (the tasks' user, the settings, Fix connection's records) is for the account it runs as.
+        // When another administrator answered the prompt, that is not the person at the screen, so nothing is done.
+        if (_host.OwnUserSid is not { } own || _host.SignedInUserSid is not { } person ||
+            !string.Equals(own, person, StringComparison.OrdinalIgnoreCase))
+        {
+            return new SetupOutcome(SetupExit.NotThePersonSignedIn, SetupText.NotThePersonInstruction,
+                (SetupText.NotThePersonContent + " " + _host.SignedInUserProblem).TrimEnd());
         }
 
         PayloadCheckResult check = PayloadCheck.Verify(_payload);

@@ -108,6 +108,47 @@ public sealed class SetupFlowTests
         Assert.IsEmpty(w.Launcher.Runs);
     }
 
+    // An administrator's own account that is not the person signed in (another administrator typed their password into the
+    // prompt) would register Earshot, its tasks and Fix connection's records for that account, not for the person. Setup stops
+    // before anything is unpacked or run.
+    [TestMethod]
+    public void SetupElevatedAsSomeoneOtherThanThePersonSignedInDoesNothingAtAll()
+    {
+        foreach ((string? own, string? signedIn) in new (string?, string?)[]
+                 {
+                     ("S-1-5-21-1000000001-1000000002-1000000003-500", FakeHost.PersonSid),
+                     (FakeHost.PersonSid, null),
+                     (null, FakeHost.PersonSid),
+                 })
+        {
+            using var w = new World();
+            w.Host.OwnUserSid = own;
+            w.Host.SignedInUserSid = signedIn;
+
+            SetupOutcome outcome = w.Run();
+
+            Assert.AreEqual(SetupExit.NotThePersonSignedIn, outcome.ExitCode, own + " / " + signedIn);
+            Assert.AreEqual(SetupText.NotThePersonInstruction, outcome.Instruction);
+            Assert.AreEqual(0, w.Payload.Opens);
+            Assert.IsEmpty(w.Acl.Created);
+            Assert.IsEmpty(w.Launcher.Runs);
+        }
+    }
+
+    [TestMethod]
+    public void AnUnreadableSignedInAccountIsRefusedWithItsRawCode()
+    {
+        using var w = new World();
+        w.Host.SignedInUserSid = null;
+        w.Host.SignedInUserProblem = "WTSQuerySessionInformation (5) failed with error 1168.";
+
+        SetupOutcome outcome = w.Run();
+
+        Assert.AreEqual(SetupExit.NotThePersonSignedIn, outcome.ExitCode);
+        StringAssert.Contains(outcome.Detail, SetupText.NotThePersonContent);
+        StringAssert.Contains(outcome.Detail, "error 1168");
+    }
+
     [TestMethod]
     public void AFreshInstallUnpacksInTheProtectedFolderThenRunsInstallZipWithTheCheckedValues()
     {
