@@ -404,6 +404,28 @@ public sealed class SetupFlowTests
         Assert.IsEmpty(w.Launcher.Runs, "An unpacked file that does not match its list is never run.");
     }
 
+    // The one real execution of Setup's launcher for Fix connection: Setup.exe is a Windows-subsystem program and starts the
+    // fix verb with no --out and nothing redirected, exactly as the flow does for SetupAction.FixConnection. Safe mode and a
+    // temporary data folder make the program print its plan and end with PlanOnly, which Setup reads as a run that did not stop.
+    [TestMethod]
+    public void FixFromSetupRunsWithNoConsole()
+    {
+        string exe = Path.Combine(AppContext.BaseDirectory, "Earshot.exe");
+        if (!File.Exists(exe))
+        {
+            Assert.Inconclusive("The test build has no Earshot.exe beside the tests: " + exe);
+        }
+
+        using var temp = new TempFolder();
+        using var safe = new EnvironmentVariableScope("EARSHOT_SAFE_MODE", "1");
+        using var root = new EnvironmentVariableScope("EARSHOT_DATA_ROOT", temp.File("data"));
+
+        LaunchResult result = new WindowsProcessLauncher().RunAndWait(exe, ["fix"], AppContext.BaseDirectory, TimeSpan.FromMinutes(2));
+
+        Assert.IsTrue(result.Started, result.Detail);
+        Assert.AreEqual(ExitCodes.PlanOnly, result.ExitCode, "IoError would mean fix found nowhere to write.");
+    }
+
     [TestMethod]
     public void AValuesFileWithoutAUserSidStopsSetupBeforeAnythingIsInstalled()
     {

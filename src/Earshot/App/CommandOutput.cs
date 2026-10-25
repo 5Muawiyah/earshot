@@ -32,18 +32,36 @@ internal sealed class CommandOutput : IDisposable
 
     public TextWriter Writer { get; }
 
-    // "console", "stdout" or the full path of the output file.
+    // "console", "stdout", "log" or the full path of the output file.
     public string Destination { get; }
 
     public static bool TryOpen(
         string? outPath,
         [NotNullWhen(true)] out CommandOutput? output,
         [NotNullWhen(false)] out string? problem) =>
-        TryOpen(outPath, SystemConsoleHost.Instance, out output, out problem);
+        TryOpen(outPath, SystemConsoleHost.Instance, null, out output, out problem);
+
+    public static bool TryOpen(
+        string? outPath,
+        LogFallback? logFallback,
+        [NotNullWhen(true)] out CommandOutput? output,
+        [NotNullWhen(false)] out string? problem) =>
+        TryOpen(outPath, SystemConsoleHost.Instance, logFallback, out output, out problem);
 
     internal static bool TryOpen(
         string? outPath,
         IConsoleHost host,
+        [NotNullWhen(true)] out CommandOutput? output,
+        [NotNullWhen(false)] out string? problem) =>
+        TryOpen(outPath, host, null, out output, out problem);
+
+    // With a log fallback, a run that has no --out, no redirected handle and no console to write to (the tray and Setup.exe
+    // start `fix` that way: both are Windows-subsystem programs with no console of their own, so the child has none to attach
+    // to) writes its lines to the log instead of failing. Without one the failure is reported, as before.
+    internal static bool TryOpen(
+        string? outPath,
+        IConsoleHost host,
+        LogFallback? logFallback,
         [NotNullWhen(true)] out CommandOutput? output,
         [NotNullWhen(false)] out string? problem)
     {
@@ -57,25 +75,30 @@ internal sealed class CommandOutput : IDisposable
         bool hasHandle = handle != 0 && handle != NativeMethods.INVALID_HANDLE_VALUE;
         if (hasHandle && host.FileType(handle) is NativeMethods.FILE_TYPE_DISK or NativeMethods.FILE_TYPE_PIPE)
         {
-            return TryUseStandardOutput(host, "stdout", startOnNewLine: false, out output, out problem);
+            return TryUseStandardOutput(host, "stdout", startOnNewLine: false, logFallback, out output, out problem);
         }
 
         if (host.AttachToParentConsole(out int error))
         {
             // The shell has already printed its prompt; start on a fresh line.
-            return TryUseStandardOutput(host, "console", startOnNewLine: true, out output, out problem);
+            return TryUseStandardOutput(host, "console", startOnNewLine: true, logFallback, out output, out problem);
         }
 
         if (error == NativeMethods.ERROR_ACCESS_DENIED)
         {
             // Already attached to a console.
-            return TryUseStandardOutput(host, "console", startOnNewLine: false, out output, out problem);
+            return TryUseStandardOutput(host, "console", startOnNewLine: false, logFallback, out output, out problem);
         }
 
         if (hasHandle)
         {
             // A character device that is not a console, such as NUL, and no parent console.
-            return TryUseStandardOutput(host, "stdout", startOnNewLine: false, out output, out problem);
+            return TryUseStandardOutput(host, "stdout", startOnNewLine: false, logFallback, out output, out problem);
+        }
+
+        if (logFallback is not null)
+        {
+            return UseLog(logFallback, out output, out problem);
         }
 
         output = null;
@@ -99,12 +122,18 @@ internal sealed class CommandOutput : IDisposable
         IConsoleHost host,
         string destination,
         bool startOnNewLine,
+        LogFallback? logFallback,
         [NotNullWhen(true)] out CommandOutput? output,
         [NotNullWhen(false)] out string? problem)
     {
         TextWriter writer = host.Out;
         if (ReferenceEquals(writer, TextWriter.Null))
         {
+            if (logFallback is not null)
+            {
+                return UseLog(logFallback, out output, out problem);
+            }
+
             output = null;
             problem = "Standard output (" + destination + ") cannot be written to. Pass --out <path>.";
             return false;
@@ -116,6 +145,13 @@ internal sealed class CommandOutput : IDisposable
         }
 
         output = new CommandOutput(writer, ownsWriter: false, destination);
+        problem = null;
+        return true;
+    }
+
+    private static bool UseLog(LogFallback fallback, out CommandOutput? output, out string? problem)
+    {
+        output = new CommandOutput(new LogLineWriter(fallback), ownsWriter: true, "log");
         problem = null;
         return true;
     }
@@ -158,6 +194,62 @@ internal sealed class CommandOutput : IDisposable
         }
 
         return false;
+    }
+}
+
+// Where output goes when there is nothing else to write to: each line becomes one log entry, with the prefix in front.
+internal sealed record LogFallback(ILog Log, string Prefix);
+
+// A writer that sends each finished line to the log as one Info entry. A last line without a line break is written when the
+// writer is flushed or disposed.
+internal sealed class LogLineWriter(LogFallback fallback) : TextWriter(System.Globalization.CultureInfo.InvariantCulture)
+{
+    private readonly StringBuilder _line = new();
+
+    public override Encoding Encoding => Encoding.UTF8;
+
+    public override void Write(char value)
+    {
+        if (value == (char)10)
+        {
+            Emit();
+        }
+        else if (value != (char)13)
+        {
+            _line.Append(value);
+        }
+    }
+
+    public override void Write(string? value)
+    {
+        foreach (char c in value ?? "")
+        {
+            Write(c);
+        }
+    }
+
+    public override void Flush()
+    {
+        if (_line.Length > 0)
+        {
+            Emit();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            Flush();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private void Emit()
+    {
+        fallback.Log.Info(fallback.Prefix + _line);
+        _line.Clear();
     }
 }
 

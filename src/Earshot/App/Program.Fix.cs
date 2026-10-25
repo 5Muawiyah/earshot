@@ -21,6 +21,8 @@ namespace Earshot;
 // ExitCodes.PlanOnly. In safe mode it never counts anyone as present, so it only prints.
 internal static partial class Program
 {
+    internal const string FixOutputLogPrefix = "fix output: ";
+
     static partial void TryRunFix(RunContext ctx)
     {
         Paths paths = Paths.Current;
@@ -42,7 +44,9 @@ internal static partial class Program
             return;
         }
 
-        if (!CommandOutput.TryOpen(outPath, out CommandOutput? output, out string? outputProblem))
+        // The tray and Setup.exe start this verb with no console and no --out: the lines go to the log then, since the run's own
+        // window shows the person the result.
+        if (!CommandOutput.TryOpen(outPath, new LogFallback(log, FixOutputLogPrefix), out CommandOutput? output, out string? outputProblem))
         {
             log.Error("fix: " + outputProblem);
             ctx.ExitCode = ExitCodes.IoError;

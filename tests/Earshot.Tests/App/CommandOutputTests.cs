@@ -1,5 +1,6 @@
 using System.Globalization;
 using Earshot.App;
+using Earshot.Contracts;
 using Earshot.Interop;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -15,6 +16,7 @@ public sealed class CommandOutputTests
     private const long ConsoleHandle = 0x54;
     private const long FileHandle = 0x58;
 
+    private static readonly string[] ExpectedFixLines = ["fix output: Fix connection plan:", "fix output: ", "fix output:   1. nothing to change"];
     private static readonly string[] AttachThenOut = ["handle", "attach", "out"];
     private static readonly string[] TypeThenOut = ["handle", "type", "out"];
     private static readonly string[] TypeThenAttachThenOut = ["handle", "type", "attach", "out"];
@@ -172,6 +174,81 @@ public sealed class CommandOutputTests
 
         Assert.IsNull(output);
         Assert.IsTrue(problem.Contains("cannot be written to", StringComparison.Ordinal), problem);
+    }
+
+    // Fix connection started from the tray or from Setup.exe: both are Windows-subsystem programs with no console, so the child
+    // has no standard output and no parent console to attach to (AttachConsole fails with ERROR_INVALID_HANDLE).
+    [TestMethod]
+    public void WithNoConsoleAndALogFallbackTheOutputGoesToTheLog()
+    {
+        var host = new FakeConsoleHost(0, attachError: ErrorInvalidHandle);
+        var log = new CapturingLog();
+
+        Assert.IsTrue(CommandOutput.TryOpen(null, host, new LogFallback(log, "fix output: "), out CommandOutput? output, out string? problem), problem);
+
+        using (output)
+        {
+            Assert.AreEqual("log", output.Destination);
+            output.Writer.WriteLine("Fix connection plan:");
+            output.Writer.WriteLine();
+            output.Writer.Write("  1. nothing to change");
+        }
+
+        string[] lines = [.. log.Entries.Select(e => e.Message)];
+        CollectionAssert.AreEqual(ExpectedFixLines, lines);
+        Assert.IsTrue(log.Entries.All(e => e.Level == LogLevel.Info));
+        CollectionAssert.DoesNotContain(host.Calls, "out");
+    }
+
+    [TestMethod]
+    public void WithALogFallbackAWriterThatDiscardsEverythingGoesToTheLogToo()
+    {
+        var host = new FakeConsoleHost((nint)FileHandle, NativeMethods.FILE_TYPE_PIPE, 0, TextWriter.Null);
+        var log = new CapturingLog();
+
+        Assert.IsTrue(CommandOutput.TryOpen(null, host, new LogFallback(log, "fix output: "), out CommandOutput? output, out string? problem), problem);
+
+        using (output)
+        {
+            Assert.AreEqual("log", output.Destination);
+            output.Writer.WriteLine("kept");
+        }
+
+        Assert.IsTrue(log.Has(LogLevel.Info, "fix output: kept"));
+    }
+
+    [TestMethod]
+    public void ALogFallbackIsNotUsedWhenAConsoleCanBeWrittenTo()
+    {
+        var host = new FakeConsoleHost(0);
+        var log = new CapturingLog();
+
+        Assert.IsTrue(CommandOutput.TryOpen(null, host, new LogFallback(log, "fix output: "), out CommandOutput? output, out string? problem), problem);
+
+        using (output)
+        {
+            Assert.AreEqual("console", output.Destination);
+            output.Writer.WriteLine("to the console");
+        }
+
+        Assert.IsEmpty(log.Entries);
+    }
+
+    [TestMethod]
+    public void AnOutPathBeatsTheLogFallback()
+    {
+        using var temp = new TempFolder();
+        var log = new CapturingLog();
+
+        Assert.IsTrue(CommandOutput.TryOpen(temp.File("fix.txt"), new FakeConsoleHost(0), new LogFallback(log, "fix output: "), out CommandOutput? output, out string? problem), problem);
+
+        using (output)
+        {
+            output.Writer.WriteLine("to the file");
+        }
+
+        Assert.AreEqual("to the file" + Environment.NewLine, File.ReadAllText(temp.File("fix.txt")));
+        Assert.IsEmpty(log.Entries);
     }
 
     [TestMethod]
