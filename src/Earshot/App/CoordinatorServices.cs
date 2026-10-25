@@ -86,6 +86,9 @@ internal sealed class CoordinatorServices
     // AirPods that are paired and are not the ones Earshot protects, found when the coordinator starts. Only reported, never adopted.
     public IProtectionCheck Protection { get; init; } = NoProtectionCheck.Instance;
 
+    // Whether any AirPods are paired, for Connect in Windows before Earshot is set up. Unknown by default, which opens Windows' settings.
+    public IPairedAirPodsCheck PairedAirPods { get; init; } = NoPairedAirPodsCheck.Instance;
+
     // What the card for unprotected AirPods does on its one button. Null shows the card without one.
     public IFixLauncher? FixLauncher { get; init; }
 }

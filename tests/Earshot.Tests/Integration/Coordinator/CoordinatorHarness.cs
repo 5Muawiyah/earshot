@@ -48,7 +48,7 @@ internal sealed class CoordinatorHarness : IDisposable
 
         Coordinator = new BlockCoordinator(Monitor, Connection, Block, Protection, Settings, Cards, Log, Time,
             new CoordinatorOptions(safeMode, startedAtLogon),
-            new CoordinatorServices { Link = Link, Session = Session, Hints = hints ?? Hints, Launcher = Launcher, History = History, FixOffer = FixOffer, Recovery = Recovery, RePair = RePair, Protection = ProtectionScan, FixLauncher = FixLauncher });
+            new CoordinatorServices { Link = Link, Session = Session, Hints = hints ?? Hints, Launcher = Launcher, History = History, FixOffer = FixOffer, Recovery = Recovery, RePair = RePair, Protection = ProtectionScan, PairedAirPods = PairedAirPods, FixLauncher = FixLauncher });
     }
 
     private readonly string _historyFolder;
@@ -66,6 +66,8 @@ internal sealed class CoordinatorHarness : IDisposable
     public FakeRePairWindow RePair { get; } = new();
 
     public FakeProtectionCheck ProtectionScan { get; } = new();
+
+    public FakePairedAirPodsCheck PairedAirPods { get; } = new();
 
     public FakeFixLauncher FixLauncher { get; } = new();
 
@@ -959,6 +961,19 @@ internal sealed class FakeProtectionCheck : IProtectionCheck
     public int Reads { get; private set; }
 
     public Task<ProtectionReading> ReadAsync(CancellationToken ct)
+    {
+        Reads++;
+        return Task.FromResult(Reading);
+    }
+}
+
+internal sealed class FakePairedAirPodsCheck : IPairedAirPodsCheck
+{
+    public PairedAirPodsReading Reading { get; set; } = PairedAirPodsReading.Unknown;
+
+    public int Reads { get; private set; }
+
+    public Task<PairedAirPodsReading> ReadAsync(CancellationToken ct)
     {
         Reads++;
         return Task.FromResult(Reading);

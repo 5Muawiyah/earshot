@@ -77,6 +77,10 @@ internal sealed record ToggleReport(bool Connect, OpStatus Status, string UserMe
     // This report made the second PC-side failure in a row: the card should offer Fix connection. Raised once.
     public bool FixOfferDue { get; init; }
 
+    // Connect in Windows found no AirPods paired before Earshot is set up: the tray starts Pair AirPods instead of opening Windows'
+    // settings, and no card is shown for this report.
+    public bool StartPairAirPods { get; init; }
+
     // The measurement of this connect or disconnect, set by the coordinator on every report it returns.
     public SwitchTimeline? Timeline { get; init; }
 
