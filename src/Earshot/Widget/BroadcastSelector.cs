@@ -191,6 +191,16 @@ internal sealed class BroadcastSelector
         return true;
     }
 
+    // A different pair was adopted: the link, the remembered link and everything kept for finding it again belong to the old
+    // pair. The paired model stays; Windows says what it is.
+    public void ForgetLink()
+    {
+        Unlink();
+        _memory = null;
+        _recent.Clear();
+        _burstActive = false;
+    }
+
     private void Unlink()
     {
         _senders.Clear();

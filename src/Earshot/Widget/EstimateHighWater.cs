@@ -71,6 +71,22 @@ internal sealed class EstimateHighWater
         }
     }
 
+    // A different pair was adopted: no estimate shown so far belongs to anything now on show.
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            for (int i = 0; i < _marks.Length; i++)
+            {
+                if (_marks[i] is not null)
+                {
+                    _marks[i] = null;
+                    _version++;
+                }
+            }
+        }
+    }
+
     // The marks held, for the readings given: a mark whose reading is no longer the part's is of no use and is left out.
     public IReadOnlyList<EstimateMark> MarksFor(LastReadingBook book)
     {
