@@ -3816,8 +3816,15 @@ internal sealed partial class BlockCoordinator : IDisposable
                 _log.Warn("Closing: the nodes are not blocked, because " + skipped + "; the BootBlock task blocks them at the next start.");
                 ClosingNotice = ClosedBeforeChangeEndedMessage;
             }
-            else if (skipped == InUseReason)
+            else if (skipped is InUseReason or GateInUseReason)
             {
+                // The gate's own refusal is the same answer as a render check's: the AirPods are linked, nothing was blocked, and
+                // the person is told. It is reached when an allow landed after the check above (the closing block ran behind it).
+                if (skipped == GateInUseReason)
+                {
+                    _log.Warn("Closing: the gate found the AirPods connected, so it blocked nothing; the nodes stay enabled, and nothing blocks them again until Earshot runs again.");
+                }
+
                 ClosingNotice = ClosedWhileInUseMessage;
             }
         }
