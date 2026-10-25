@@ -4,7 +4,9 @@ using System.Windows.Forms;
 using Earshot.App;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
+using Earshot.Bluetooth;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Infra;
 using Earshot.Repair;
 using Earshot.Service;
@@ -165,7 +167,11 @@ internal static partial class Program
         return result?.ExitCode ?? ExitCodes.Software;
     }
 
-    private static FixHost CreateFixHost(Paths paths, ILog log, TextWriter output, FixRePairWindow ui, SystemWorker worker, FixElevation elevation)
+    // Safe mode against the real data folder writes nothing, the connect history included; any other run has a history file.
+    internal static ConnectHistory? OpenConnectHistory(Paths paths, ILog log) =>
+        paths.IsSafeMode && !paths.IsRedirected ? null : new ConnectHistory(paths.ConnectHistoryFile, TimeProvider.System, log);
+
+    internal static FixHost CreateFixHost(Paths paths, ILog log, TextWriter output, FixRePairWindow ui, SystemWorker worker, FixElevation elevation)
     {
         var nodes = new CfgMgr32NodeReader();
         var store = new GateStore(paths.MachineFolder);
@@ -191,6 +197,8 @@ internal static partial class Program
             RePairUi = ui,
             Gate = gate,
             Recovery = new FixRecovery(Path.Combine(paths.LocalFolder, "fix-window.json"), TimeProvider.System, ProcessIsAlive),
+            Radio = RadioCheck.CreateReal(log),
+            History = OpenConnectHistory(paths, log),
             Output = output,
             Log = log,
             MachineFolder = paths.MachineFolder,

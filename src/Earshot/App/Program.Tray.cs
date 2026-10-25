@@ -411,9 +411,7 @@ internal static partial class Program
                 registry = CompositionRoot.Build(log, settings, action => ui.Post(static state => ((Action)state!)(), stallLog.Wrap(action)), paths.IsSafeMode);
 
                 // Safe mode against the real data folder writes nothing, the connect history included.
-                ConnectHistory? history = paths.IsSafeMode && !paths.IsRedirected
-                    ? null
-                    : new ConnectHistory(paths.ConnectHistoryFile, TimeProvider.System, log);
+                ConnectHistory? history = OpenConnectHistory(paths, log);
 
                 // A change to settings.json by another program (the settings command, an edit by hand) is taken up live, on the UI
                 // thread: the store's Changed reaches the block coordinator and the alert latch, which belong to it.
