@@ -23,11 +23,11 @@ public sealed class FixRePairTests
     {
         rig.Pairing.Paired.Add(new PairedDevice(OldId, "Jonathan’s AirPods Pro", RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer));
         rig.Pairing.Paired.Add(new PairedDevice("paired-phone", "iPhone", RecordedNodes.IPhoneAddress, RecordedNodes.IPhoneContainer));
-        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("seen-before", "Old speaker", "AABBCCDDEE01", IsAudioVideo: true)));
+        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("seen-before", "Old speaker", "AABBCCDDEE01", IsAudioVideo: true, MinorClass: 6)));
         rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("seen-before-2", "Some watch", "AABBCCDDEE02", IsAudioVideo: false)));
         rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.InitialListDone, null));
         rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("not-audio", "Keyboard", "AABBCCDDEE03", IsAudioVideo: false)));
-        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(NewId, "AirPods Pro", FixRig.NewAirPodsAddress, IsAudioVideo: true)));
+        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(NewId, "AirPods Pro", FixRig.NewAirPodsAddress, IsAudioVideo: true, MinorClass: 6)));
         rig.Pairing.OnUnpaired = () =>
         {
             // Removing a device from Windows takes its nodes with it; this is only what the fake does.
@@ -81,7 +81,7 @@ public sealed class FixRePairTests
     {
         using var rig = new FixRig();
         ArrangeHappyPairing(rig);
-        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("headset-2", "Some headset", "AABBCCDDEE04", IsAudioVideo: true)));
+        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("headset-2", "Some headset", "AABBCCDDEE04", IsAudioVideo: true, MinorClass: 6)));
 
         await Make(rig).RunAsync(RePairConsent(), Target, CancellationToken.None);
 
@@ -102,7 +102,7 @@ public sealed class FixRePairTests
         Assert.IsLessThan(pick, instruction);
         string text = rig.Ui.Shown[instruction];
         Assert.Contains("white", text, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("setup button", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("button on the back", text, StringComparison.OrdinalIgnoreCase);
     }
 
     [TestMethod]

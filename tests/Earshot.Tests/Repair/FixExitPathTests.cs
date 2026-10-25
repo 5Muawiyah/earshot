@@ -239,17 +239,17 @@ public sealed class FixExitPathTests
     }
 
     [TestMethod]
-    public async Task AnEmptyPlanSkipsElevationAndTheFirstQuestion()
+    public async Task AnEmptyPlanSkipsElevationButStillAsksTwoQuestions()
     {
         using var rig = new FixRig();
         FixRePairTests.ArrangeHappyPairing(rig);
-        rig.Prompter.SayOk();
+        SayBothOk(rig);
 
         FixResult result = await RunAsync(rig);
 
         Assert.IsEmpty(rig.Elevator.Calls);
-        Assert.HasCount(1, rig.Prompter.Asked, "Only the re-pair question was asked.");
-        Assert.IsTrue(rig.Prompter.Asked[0].Heading.Contains("pair", StringComparison.OrdinalIgnoreCase));
+        Assert.HasCount(2, rig.Prompter.Asked, "The first question and the re-pair question.");
+        Assert.IsTrue(rig.Prompter.Asked[1].Heading.Contains("pair", StringComparison.OrdinalIgnoreCase));
         Assert.AreEqual(FixOutcome.Done, result.Outcome, string.Join("; ", result.Lines));
     }
 
@@ -399,13 +399,14 @@ public sealed class FixExitPathTests
         using FixRig rig = Arranged();
         Uninstall(rig);
 
-        // With no record of Earshot there is nothing to undo, so the only question is the second one.
+        // With no record of Earshot there is nothing to undo; the first question is still asked, then the second.
+        rig.Prompter.SayOk();
         rig.Prompter.SayCancel();
 
         FixResult result = await RunAsync(rig);
 
         Assert.AreEqual(FixOutcome.Declined, result.Outcome);
-        Assert.HasCount(1, rig.Prompter.Asked);
+        Assert.HasCount(2, rig.Prompter.Asked);
         Assert.IsEmpty(rig.Pairing.Calls);
         Assert.IsEmpty(rig.GateFake.Calls);
     }

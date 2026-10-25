@@ -2,6 +2,7 @@ using System.Globalization;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 
 namespace Earshot.Repair;
 
@@ -11,10 +12,12 @@ namespace Earshot.Repair;
 //   2. Print the plan. With nobody at the screen (no input desktop, a different desktop, not interactive) stop here: nothing
 //      is asked, elevated or changed, and the exit code says "plan only".
 //   3. First question (an on-screen dialog): every change. On OK, one administrator prompt runs `fix-apply`, which builds the
-//      plan again itself and applies the part both agree on.
+//      plan again itself and applies the part both agree on. With nothing to undo it is still asked, as a question of its own
+//      (owner stand-in decision of 25 October 2026: two explicit on-screen questions, however empty the plan).
 //   4. Second question (a separate dialog): remove the AirPods from Windows and pair them again, by name. On OK, in this
-//      session: unpair, scan, show Apple's instruction, pick, pair, check the new device with the identity rule, adopt it
-//      through one gate run when Earshot is installed.
+//      session: the radio check, then unpair, scan, show the instruction, pick, pair, check the new device with the identity
+//      rule, adopt it through one gate run when Earshot is installed. The person's "Pair" press on the chosen device is a
+//      step of the pairing and is not one of the two questions.
 //   5. Every path that changed something and ends without an adoption ends with the normal block when Earshot is installed and
 //      Block at boot is on. A marker file covers a crash in between: the tray answers a stale one with the block at its next
 //      start (FixRecovery).
@@ -124,6 +127,16 @@ internal static class FixConnection
         public bool Installed { get; init; }
     }
 
+    // The first question when there is nothing to undo. It issues no consent and starts nothing: the second question, which
+    // names what will be removed, is asked next, and nothing is removed before it is answered.
+    private static readonly FixPrompt NothingToUndoPrompt = new(
+        FixPromptText.Title,
+        "Nothing of Earshot's to undo",
+        "Earshot has no change of its own to undo. The next question asks whether to remove your AirPods from Windows and pair them again. Nothing is removed until you answer it.",
+        [],
+        [],
+        "Go on");
+
     private static async Task<FixResult> RunWithPersonAsync(FixConsentDialog dialog, FixPlan plan, FixHost host, List<StepOutcome> steps, CancellationToken ct)
     {
         var lines = new List<string>();
@@ -155,7 +168,16 @@ internal static class FixConnection
         FixConsentDialog dialog, FixPlan plan, FixHost host, RunState state, List<string> lines, List<StepOutcome> steps, CancellationToken ct)
     {
         FixPlan work = plan;
-        if (!plan.IsEmpty)
+        if (plan.IsEmpty)
+        {
+            // Nothing to undo, and still a first question: the person agrees to go on before the second one is shown.
+            if (host.Prompter.Ask(NothingToUndoPrompt).Answer != FixAnswer.Ok)
+            {
+                lines.Add("Declined. Nothing was changed.");
+                return FixOutcome.Declined;
+            }
+        }
+        else
         {
             FixConsentAnswer first = dialog.AskChanges(plan);
             if (first.Consent is null)
@@ -206,7 +228,8 @@ internal static class FixConnection
                 lines.Add("Could not be undone: " + remaining.ToString(CultureInfo.InvariantCulture) + " part(s) are still as Earshot left them.");
             }
         }
-        else
+
+        if (plan.IsEmpty)
         {
             lines.Add("Earshot has no change to undo.");
         }
@@ -240,9 +263,16 @@ internal static class FixConnection
         }
 
         steps.Add(host.Recovery.Begin("repairing"));
+        bool touchedBefore = state.Touched;
         state.Touched = true;
-        var repairer = new RePairer(host.Pairing, host.Nodes, host.RePairUi, host.Options, host.Log);
+        var repairer = new RePairer(host.Pairing, host.Nodes, host.RePairUi, host.Options, host.Log, host.Radio);
         RePairResult repaired = await repairer.RunAsync(second, target is null ? null : new RePairTarget(target.Address, target.Name), ct).ConfigureAwait(false);
+        if (!repaired.Touched)
+        {
+            // Refused before anything was removed or scanned (the radio check): nothing here needs the closing block.
+            state.Touched = touchedBefore;
+        }
+
         lines.AddRange(repaired.Lines);
         steps.AddRange(repaired.Steps);
         foreach (PairingCallResult status in repaired.Statuses)
@@ -250,11 +280,13 @@ internal static class FixConnection
             lines.Add("Status: " + status.Name + " (" + status.Code.ToString(CultureInfo.InvariantCulture) + ").");
         }
 
+        StepOutcome? adoptStep = null;
         if (repaired.Adoptable is { } candidate)
         {
             if (!state.Installed)
             {
                 lines.Add("Earshot is not installed (or Block at boot is off), so nothing was adopted.");
+                adoptStep = new StepOutcome("adopt", true, 0, "not-set-up", null);
             }
             else
             {
@@ -263,13 +295,29 @@ internal static class FixConnection
                 steps.AddRange(adoption.Steps);
                 state.Adopted = adoption.Ok;
                 state.NewPairUnprotected = !adoption.Ok;
+                adoptStep = new StepOutcome("adopt", adoption.Ok, adoption.ExitCode ?? 0, adoption.Ok ? "adopted" : "not-adopted", null);
                 lines.Add(adoption.Ok
                     ? "Earshot now protects the new pair, and it is blocked at rest."
                     : "Could not adopt the new pair: " + adoption.Summary + (adoption.ExitCode is int code ? " (" + code.ToString(CultureInfo.InvariantCulture) + ")" : "") + ".");
             }
         }
 
+        RecordPairing(host, steps, repaired, adoptStep);
+
         return repaired.Paired && repaired.Failure == RePairFailure.None && (state.Adopted || !state.Installed) ? FixOutcome.Done : FixOutcome.Failed;
+    }
+
+    // The one connect-history entry of this run's pairing, when the run has a history to write to and a pairing session ran (or
+    // was refused by the radio check). Nothing in it names a device. A failed write is a step with its raw code.
+    private static void RecordPairing(FixHost host, List<StepOutcome> steps, RePairResult repaired, StepOutcome? adoptStep)
+    {
+        if (host.History is null || repaired.Session is null)
+        {
+            return;
+        }
+
+        ConnectHistoryEntry entry = repaired.Session.ToHistoryEntry(host.Time.GetUtcNow(), adoptStep is null ? null : [adoptStep]);
+        steps.Add(host.History.Append(entry));
     }
 
     // The block that ends every path that changed something. An adoption is a pin and a block in one gate run, so it needs no
