@@ -16,6 +16,10 @@ internal sealed partial class BlockCoordinator
     // device group (reasoned from how pairing adds a device container; no live run has shown it).
     // The check for AirPods Earshot does not protect then runs again, after NewDeviceSettle, instead of waiting for the next
     // sign-in. The card about them keeps its once-per-run rule. UI thread only.
+    // Asked when a new device group has settled, before the check for unprotected AirPods: true when it showed the person
+    // something about the pairs. Set by the tray. UI thread.
+    internal Func<CancellationToken, Task<bool>>? NewDeviceHook { get; set; }
+
     private void NoteNewDeviceGroups(DeviceSnapshot snapshot)
     {
         if (snapshot.ReadStatus != SnapshotReadStatus.Ok)
@@ -47,6 +51,14 @@ internal sealed partial class BlockCoordinator
             if (_services.RePair.IsOpen)
             {
                 _log.Info("A new device appeared while a Fix connection run is pairing the AirPods again; that run answers for it.");
+                return;
+            }
+
+            // The tray looks at whether the pinned pair is still paired. When that look told the person something, it has said what
+            // there is to say about the pairs, and a second card about the same new pair would only repeat it.
+            if (NewDeviceHook is { } hook && await hook(CancellationToken.None))
+            {
+                _log.Info("A new device appeared; the tray answered for it, so the check for AirPods that Earshot does not protect did not run.");
                 return;
             }
 

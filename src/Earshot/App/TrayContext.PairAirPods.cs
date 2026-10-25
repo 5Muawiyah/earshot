@@ -25,6 +25,12 @@ internal sealed partial class TrayContext
     private void WirePairAirPods(TrayStartOptions options)
     {
         _pairServices = options.PairAirPods;
+        if (_pairServices is not null && !options.DataRootRedirected)
+        {
+            // A pair made or removed in Windows arrives as a new device group.
+            _coordinator.NewDeviceHook = async _ => !await CheckPinnedPairAsync("new device", CardPlace.NearTray);
+        }
+
         _menu.PairAirPodsClicked += (_, _) =>
         {
             _log.Info("Pair AirPods: started from the menu.");
