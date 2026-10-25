@@ -132,7 +132,7 @@ internal sealed partial class BlockCoordinator
         return sealedReport;
     }
 
-    private void WriteHistory(ConnectHistoryEntry entry)
+    internal void WriteHistory(ConnectHistoryEntry entry)
     {
         if (_services.History is not { } history)
         {

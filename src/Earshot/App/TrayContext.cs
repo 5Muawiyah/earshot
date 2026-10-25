@@ -163,6 +163,11 @@ internal sealed record TrayStartOptions(
     // itself runs for, rather than racing a real timing window against a scheduled read.
     public int? TaskbarWatcherPollIntervalMs { get; init; }
 
+    // What Pair AirPods runs on: the real pairing API, window and radio check in the program, fakes in a test. Null (the default)
+    // means this tray cannot pair, which is what every tray-level test that does not test pairing gets, so none of them reaches
+    // the machine's Bluetooth.
+    public PairAirPodsServices? PairAirPods { get; init; }
+
     // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
     // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
     // widget-enabled tray-level test injects a fake instead, so GaugeController's own fallback logic
@@ -2700,6 +2705,7 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
+        Guid previousPair = _registry.Settings.Current.PinnedContainerId;
         bool gateRepinned = false;
         if (status is not null && !TrayStatus.NeedsSetUp(status))
         {
@@ -2734,6 +2740,7 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         _pinAttemptedFor = choice.ContainerId;
+        ForgetPreviousPairIfDifferent(previousPair, choice.ContainerId);
         _log.Info("Device chosen: " + choice.Name + " (" + choice.Address + ", container " + choice.ContainerId + "), match \"" + choice.Match + "\".");
         _ = RefreshSnapshotAsync();
 

@@ -462,6 +462,7 @@ internal static partial class Program
                     FrameLog = stallLog,
                     DataRootRedirected = paths.IsRedirected,
                     InstalledExePath = paths.InstalledExe,
+                    PairAirPods = paths.IsSafeMode ? null : PairAirPodsServices.CreateReal(paths, log),
                     UpdateOutcome = paths.IsSafeMode || paths.IsRedirected
                         ? null
                         : new UpdateOutcomeSource(paths.MachineFolder, Path.Combine(paths.LocalFolder, "update", "outcome-shown.txt")),
