@@ -28,6 +28,7 @@ namespace Earshot;
 //   settings list|get|set             TryRunSettings  Commands\Program.Commands.cs (the settings page's options, from a terminal)
 //   fix [--out <path>]                TryRunFix        App\Program.Fix.cs (plans, asks two questions on the screen, then repairs the connection)
 //   fix-apply <plan> <sha256>         TryRunFixApply   Boot\Gate\Program.FixApply.cs (the elevated step of fix, through the UAC prompt only)
+//   trace <tray pid> <nonce>          TryRunTrace      App\Program.Trace.cs (records a Bluetooth trace, through the UAC prompt only)
 //   uninstall-ui, repair-ui           TryRunUninstallUi, TryRunRepairUi  the per-user steps of the Installed apps entry
 //
 // Dispatch runs before WinForms is initialised and before the single-instance mutex, so the
@@ -157,6 +158,7 @@ internal static partial class Program
             case "settings":  label = mode; TryRunSettings(ctx); break;
             case "fix":       label = mode; TryRunFix(ctx); break;
             case "fix-apply": label = mode; TryRunFixApply(ctx); break;
+            case "trace":     label = mode; TryRunTrace(ctx); break;
             case "uninstall-ui": label = mode; TryRunUninstallUi(ctx); break;
             case "repair-ui": label = mode; TryRunRepairUi(ctx); break;
             default:          label = "tray"; TryRunTray(ctx); break;
@@ -181,7 +183,7 @@ internal static partial class Program
     }
 
     internal static readonly IReadOnlySet<string> PrivilegedModes =
-        new HashSet<string>(StringComparer.Ordinal) { "gate", "gate-protect", "install", "install-zip", "uninstall", "update", "repair", "service", "fix-apply" };
+        new HashSet<string>(StringComparer.Ordinal) { "gate", "gate-protect", "install", "install-zip", "uninstall", "update", "repair", "service", "fix-apply", "trace" };
 
     // Why a privileged mode must not run with these paths, or null when it may (or the mode is not
     // privileged). See the header comment.
@@ -224,6 +226,7 @@ internal static partial class Program
     static partial void TryRunSettings(RunContext ctx);
     static partial void TryRunFix(RunContext ctx);
     static partial void TryRunFixApply(RunContext ctx);
+    static partial void TryRunTrace(RunContext ctx);
     static partial void TryRunUninstallUi(RunContext ctx);
     static partial void TryRunRepairUi(RunContext ctx);
 
