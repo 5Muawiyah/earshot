@@ -314,7 +314,7 @@ internal static partial class Program
     // data root, where the gate is never reached.
     internal static CoordinatorServices CreateCoordinatorServices(
         Paths paths, ISettingsStore settings, ILog log, ConnectHistory? history, TimeProvider time, Func<Widget.IWidgetStatus?> widget, ISystemWorker? worker,
-        Action? fixEnded = null)
+        Action? fixEnded = null, IFixLauncher? fixLauncher = null)
     {
         var nodes = new CfgMgr32NodeReader();
         bool gateReachable = !paths.IsSafeMode && !paths.IsRedirected;
@@ -345,7 +345,7 @@ internal static partial class Program
             Recovery = recovery,
             RePair = rePair,
             Protection = protection,
-            FixLauncher = new OwnProgramFixLauncher(fixEnded),
+            FixLauncher = fixLauncher ?? new OwnProgramFixLauncher(fixEnded),
         };
     }
 
@@ -396,7 +396,9 @@ internal static partial class Program
             ServiceRegistry? registry = null;
             BlockCoordinator? coordinator = null;
             RegisteredWaitHandle? showWait = null;
+            OwnProgramFixLauncher? fixLauncher = null;
             IDisposable? exitSignal = null;
+            FixEndedSignal? fixEndedSignal = null;
             SettingsFileWatcher? settingsWatcher = null;
             try
             {
@@ -416,12 +418,20 @@ internal static partial class Program
                 // A change to settings.json by another program (the settings command, an edit by hand) is taken up live, on the UI
                 // thread: the store's Changed reaches the block coordinator and the alert latch, which belong to it.
                 settingsWatcher = new SettingsFileWatcher(settings, log, registry.UiPost);
+
+                // A Fix connection run ends the tray's start checks again, whoever started it. One launcher serves the card, the
+                // menu, the settings page and the coordinator's own card, so a second press while a run is open is refused. A run
+                // the tray started tells it twice (the event the fix verb sets, and the end of the process); FixEndedSignal
+                // makes the two one. A run started by Setup.exe or by the install script is heard through the event only.
+                fixEndedSignal = FixEndedSignal.Listen(
+                    FixEndedSignal.NameFor(paths), () => registry.UiPost(() => coordinator?.RecheckProtectionAfterFix()), TimeProvider.System, log);
+                fixLauncher = new OwnProgramFixLauncher(() => fixEndedSignal?.Notify("the run the tray started"));
                 coordinator = new BlockCoordinator(
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon),
                     CreateCoordinatorServices(paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker,
-                        () => registry.UiPost(() => coordinator?.RecheckProtectionAfterFix())));
+                        fixLauncher: fixLauncher));
 
                 // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
                 // constructed below): the toast route's AppUserModelID must be set before a window or a toast
@@ -456,7 +466,10 @@ internal static partial class Program
                     UpdateOutcome = paths.IsSafeMode || paths.IsRedirected
                         ? null
                         : new UpdateOutcomeSource(paths.MachineFolder, Path.Combine(paths.LocalFolder, "update", "outcome-shown.txt")),
-                });
+                })
+                {
+                    FixLauncher = fixLauncher,
+                };
 
                 TrayContext shown = context;
                 showWait = ThreadPool.RegisterWaitForSingleObject(
@@ -502,6 +515,7 @@ internal static partial class Program
                 }
 
                 exitSignal?.Dispose();
+                fixEndedSignal?.Dispose();
                 settingsWatcher?.Dispose();
 
                 // Nothing after this point may resume on the UI thread: its message loop has ended. The card

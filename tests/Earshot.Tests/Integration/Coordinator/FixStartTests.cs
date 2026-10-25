@@ -158,6 +158,23 @@ public sealed class FixStartTests
     }
 
     [TestMethod]
+    public void ThePressOnTheCardWhileARunIsOpenSaysSoAndStartsNothing()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        h.Start();
+        CardShown card = h.Cards.Shown.Single(c => c.Content.Status == BlockCoordinator.NotProtectedMessage);
+        h.FixLauncher.Running = true;
+
+        card.Content.Action!.OnClick();
+
+        Assert.AreEqual(0, h.FixLauncher.Started);
+        Assert.AreEqual(FixOffer.AlreadyRunningMessage, h.Cards.Shown[^1].Content.Status);
+    }
+
+    [TestMethod]
     public void TheCardIsShownOncePerRun()
     {
         using var h = new CoordinatorHarness();

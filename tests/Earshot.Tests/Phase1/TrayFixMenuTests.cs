@@ -1,4 +1,5 @@
 using System.Windows.Forms;
+using Earshot.App;
 using Earshot.Contracts;
 using Earshot.Tests.Integration.Coordinator;
 using Earshot.Tray;
@@ -50,6 +51,25 @@ public sealed class TrayFixMenuTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, launcher.Started);
+        });
+    }
+
+    // The menu, the card and the settings page share one launcher, so a second press while the first run is open says so.
+    [TestMethod]
+    public void ChoosingFixConnectionWhileARunIsOpenSaysSoAndStartsNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
+            var launcher = new FakeFixLauncher { Running = true };
+            tray.Context.FixLauncher = launcher;
+            tray.Context.Menu.Refresh();
+
+            tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.FixConnection).PerformClick();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(0, launcher.Started);
+            Assert.AreEqual(FixOffer.AlreadyRunningMessage, tray.Cards.Shown[^1].Content.Status);
         });
     }
 }

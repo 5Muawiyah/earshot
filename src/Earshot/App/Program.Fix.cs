@@ -55,7 +55,27 @@ internal static partial class Program
 
         using (output)
         {
-            ctx.ExitCode = RunFix(ctx.Args, paths, log, output.Writer);
+            // One run at a time on this PC: a Fix started from the tray, from Setup.exe and from the install script is three
+            // programs, so the lock is a named mutex. The run that finds it taken starts nothing and says nothing else.
+            using FixRunLock? runLock = FixRunLock.TryAcquire(FixRunLock.NameFor(paths), log);
+            if (runLock is null)
+            {
+                log.Warn("fix: another Fix connection or Pair AirPods run holds the lock, so this run was not started.");
+                output.Writer.WriteLine(FixRunLock.FixAlreadyRunningMessage);
+                ctx.ExitCode = ExitCodes.AlreadyRunning;
+                return;
+            }
+
+            try
+            {
+                ctx.ExitCode = RunFix(ctx.Args, paths, log, output.Writer);
+            }
+            finally
+            {
+                // However the run was started, the tray hears that it ended and runs its start checks again: a run can end with a
+                // new pair Earshot does not protect.
+                FixEndedSignal.Raise(FixEndedSignal.NameFor(paths), log);
+            }
         }
     }
 

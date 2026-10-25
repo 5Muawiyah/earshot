@@ -482,9 +482,10 @@ internal sealed partial class BlockCoordinator : IDisposable
             : new CardAction(FixOffer.ButtonLabel, () =>
             {
                 _log.Info("Fix connection: started from the card.");
+                bool alreadyRunning = launcher.IsRunning;
                 if (!launcher.Start(_log) && !_closing)
                 {
-                    CardPlace.NearTray.Show(_cards, TrayStatus.AppName, FixOffer.NotStartedMessage);
+                    CardPlace.NearTray.Show(_cards, TrayStatus.AppName, alreadyRunning ? FixOffer.AlreadyRunningMessage : FixOffer.NotStartedMessage);
                 }
             });
         _cards.Show(new CardContent(TrayStatus.AppName, NotProtectedMessage, action), CardAnchor.NearTray);
