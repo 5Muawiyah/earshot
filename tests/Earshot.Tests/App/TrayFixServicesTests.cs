@@ -27,6 +27,17 @@ public sealed class TrayFixServicesTests
         Assert.IsInstanceOfType<FixMarkerRePairWindow>(services.RePair);
         Assert.IsInstanceOfType<AirPodsProtectionCheck>(services.Protection);
         Assert.IsInstanceOfType<OwnProgramFixLauncher>(services.FixLauncher);
+        Assert.IsInstanceOfType<NodePairedAirPodsCheck>(services.PairedAirPods);
+    }
+
+    [TestMethod]
+    public void TheReadOnlyPairedCheckIsRealEvenWhereTheGateIsNeverReached()
+    {
+        var safe = Paths.FromEnvironment(name => name == Paths.SafeModeVariable ? "1" : null);
+        var redirected = Paths.FromEnvironment(name => name == Paths.DataRootVariable ? Path.GetTempPath() : null);
+
+        Assert.IsInstanceOfType<NodePairedAirPodsCheck>(Build(safe, null).PairedAirPods);
+        Assert.IsInstanceOfType<NodePairedAirPodsCheck>(Build(redirected, null).PairedAirPods);
     }
 
     [TestMethod]

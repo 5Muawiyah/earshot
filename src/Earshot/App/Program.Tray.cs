@@ -345,6 +345,7 @@ internal static partial class Program
             Recovery = recovery,
             RePair = rePair,
             Protection = protection,
+            PairedAirPods = new NodePairedAirPodsCheck(nodes),
             FixLauncher = fixLauncher ?? new OwnProgramFixLauncher(fixEnded),
         };
     }
