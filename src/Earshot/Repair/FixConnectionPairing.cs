@@ -33,7 +33,10 @@ internal enum FixPairKind
 
 internal sealed record PairedDevice(string Id, string Name, string Address12, Guid ContainerId);
 
-internal sealed record UnpairedDevice(string Id, string Name, string Address12, bool IsAudioVideo);
+// A device the scan listed. MinorClass and IsPresent are null until a watcher event reports them; the Bluetooth class of device
+// is major then minor (Audio/Video, then Headphones or Wearable headset for AirPods).
+// https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothminorclass
+internal sealed record UnpairedDevice(string Id, string Name, string Address12, bool IsAudioVideo, uint? MinorClass = null, bool? IsPresent = null);
 
 internal enum WatchEventKind
 {
@@ -47,8 +50,9 @@ internal sealed record WatchEvent(WatchEventKind Kind, UnpairedDevice? Device);
 
 internal sealed record PairedListResult(IReadOnlyList<PairedDevice> Devices, IReadOnlyList<StepOutcome> Steps);
 
-// A status Windows returned: the enum name, its number, and whether it means done.
-internal sealed record PairingCallResult(string Name, int Code, bool Success, string? Detail);
+// A status Windows returned: the enum name, its number, and whether it means done. Threw says the call raised an exception
+// instead: Name is then the exception type and Code its HRESULT, not a status.
+internal sealed record PairingCallResult(string Name, int Code, bool Success, string? Detail, bool Threw = false);
 
 internal interface IPairingPrompt
 {
