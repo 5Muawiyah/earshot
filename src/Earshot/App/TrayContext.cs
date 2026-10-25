@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Globalization;
 using Earshot.Audio.Connect;
+using Earshot.Bluetooth;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Hotkeys;
@@ -980,8 +981,16 @@ internal sealed partial class TrayContext : ApplicationContext
                 report.Steps);
             _log.Write(report.IsSuccess || cancelled ? LogLevel.Info : LogLevel.Warn, text);
             LogSwitch(_log, report);
-            bool fixOffered = FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);
-            if (fixOffered)
+            // A radio that is off, switched off, broken or absent is the whole story of a failed connect: its line and its button are
+            // shown, and nothing that cannot help (Fix connection, Connect in Windows) is offered. Read once, only after a failure.
+            RadioCheckResult? radio = wanted && !report.IsSuccess && !cancelled ? await ReadRadioAfterFailureAsync(cts.Token) : null;
+            bool radioBlocks = radio is { BlocksRepair: true };
+            bool fixOffered = !radioBlocks && FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);
+            if (radioBlocks)
+            {
+                ShowRadioCard(radio!, place);
+            }
+            else if (fixOffered)
             {
                 ShowFixOffer(intent.DeviceName, report.UserMessage, place);
             }

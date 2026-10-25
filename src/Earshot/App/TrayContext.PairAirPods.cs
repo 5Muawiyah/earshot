@@ -151,6 +151,20 @@ internal sealed partial class TrayContext
         }
     }
 
+    // One radio read (its own budget is a second), timed in the log. Null when there is no radio check to ask or in safe mode.
+    private async Task<RadioCheckResult?> ReadRadioAfterFailureAsync(CancellationToken ct)
+    {
+        if (_pairServices?.Radio is not { } radio || _registry.SafeMode)
+        {
+            return null;
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        RadioCheckResult result = await radio.CheckAsync(ct);
+        _log.Info("Radio check after a failed connect: " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms.");
+        return result;
+    }
+
     // The radio's line, and its button when it has one.
     private void ShowRadioCard(RadioCheckResult radio, CardPlace place)
     {

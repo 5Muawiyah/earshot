@@ -1444,7 +1444,8 @@ internal sealed class TrayHarness : IDisposable
         Earshot.Diagnostics.IFrameLogSource? frameLog = null,
         Func<string>? diagnosticsLogPath = null,
         PairAirPodsServices? pairAirPods = null,
-        CoordinatorServices? coordinatorServices = null)
+        CoordinatorServices? coordinatorServices = null,
+        Earshot.Infra.ISettingsLauncher? settingsLauncher = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1602,6 +1603,7 @@ internal sealed class TrayHarness : IDisposable
             CardEnvironmentFactory = cardEnvironmentFactory,
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
             PairAirPods = pairAirPods,
+            SettingsLauncher = settingsLauncher,
         };
         if (displaySource is not null)
         {
