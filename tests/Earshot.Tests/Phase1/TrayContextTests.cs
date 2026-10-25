@@ -1031,6 +1031,25 @@ public sealed class TrayContextTests
         });
     }
 
+    // 25 October: after set-up the Run value read the per-user copy again, and that copy, started at sign-in, kept it
+    // because Windows had started it from that value. An installed copy wins: the value is pointed at it.
+    [TestMethod]
+    public void ACopyStartedAtLogonPointsTheRunValueAtAnInstalledCopy()
+    {
+        StaThread.Run(() =>
+        {
+            const string Installed = @"C:\Program Files\Earshot Installed\Earshot.exe";
+            using var tray = new TrayHarness(
+                startup: r => r.Run[StartupRegistration.ValueName] = StartupRegistration.CommandFor(TrayHarness.ExePath),
+                startedAtLogon: true,
+                installedExePath: Installed,
+                fileExists: path => path == Installed);
+
+            Assert.AreEqual(StartupRegistration.CommandFor(Installed), tray.Startup.Run[StartupRegistration.ValueName]);
+            Assert.AreEqual(1, tray.Startup.Writes);
+        });
+    }
+
     [TestMethod]
     public void ARunAgainstATestDataFolderWritesNoStartupValue()
     {
