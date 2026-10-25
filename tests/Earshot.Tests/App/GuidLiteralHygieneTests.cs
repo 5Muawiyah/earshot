@@ -50,7 +50,7 @@ public sealed class GuidLiteralHygieneTests
         "7e2d4c8a-5a1e-4d0b-9c61-3f0e2a7b8c90", "7fa06c40-b8f6-4c7e-8556-e8c33a12e54d", "85df5081-1b24-4f32-878a-d9d14df4cb77", "86627eb4-42a7-41e4-a4d9-ac33a72f2d52",
         "886d8eeb-8cf2-4446-8d02-cdba1dbdcf99", "8c134960-51ad-11cf-878a-94f801c10000", "8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c", "8cfac062-a080-4c15-9a88-aa7c2af80dfc",
         "8fd4711d-2d02-4c8c-87e3-eff699de127e", "9c2c4058-23f5-41de-877a-df3af236a09e", "9c86f320-dee3-4dd1-b972-a303f26b061e", "9f4c2855-9f79-4b39-a8d0-e1d42de1d5f3",
-        "a2901f31-dc17-41b7-b0ad-2f77a5f04490", "a35996ab-11cf-4935-8b61-a6761081ecdf", "a45c254e-df1c-4efd-8020-67d146a850e0", "a95664d2-9614-4f35-a746-de8db63617e6",
+        "a2901f31-dc17-41b7-b0ad-2f77a5f04490", "a35996ab-11cf-4935-8b61-a6761081ecdf", "a45c254e-df1c-4efd-8020-67d146a850e0", "a8b865dd-2e3d-4094-ad97-e593a70c75d6", "a95664d2-9614-4f35-a746-de8db63617e6",
         "aaaaaaaa-bbbb-4ccc-8ddd-000000000001", "ae02eedb-c735-4690-8d52-5a8dc20213aa", "ae2de0e4-5bca-4f2d-aa46-5d13f8fdb3a9", "b32a92b5-bc25-4078-9c08-d7ee95c48e03", "b725f130-47ef-101a-a5f1-02608c9eebac", "bfb7ff88-7239-4fc9-8fa2-07c950be9c6d",
         "bae54997-48b1-4cbe-9965-d6be263ebea4", "bcde0395-e52f-467c-8e3d-c4579291692e", "c4c07f2b-8524-4e66-ae3a-a6235f103beb", "cccccccc-dddd-4eee-8fff-000000000001",
         "d22108aa-8ac5-49a5-837b-37bbb3d7591e", "d666063f-1587-4e43-81f1-b948e807363f", "d98d51e5-c9b4-496a-a9c1-18980261cf0f", "e2f5bb11-0570-40ca-acdd-3aa01277dee8", "e6327cad-dcec-4949-ae8a-991e976a79d2", "e7c3fb29-caa7-4f47-8c8b-be59b330d4c5",
