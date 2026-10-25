@@ -253,6 +253,34 @@ public sealed class PairAirPodsTests
     }
 
     [TestMethod]
+    public void AClickWithNothingPairedSaysSoWithAPairAirPodsButtonThatStartsPairing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig(new FakeNodeApi(Array.Empty<FakeNode>()), pinned: false);
+            rig.Prompter.SayCancel();
+            using var tray = new TrayHarness(
+                pairAirPods: Services(rig),
+                settings: s =>
+                {
+                    s.PinnedContainerId = Guid.Empty;
+                    s.PinnedAddress = "";
+                });
+            tray.Cards.Shown.Clear();
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            CardContent card = tray.Cards.Shown[^1].Content;
+            Assert.AreEqual("No AirPods are paired with this PC.", card.Status);
+            Assert.AreEqual("Pair AirPods", card.Action?.Label);
+            card.Action!.OnClick();
+            tray.PumpUntilIdle();
+            Assert.HasCount(1, rig.Prompter.Asked);
+        });
+    }
+
+    [TestMethod]
     public void SafeModeRefusesPairingAndTouchesNothing()
     {
         StaThread.Run(() =>

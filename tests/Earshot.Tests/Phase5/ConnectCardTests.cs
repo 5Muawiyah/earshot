@@ -31,7 +31,7 @@ public sealed class ConnectCardTests
         TrayStatus.CardDisconnected,
         TrayStatus.CardBlockedAtBoot,
         TrayStatus.MicrophoneNotice,
-        TrayStatus.NotFoundMessage(new EarshotSettings()),
+        TrayStatus.NotFoundMessage,
         TrayContext.BusyMessage,
         TrayContext.SomethingWentWrongMessage,
         BlockController.NotPresentBlockMessage,

@@ -305,7 +305,7 @@ public sealed class TrayContextTests
             tray.PumpUntilIdle();
 
             Assert.IsEmpty(tray.Connection.Calls);
-            CollectionAssert.AreEqual(new[] { TrayStatus.NotFoundMessage(tray.Settings.Current) }, tray.Cards.Statuses);
+            CollectionAssert.AreEqual(new[] { TrayStatus.NotFoundMessage }, tray.Cards.Statuses);
         });
     }
 

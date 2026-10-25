@@ -124,16 +124,13 @@ internal static class TrayStatus
         {
             Connected => CardConnected,
             Blocked => CardBlockedAtBoot,
-            NotFound => NotFoundMessage(settings),
+            NotFound => NotFoundMessage,
             NotKnown => CardNotKnown,
             _ => CardDisconnected,
         };
 
-    public static string NotFoundMessage(EarshotSettings settings)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        return settings.DeviceMatch + " not found. Connect them once, or choose your device from the menu.";
-    }
+    // Nothing to connect: no AirPods are paired with this PC. The card that says it offers Pair AirPods.
+    public const string NotFoundMessage = "No AirPods are paired with this PC.";
 
     // The container a left click acts on: the pinned container when there is one, otherwise the
     // resolved target's. Null when neither is a valid device container.

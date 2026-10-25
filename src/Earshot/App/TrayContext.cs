@@ -922,9 +922,17 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             string message = _snapshot.ReadStatus == SnapshotReadStatus.Failed
                 ? ConnectMessages.CouldNotReadDevices
-                : TrayStatus.NotFoundMessage(settings);
+                : TrayStatus.NotFoundMessage;
             _log.Warn("Toggle: " + message);
-            ShowCard(settings.DeviceMatch, message, place);
+            if (message == TrayStatus.NotFoundMessage && _pairServices is not null && !_registry.SafeMode)
+            {
+                ShowCardWithButton(settings.DeviceMatch, message, PairAirPodsText.Title, () => StartPairAirPods(place), place);
+            }
+            else
+            {
+                ShowCard(settings.DeviceMatch, message, place);
+            }
+
             return;
         }
 

@@ -59,7 +59,7 @@ internal static class PairAirPodsText
 
     public const string PairedNotAdopted = "Paired, but Earshot could not switch to these AirPods. Choose them from the menu.";
 
-    public const string NoAirPodsPaired = "No AirPods are paired with this PC.";
+    public const string NoAirPodsPaired = Tray.TrayStatus.NotFoundMessage;
 
     public const string ChooseButton = "Choose AirPods";
 
