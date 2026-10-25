@@ -49,6 +49,12 @@
        publish, the target below lists it in Earshot.files.json like any other, so install copies it and checks it.
        https://learn.microsoft.com/en-us/legal/windows-sdk/redist
        https://learn.microsoft.com/en-us/dotnet/core/project-sdk/msbuild-props#copytopublishdirectory -->
+  <!-- Microsoft's Bluetooth recording profile for Windows Performance Recorder (github.com/microsoft/busiotools, MIT), kept
+       unmodified and checked against a pinned SHA-256 before every recording. Its licence notice is in THIRD-PARTY-NOTICES.txt.
+       Used only from src\Earshot\Trace\TraceProfile.cs. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Trace\BluetoothStack.wprp" LogicalName="Earshot.Trace.BluetoothStack.wprp" />
+  </ItemGroup>
   <ItemGroup>
     <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
