@@ -49,6 +49,83 @@ internal sealed partial class TrayContext
         Launch("pair airpods", () => PairAirPodsAsync(place), place);
     }
 
+    // The look at whether the pinned pair is still paired, at tray start and when a new device appeared. Nothing is shown when it
+    // is, or when that cannot be told.
+    internal void StartPinnedPairCheck(string reason)
+    {
+        if (_closing || _pairServices is null || _registry.SafeMode)
+        {
+            return;
+        }
+
+        Launch("check the pinned pair", () => CheckPinnedPairAsync(reason, CardPlace.NearTray), CardPlace.NearTray);
+    }
+
+    // Whether the AirPods Earshot has pinned are still paired, read only. True means go on: the pin is fine, or nothing could be
+    // told (not knowing is never stale). False means the person has been told what to do and the caller must not go on: a stale
+    // pin forgets the replaced pair's readings and link, then offers the device picker when another pair is paired, or Pair
+    // AirPods when none is. The other pair is never adopted by itself, and nothing is unpaired. Nothing pinned with no AirPods
+    // paired at all offers Pair AirPods too (once per run, unless the person has just asked for something that needs a pair).
+    // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothdevice.getdeviceselectorfrompairingstate
+    private async Task<bool> CheckPinnedPairAsync(string reason, CardPlace place)
+    {
+        if (_closing || _pairServices is not { } services || _registry.SafeMode)
+        {
+            return true;
+        }
+
+        EarshotSettings settings = _registry.Settings.Current;
+        StalePinResult result;
+        try
+        {
+            result = await StalePin.ReadAsync(services.Api, services.Nodes, settings.PinnedContainerId, settings.PinnedAddress, _lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            return true;
+        }
+
+        _log.Info("Pairing check (" + reason + "): " + StalePin.Describe(result));
+        if (_closing)
+        {
+            return true;
+        }
+
+        switch (result.State)
+        {
+            case StalePinState.NotPinned:
+            {
+                AirPodsDiscoveryResult found = await Task.Run(() => AirPodsDiscovery.Find(services.Nodes), _lifetime.Token);
+                bool nonePaired = found.Listed && !found.Candidates.Any(c => c.DevicePresent);
+                if (nonePaired)
+                {
+                    OfferPairAirPods(place, force: reason == "setup");
+                }
+
+                return !nonePaired;
+            }
+
+            case StalePinState.Stale:
+                _log.Info("The pinned AirPods are no longer paired, so their last readings and link are dropped.");
+                _widgetStatus?.ForgetPair("the pinned AirPods are no longer paired");
+                if (result.Others.Count == 0)
+                {
+                    OfferPairAirPods(place, force: true);
+                }
+                else
+                {
+                    ShowCardWithButton(
+                        TrayStatus.AppName, PairAirPodsText.StaleChosen, PairAirPodsText.ChooseButton,
+                        () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
+                }
+
+                return false;
+
+            default:
+                return true;
+        }
+    }
+
     // A card with one button, in the same place as the other cards of the tray.
     private void ShowCardWithButton(string title, string text, string label, Action onClick, CardPlace place)
     {

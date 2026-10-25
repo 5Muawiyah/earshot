@@ -61,6 +61,8 @@ internal static class PairAirPodsText
 
     public const string NoAirPodsPaired = "No AirPods are paired with this PC.";
 
+    public const string ChooseButton = "Choose AirPods";
+
     public const string StaleChosen = "Your AirPods were removed in Windows. Choose which pair Earshot should use.";
 
     // The first question, before anything is scanned: three lines, each its own step.

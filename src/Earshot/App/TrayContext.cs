@@ -560,6 +560,10 @@ internal sealed partial class TrayContext : ApplicationContext
         InitPauseOnLeave();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
+        if (!options.DataRootRedirected)
+        {
+            StartPinnedPairCheck("start");
+        }
     }
 
     // True while a connect, disconnect or menu action started here is in flight.
@@ -2095,6 +2099,13 @@ internal sealed partial class TrayContext : ApplicationContext
 
     private async Task RunSetupAsync(CardPlace place)
     {
+        // Set-up sends the pinned pair's address and container to the gate. A pair removed in Windows would be sent as it was, and
+        // the gate would find no such device, so the pin is looked at first.
+        if (!await CheckPinnedPairAsync("setup", place))
+        {
+            return;
+        }
+
         if (!TryBeginElevatedRun(SetupRun, place))
         {
             return;
