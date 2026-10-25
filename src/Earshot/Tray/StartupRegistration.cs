@@ -217,6 +217,12 @@ internal sealed class StartupRegistration
     // after uninstall removed it. A value in any other form, or one that could not be read, is not reported.
     public bool RunValueTargetMissing() => RunValueTarget() is { } target && !_fileExists(target);
 
+    // True when an installed copy is there and the Run value starts a different file, such as the per-user copy that ran
+    // set-up. Reads only.
+    public bool RunValueBypassesTheInstalledCopy() =>
+        !string.IsNullOrWhiteSpace(_installedExePath) && _fileExists(_installedExePath) &&
+        RunValueTarget() is { } target && !NotificationRegistration.PathsEqual(target, _installedExePath);
+
     // The quoted path at the start of a command in the form CommandFor writes, when it is a full path.
     internal static string? TargetOf(string? command)
     {

@@ -1044,6 +1044,7 @@ public sealed class TrayContextTests
                 startedAtLogon: true,
                 installedExePath: Installed,
                 fileExists: path => path == Installed);
+            tray.PumpUntilIdle();
 
             Assert.AreEqual(StartupRegistration.CommandFor(Installed), tray.Startup.Run[StartupRegistration.ValueName]);
             Assert.AreEqual(1, tray.Startup.Writes);

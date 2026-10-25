@@ -46,11 +46,11 @@ try
     # A normal line, then the run, then the first entry written after the power came back (old by the time asked for), then a
     # normal line that is new. The NUL run sits in front of the first entry on the same line, as it did on 24 October.
     $oldBeforeLoss = '2026-10-13T12:55:56.187Z INFO Tray started before the power loss.'
-    $afterLossOld = $nul * 4153 + '2026-10-13T12:56:10.000Z INFO Tray started the first time after the run.'
-    $afterLossNew = $nul * 7 + '2026-10-24T22:44:15.219Z INFO Tray started the second time after the run.'
+    $afterLossOld = [string]($nul * 4153) + '2026-10-13T12:56:10.000Z INFO Tray started the first time after the run.'
+    $afterLossNew = [string]($nul * 7) + '2026-10-24T22:44:15.219Z INFO Tray started the second time after the run.'
     $plainNew = '2026-10-24T22:44:16.000Z INFO Tray started the third time.'
     $text = ($oldBeforeLoss, $afterLossOld, $afterLossNew, $plainNew) -join "`r`n"
-    [System.IO.File]::WriteAllBytes((Join-Path $workDir 'earshot.log'), [System.Text.Encoding]::ASCII.GetBytes($text + "`r`n"))
+    [System.IO.File]::WriteAllBytes((Join-Path $workDir 'earshot.log'), [System.Text.Encoding]::ASCII.GetBytes([string]$text + "`r`n"))
 
     $since = [datetime]::SpecifyKind([datetime]'2026-10-24T00:00:00', [System.DateTimeKind]::Utc)
     $lines = Get-EarshotLogLines -Run $run -Pattern 'Tray started' -SinceUtc $since

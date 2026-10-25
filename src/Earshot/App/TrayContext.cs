@@ -2445,7 +2445,9 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        if (_startedAtLogon)
+        // An installed copy wins even then: the value names another file, so writing it does not rewrite the entry this
+        // run was started from in place. 25 October: the per-user copy kept the value after set-up.
+        if (_startedAtLogon && !_startup.RunValueBypassesTheInstalledCopy())
         {
             _log.Info("Earshot was started by its Run value, so that value is not written again in this run.");
             return;

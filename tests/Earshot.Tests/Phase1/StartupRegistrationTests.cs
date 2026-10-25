@@ -265,6 +265,26 @@ public sealed class StartupRegistrationTests
     }
 
     [TestMethod]
+    public void AValueThatStartsAnotherCopyThanTheInstalledOneIsSeen()
+    {
+        const string PerUser = @"C:\Users\Someone\AppData\Local\Programs\Earshot\Earshot.exe";
+        const string Installed = @"C:\Program Files\Earshot\Earshot.exe";
+        bool installed = true;
+        var registry = new FakeStartupRegistry();
+        var startup = new StartupRegistration(registry, new CapturingLog(), false, PerUser,
+            installedExePath: Installed, fileExists: path => installed && path == Installed);
+
+        Assert.IsFalse(startup.RunValueBypassesTheInstalledCopy(), "No value.");
+        registry.Run["Earshot"] = StartupRegistration.CommandFor(PerUser);
+        Assert.IsTrue(startup.RunValueBypassesTheInstalledCopy());
+        registry.Run["Earshot"] = StartupRegistration.CommandFor(Installed.ToUpperInvariant());
+        Assert.IsFalse(startup.RunValueBypassesTheInstalledCopy(), "Paths compare ignoring case.");
+        registry.Run["Earshot"] = StartupRegistration.CommandFor(PerUser);
+        installed = false;
+        Assert.IsFalse(startup.RunValueBypassesTheInstalledCopy(), "Nothing is installed.");
+    }
+
+    [TestMethod]
     public void TheRepairCheckLogsAndDeclinesWhenItCannotRead()
     {
         var log = new CapturingLog();
