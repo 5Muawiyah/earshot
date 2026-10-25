@@ -229,11 +229,193 @@ public sealed class DoctorTests
             "handBackService", "handBackService.present", "handBackService.state",
             "airpods", "airpods[].model", "airpods[].bus", "airpods[].present", "airpods[].status", "airpods[].problemCode", "airpods[].disabled",
             "otherAppleNodes", "bluetoothServices", "bluetoothServices[].name", "bluetoothServices[].state",
-            "radio", "radio.found", "radio.driverVersion", "filterDrivers", "filterDrivers[].name", "filterDrivers[].on",
+            "radio", "radio.found", "radio.adapterFound", "radio.classicSupported", "radio.state", "radio.radioState", "radio.devNodeStatus", "radio.problemCode",
+            "radio.driverVersion", "radio.driverDate", "radio.readCodes",
+            "startup", "startup.runValue", "startup.target", "startup.targetExists", "startup.approvedFlag", "startup.turnedOffInWindows",
+            "pairing", "pairing[].time", "pairing[].outcome", "pairing[].status", "pairing[].statusValue", "pairing[].modelCheck", "pairing[].durationMs",
+            "filterDrivers", "filterDrivers[].name", "filterDrivers[].on",
             "connectHistory", "connectHistory.path", "connectHistory.exists", "connectHistory.lines", "connectHistory.last",
             "protection", "protection.pinned", "protection.unprotectedAirPods",
             "battery", "battery.source", "battery.lastReadingSaved", "unreadable", "unreadable[].part", "unreadable[].reason",
         ];
         CollectionAssert.AreEquivalent(expected, keys.ToArray());
+    }
+
+    [TestMethod]
+    public void TheRadioIsReportedWithItsStateProblemCodeDriverAndReadCodes()
+    {
+        string output = Run(new FakeDoctorSource(DoctorFixture.Facts()));
+        using JsonDocument report = JsonDocument.Parse(Fenced(output));
+
+        JsonElement radio = report.RootElement.GetProperty("radio");
+        Assert.IsTrue(radio.GetProperty("adapterFound").GetBoolean());
+        Assert.IsTrue(radio.GetProperty("classicSupported").GetBoolean());
+        Assert.AreEqual("Problem", radio.GetProperty("state").GetString());
+        Assert.AreEqual("On", radio.GetProperty("radioState").GetString());
+        Assert.AreEqual("0x00000400", radio.GetProperty("devNodeStatus").GetString());
+        Assert.AreEqual(10, radio.GetProperty("problemCode").GetInt32());
+        Assert.AreEqual("23.60.0.2", radio.GetProperty("driverVersion").GetString());
+        Assert.AreEqual("2024-03-09", radio.GetProperty("driverDate").GetString());
+        Assert.AreEqual(2, radio.GetProperty("readCodes").GetArrayLength());
+        StringAssert.Contains(output, "Bluetooth radio: Problem, problem code 10, driver 23.60.0.2 (2024-03-09).");
+    }
+
+    [TestMethod]
+    public void ARadioNobodyReadSaysNoneFoundWithNoStateAndEveryRadioKeyIsStillThere()
+    {
+        string output = Run(new FakeDoctorSource(new DoctorFacts()));
+        using JsonDocument report = JsonDocument.Parse(Fenced(output));
+
+        JsonElement radio = report.RootElement.GetProperty("radio");
+        Assert.IsFalse(radio.GetProperty("found").GetBoolean());
+        Assert.AreEqual(JsonValueKind.Null, radio.GetProperty("state").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, radio.GetProperty("problemCode").ValueKind);
+        Assert.AreEqual(0, radio.GetProperty("readCodes").GetArrayLength());
+        StringAssert.Contains(output, "Bluetooth radio: none found.");
+    }
+
+    [TestMethod]
+    public void ARadioFieldThatIsNotAPlainValueIsDropped()
+    {
+        DoctorFacts facts = DoctorFixture.Facts();
+        facts.Radio!.State = "Jonathan's PC is off";
+        facts.Radio.DevNodeStatus = "0A1B2C3D4E8C";
+        facts.Radio.DriverDate = "last Tuesday";
+
+        using JsonDocument report = JsonDocument.Parse(Fenced(Run(new FakeDoctorSource(facts))));
+
+        JsonElement radio = report.RootElement.GetProperty("radio");
+        Assert.AreEqual(JsonValueKind.Null, radio.GetProperty("state").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, radio.GetProperty("devNodeStatus").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, radio.GetProperty("driverDate").ValueKind);
+    }
+
+    [TestMethod]
+    public void TheLastPairingRunsAreReportedAsPlainTokensAndTheSummaryNamesTheLast()
+    {
+        string output = Run(new FakeDoctorSource(DoctorFixture.Facts()));
+        using JsonDocument report = JsonDocument.Parse(Fenced(output));
+
+        JsonElement pairing = report.RootElement.GetProperty("pairing");
+        Assert.AreEqual(3, pairing.GetArrayLength());
+        Assert.AreEqual("AuthenticationFailure", pairing[0].GetProperty("status").GetString());
+        Assert.AreEqual(9, pairing[0].GetProperty("statusValue").GetInt32());
+        Assert.AreEqual(JsonValueKind.Null, pairing[0].GetProperty("modelCheck").ValueKind);
+        Assert.AreEqual("airpods", pairing[1].GetProperty("modelCheck").GetString());
+        Assert.AreEqual(21000, pairing[1].GetProperty("durationMs").GetInt64());
+        // Free text, an address-sized number and a negative duration from a writer are dropped, as in the history.
+        foreach (string key in new[] { "time", "outcome", "status", "statusValue", "modelCheck", "durationMs" })
+        {
+            Assert.AreEqual(JsonValueKind.Null, pairing[2].GetProperty(key).ValueKind, key);
+        }
+    }
+
+    [TestMethod]
+    public void OnlyTheLastFivePairingRunsAreReported()
+    {
+        DoctorFacts facts = DoctorFixture.Facts();
+        facts.History!.Pairing = Enumerable.Range(1, 8).Select(i => new PairingFact { Outcome = "failed", Status = "Failed", StatusValue = 19, Time = "2026-10-25T20:0" + i + ":00Z" }).ToList();
+
+        using JsonDocument report = JsonDocument.Parse(Fenced(Run(new FakeDoctorSource(facts))));
+
+        JsonElement pairing = report.RootElement.GetProperty("pairing");
+        Assert.AreEqual(5, pairing.GetArrayLength());
+        Assert.AreEqual("2026-10-25T20:08:00Z", pairing[4].GetProperty("time").GetString(), "Newest last.");
+    }
+
+    [TestMethod]
+    public void TheSummarySaysTheLastPairingAndNothingWhenThereWasNone()
+    {
+        StringAssert.Contains(Run(new FakeDoctorSource(DoctorFixture.Facts())), "Last pairing: unknown (no status).");
+        DoctorFacts facts = DoctorFixture.Facts();
+        facts.History!.Pairing = [new PairingFact { Time = "2026-10-25T20:08:22Z", Outcome = "paired", Status = "Paired", StatusValue = 0 }];
+
+        StringAssert.Contains(Run(new FakeDoctorSource(facts)), "Last pairing: paired (Paired) at 2026-10-25T20:08:22Z.");
+        Assert.DoesNotContain("Last pairing", Run(new FakeDoctorSource(new DoctorFacts())), StringComparison.Ordinal);
+    }
+
+    [TestMethod]
+    public void TheRunValueTargetAndItsPresenceAreReported()
+    {
+        string output = Run(new FakeDoctorSource(DoctorFixture.Facts()));
+        using JsonDocument report = JsonDocument.Parse(Fenced(output));
+
+        JsonElement startup = report.RootElement.GetProperty("startup");
+        Assert.IsTrue(startup.GetProperty("runValue").GetBoolean());
+        Assert.AreEqual(@"%LOCALAPPDATA%\Programs\Earshot\Earshot.exe", startup.GetProperty("target").GetString(), "The user's folder is written as a variable.");
+        Assert.AreEqual(JsonValueKind.False, startup.GetProperty("targetExists").ValueKind);
+        Assert.AreEqual("02", startup.GetProperty("approvedFlag").GetString());
+        Assert.AreEqual(JsonValueKind.False, startup.GetProperty("turnedOffInWindows").ValueKind);
+        StringAssert.Contains(output, "Open on startup: the Run value points at a file that is not there.");
+    }
+
+    [TestMethod]
+    public void AFlagWithBitOneSetIsReportedAsTurnedOffInWindowsAndNoRunValueSaysNothing()
+    {
+        DoctorFacts off = DoctorFixture.Facts();
+        off.Startup!.ApprovedFlag = "03";
+        off.Startup.TargetExists = true;
+        string output = Run(new FakeDoctorSource(off));
+        using JsonDocument report = JsonDocument.Parse(Fenced(output));
+        Assert.AreEqual(JsonValueKind.True, report.RootElement.GetProperty("startup").GetProperty("turnedOffInWindows").ValueKind);
+        StringAssert.Contains(output, "Open on startup: turned off in Windows' startup settings.");
+        Assert.DoesNotContain("points at a file that is not there", output, StringComparison.Ordinal);
+
+        using JsonDocument none = JsonDocument.Parse(Fenced(Run(new FakeDoctorSource(new DoctorFacts()))));
+        JsonElement startup = none.RootElement.GetProperty("startup");
+        Assert.IsFalse(startup.GetProperty("runValue").GetBoolean());
+        Assert.AreEqual(JsonValueKind.Null, startup.GetProperty("target").ValueKind);
+        Assert.AreEqual(JsonValueKind.Null, startup.GetProperty("approvedFlag").ValueKind);
+    }
+
+    [TestMethod]
+    public void TheTargetOfARunCommandIsTheQuotedPathOrTheTextBeforeTheFirstOption()
+    {
+        Assert.AreEqual(@"C:\Program Files\Earshot\Earshot.exe", StartupFact.TargetOf("\"C:\\Program Files\\Earshot\\Earshot.exe\" --startup"));
+        Assert.AreEqual(@"C:\Earshot\Earshot.exe", StartupFact.TargetOf(@"C:\Earshot\Earshot.exe --startup"));
+        Assert.AreEqual(@"C:\Earshot\Earshot.exe", StartupFact.TargetOf(@"C:\Earshot\Earshot.exe"));
+        Assert.IsNull(StartupFact.TargetOf(null));
+        Assert.IsNull(StartupFact.TargetOf("  "));
+    }
+
+    [TestMethod]
+    public void APairEntryOfTheConnectHistoryBecomesAPairingFactWithItsStatusAndModelCheck()
+    {
+        var entry = new Earshot.Diagnostics.ConnectHistoryEntry(
+            new DateTimeOffset(2026, 10, 25, 20, 8, 22, TimeSpan.Zero), "pair", "none", "custom-pairing",
+            [new Earshot.Diagnostics.HistoryStep("pair", 0, "Paired"), new Earshot.Diagnostics.HistoryStep("model-check", 1, "not-airpods")],
+            false, "not-airpods", "None", 21000);
+
+        PairingFact fact = RealDoctorSource.PairingOf(entry);
+
+        Assert.AreEqual("2026-10-25T20:08:22Z", fact.Time);
+        Assert.AreEqual("not-airpods", fact.Outcome);
+        Assert.AreEqual("Paired", fact.Status);
+        Assert.AreEqual(0, fact.StatusValue);
+        Assert.AreEqual("not-airpods", fact.ModelCheck);
+        Assert.AreEqual(21000, fact.DurationMs);
+    }
+
+    // The one real run of the new reads: this PC's radio check and Run value, read only, through the real source.
+    [TestMethod]
+    public void TheRealSourceReadsTheRadioWithTheCheckAndTheStartupValueWithoutChangingThem()
+    {
+        using var temp = new TempFolder();
+        Paths paths = Paths.FromEnvironment(name => name switch
+        {
+            Paths.DataRootVariable => temp.File("data"),
+            Paths.SafeModeVariable => "1",
+            _ => null,
+        });
+
+        DoctorFacts facts = new RealDoctorSource(paths, new CapturingLog()).Read();
+
+        Assert.IsNotNull(facts.Radio, "The radio part is always filled in; its failures are in ReadCodes.");
+        Assert.IsNotNull(facts.Radio.State);
+        Assert.IsNotNull(facts.Radio.ReadCodes);
+        Assert.IsNotNull(facts.Startup);
+        Assert.IsNotNull(facts.History!.Pairing);
+        using JsonDocument report = JsonDocument.Parse(DoctorReport.Build(facts));
+        Assert.AreEqual(facts.Radio.State, report.RootElement.GetProperty("radio").GetProperty("state").GetString());
     }
 }
