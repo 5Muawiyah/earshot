@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Windows.Forms;
 using Earshot.App;
 using Earshot.Contracts;
+using Earshot.Infra;
 using Earshot.Popup;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -182,5 +183,54 @@ public sealed class FixOfferTests
         string label = FixOffer.ButtonLabel;
         Assert.AreEqual("Fix connection", label);
         Assert.IsInstanceOfType<IFixLauncher>(new OwnProgramFixLauncher());
+    }
+
+    // The launcher is the real one and the program is the built Earshot.exe, in safe mode and against a temporary data folder,
+    // where fix prints its plan and ends with PlanOnly without asking anyone. The one real execution of the tray's launcher:
+    // it starts a Windows-subsystem program with no --out and nothing redirected, as the tray does. (A test host has a console
+    // its child can attach to, so this cannot by itself prove the no-console branch; CommandOutputTests and the run in
+    // NoConsoleFixRunTests do.)
+    [TestMethod]
+    public void TheTrayStartsFixWithNoConsoleAndItRuns()
+    {
+        string exe = Path.Combine(AppContext.BaseDirectory, "Earshot.exe");
+        if (!File.Exists(exe))
+        {
+            Assert.Inconclusive("The test build has no Earshot.exe beside the tests: " + exe);
+        }
+
+        using var temp = new TempFolder();
+        using var ended = new ManualResetEventSlim();
+        var launcher = new OwnProgramFixLauncher(() => ended.Set(), () => exe);
+        using var safe = new EnvironmentVariableScope(Paths.SafeModeVariable, "1");
+        using var root = new EnvironmentVariableScope(Paths.DataRootVariable, temp.File("data"));
+
+        Assert.IsTrue(launcher.Start(new CapturingLog()));
+
+        Assert.IsTrue(ended.Wait(TimeSpan.FromSeconds(60)), "The fix run did not end.");
+        Assert.AreEqual(ExitCodes.PlanOnly, launcher.LastExitCode, "Fix connection prints its plan and ends with PlanOnly; IoError would mean it found nowhere to write.");
+        string logFile = Path.Combine(temp.File("data"), "Local", "Earshot", "logs", "earshot.log");
+        string log = File.Exists(logFile) ? File.ReadAllText(logFile) : "";
+        Assert.IsFalse(log.Contains("no console to write to", StringComparison.Ordinal), log);
+    }
+
+    // Two presses, two cards and a menu item all reach one launcher, so a second run is refused while the first is open.
+    [TestMethod]
+    public void TheLauncherRefusesWhileItsRunIsAlive()
+    {
+        string ping = Path.Combine(Environment.SystemDirectory, "ping.exe");
+        using var ended = new ManualResetEventSlim();
+        var log = new CapturingLog();
+        var launcher = new OwnProgramFixLauncher(() => ended.Set(), () => ping, ["-n", "3", "127.0.0.1"]);
+        Assert.IsFalse(launcher.IsRunning);
+
+        Assert.IsTrue(launcher.Start(log));
+        Assert.IsTrue(launcher.IsRunning);
+        Assert.IsFalse(launcher.Start(log), "A second run while the first is open.");
+        Assert.IsTrue(log.Has(LogLevel.Info, "still open"));
+
+        Assert.IsTrue(ended.Wait(TimeSpan.FromSeconds(30)), "The first run did not end.");
+        Assert.IsFalse(launcher.IsRunning);
+        Assert.AreEqual(0, launcher.LastExitCode);
     }
 }

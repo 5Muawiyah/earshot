@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Earshot.App;
 using Earshot.Contracts;
+using Earshot.Infra;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Integration.Coordinator;
@@ -73,6 +74,66 @@ public sealed class FixRecheckTests
         h.Pump();
 
         Assert.AreEqual(runs, h.Recovery.Runs);
+    }
+
+    // A Fix run started by Setup.exe or by the install script is not a process the tray started, so the tray cannot watch it end.
+    // The fix verb sets a named event as it ends and the tray waits on it. The run here is the real, built Earshot.exe, in safe
+    // mode against a temporary data folder (whose event name is its own), started by this test and not by any launcher.
+    [TestMethod]
+    public void ARunStartedOutsideTheTrayMakesTheTrayRecheck()
+    {
+        string exe = Path.Combine(AppContext.BaseDirectory, "Earshot.exe");
+        if (!File.Exists(exe))
+        {
+            Assert.Inconclusive("The test build has no Earshot.exe beside the tests: " + exe);
+        }
+
+        using var temp = new TempFolder();
+        using var safe = new EnvironmentVariableScope(Paths.SafeModeVariable, "1");
+        using var root = new EnvironmentVariableScope(Paths.DataRootVariable, temp.File("data"));
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        h.Start();
+        Assert.AreEqual(1, h.Recovery.Runs);
+        using var heard = new ManualResetEventSlim();
+        using FixEndedSignal? signal = FixEndedSignal.Listen(
+            FixEndedSignal.NameFor(Paths.Current), () => { h.Ui.Post(_ => h.Coordinator.RecheckProtectionAfterFix(), null); heard.Set(); }, TimeProvider.System, new CapturingLog());
+        Assert.IsNotNull(signal);
+
+        var info = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true };
+        info.ArgumentList.Add("fix");
+        info.ArgumentList.Add("--out");
+        info.ArgumentList.Add(temp.File("fix-out.txt"));
+        using (Process fix = Process.Start(info)!)
+        {
+            Assert.IsTrue(fix.WaitForExit(TimeSpan.FromSeconds(60)), "fix did not end.");
+            Assert.AreEqual(ExitCodes.PlanOnly, fix.ExitCode);
+        }
+
+        Assert.IsTrue(heard.Wait(TimeSpan.FromSeconds(30)), "The tray was not told the run ended.");
+        h.Pump();
+        Assert.AreEqual(2, h.Recovery.Runs, "The start checks run again.");
+        Assert.AreEqual(2, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+    }
+
+    // The tray-started run raises the event and also ends as a process the tray watches: the tray hears twice and rechecks once.
+    [TestMethod]
+    public void TheEventAndTheEndOfTheProcessItStartedMakeOneRecheck()
+    {
+        var time = new ManualTime();
+        int rechecks = 0;
+        using FixEndedSignal? signal = FixEndedSignal.Listen(@"Local\Earshot.FixEnded.test-" + Guid.NewGuid().ToString("N"), () => Interlocked.Increment(ref rechecks), time, new CapturingLog());
+        Assert.IsNotNull(signal);
+
+        signal.Notify("the event");
+        signal.Notify("the process");
+        Assert.AreEqual(1, rechecks);
+
+        time.Advance(FixEndedSignal.CoalesceWindow + TimeSpan.FromMilliseconds(1));
+        signal.Notify("a later run");
+        Assert.AreEqual(2, rechecks);
     }
 
     // The real launcher, against a harmless program that ends at once, in place of this program's own fix mode.

@@ -8,9 +8,10 @@ namespace Earshot.Infra;
 // Append-only text log shared by every run mode.
 //
 // One entry per line: "<UTC ISO 8601> <LEVEL> <message>", with exception text on the following
-// lines, each indented by two spaces. When the file reaches the size cap it is renamed to
-// "<name>.1.log", replacing the previous one, and a new file starts; the log never holds much more
-// than twice the cap.
+// lines, each indented by two spaces. When the file reaches the size cap the first backup "<name>.1.log" becomes
+// "<name>.2.log", replacing the previous one, the file is renamed to "<name>.1.log", and a new file starts; the log never
+// holds much more than three times the cap. Two backups, because the lines of an install run were rolled out of one within
+// a day of ordinary logging.
 //
 // Write never throws. A write that cannot reach the disk is counted, sent to the debugger output,
 // kept in LastWriteError, and reported at the top of the next entry that does reach the file.
@@ -31,6 +32,7 @@ internal sealed class FileLog : ILog
     private readonly string _folder;
     private readonly string _file;
     private readonly string _rolledFile;
+    private readonly string _secondRolledFile;
     private readonly long _maxBytes;
     private readonly bool _rolls;
     private readonly Action<string>? _createFolder;
@@ -46,6 +48,7 @@ internal sealed class FileLog : ILog
         _folder = folder;
         _file = Path.Combine(folder, fileName);
         _rolledFile = Path.Combine(folder, Path.GetFileNameWithoutExtension(fileName) + ".1" + Path.GetExtension(fileName));
+        _secondRolledFile = Path.Combine(folder, Path.GetFileNameWithoutExtension(fileName) + ".2" + Path.GetExtension(fileName));
         _maxBytes = maxBytes;
         _rolls = rolls;
         _createFolder = createFolder;
@@ -54,6 +57,8 @@ internal sealed class FileLog : ILog
     public string FilePath => _file;
 
     public string RolledFilePath => _rolledFile;
+
+    public string SecondRolledFilePath => _secondRolledFile;
 
     // Writes that failed since the last successful one.
     public int FailedWrites
@@ -125,6 +130,13 @@ internal sealed class FileLog : ILog
         var info = new FileInfo(_file);
         if (info.Exists && info.Length + incomingBytes > _maxBytes)
         {
+            // Two backups: the first becomes the second, replacing it, and the file becomes the first. A failure to move the
+            // first aside is not hidden: it stops the roll, and Write reports it as it does any other failed write.
+            if (File.Exists(_rolledFile))
+            {
+                File.Move(_rolledFile, _secondRolledFile, overwrite: true);
+            }
+
             File.Move(_file, _rolledFile, overwrite: true);
         }
     }

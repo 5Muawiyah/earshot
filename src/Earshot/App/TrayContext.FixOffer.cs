@@ -112,6 +112,15 @@ internal sealed partial class TrayContext
             return;
         }
 
+        // One run at a time: a press while the last one is still open (from the card, the menu or the settings page) says so and
+        // starts nothing.
+        if (FixLauncher.IsRunning)
+        {
+            _log.Info("Fix connection: it is already running, so it was not started again.");
+            ShowCard(TrayStatus.AppName, FixOffer.AlreadyRunningMessage, CardPlace.NearTray);
+            return;
+        }
+
         if (!FixLauncher.Start(_log))
         {
             ShowCard(TrayStatus.AppName, FixOffer.NotStartedMessage, CardPlace.NearTray);

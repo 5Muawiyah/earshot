@@ -969,8 +969,18 @@ internal sealed class FakeFixLauncher : IFixLauncher
 {
     public int Started { get; private set; }
 
+    // A run this launcher started that has not ended: Start refuses while it is true, as the real one does.
+    public bool Running { get; set; }
+
+    public bool IsRunning => Running;
+
     public bool Start(ILog log)
     {
+        if (Running)
+        {
+            return false;
+        }
+
         Started++;
         return true;
     }

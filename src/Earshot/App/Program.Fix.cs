@@ -21,6 +21,8 @@ namespace Earshot;
 // ExitCodes.PlanOnly. In safe mode it never counts anyone as present, so it only prints.
 internal static partial class Program
 {
+    internal const string FixOutputLogPrefix = "fix output: ";
+
     static partial void TryRunFix(RunContext ctx)
     {
         Paths paths = Paths.Current;
@@ -42,7 +44,9 @@ internal static partial class Program
             return;
         }
 
-        if (!CommandOutput.TryOpen(outPath, out CommandOutput? output, out string? outputProblem))
+        // The tray and Setup.exe start this verb with no console and no --out: the lines go to the log then, since the run's own
+        // window shows the person the result.
+        if (!CommandOutput.TryOpen(outPath, new LogFallback(log, FixOutputLogPrefix), out CommandOutput? output, out string? outputProblem))
         {
             log.Error("fix: " + outputProblem);
             ctx.ExitCode = ExitCodes.IoError;
@@ -51,7 +55,27 @@ internal static partial class Program
 
         using (output)
         {
-            ctx.ExitCode = RunFix(ctx.Args, paths, log, output.Writer);
+            // One run at a time on this PC: a Fix started from the tray, from Setup.exe and from the install script is three
+            // programs, so the lock is a named mutex. The run that finds it taken starts nothing and says nothing else.
+            using FixRunLock? runLock = FixRunLock.TryAcquire(FixRunLock.NameFor(paths), log);
+            if (runLock is null)
+            {
+                log.Warn("fix: another Fix connection or Pair AirPods run holds the lock, so this run was not started.");
+                output.Writer.WriteLine(FixRunLock.FixAlreadyRunningMessage);
+                ctx.ExitCode = ExitCodes.AlreadyRunning;
+                return;
+            }
+
+            try
+            {
+                ctx.ExitCode = RunFix(ctx.Args, paths, log, output.Writer);
+            }
+            finally
+            {
+                // However the run was started, the tray hears that it ended and runs its start checks again: a run can end with a
+                // new pair Earshot does not protect.
+                FixEndedSignal.Raise(FixEndedSignal.NameFor(paths), log);
+            }
         }
     }
 

@@ -15,4 +15,5 @@ internal static class ExitCodes
     public const int IoError = 74;       // output could not be opened
     public const int Refused = 77;       // refused on purpose, for example in safe mode
     public const int Config = 78;        // bad environment configuration
+    public const int AlreadyRunning = 80; // another Fix connection or Pair AirPods run holds the lock; nothing was started
 }

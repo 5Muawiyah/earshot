@@ -1385,8 +1385,12 @@ function Get-EarshotLogLines
     if (-not (Test-Path -LiteralPath $Run.LogFolder)) { return ,$found }
     foreach ($file in (Get-ChildItem -LiteralPath $Run.LogFolder -Filter '*.log' -File | Sort-Object LastWriteTimeUtc))
     {
-        foreach ($line in (Get-Content -LiteralPath $file.FullName))
+        foreach ($rawLine in (Get-Content -LiteralPath $file.FullName))
         {
+            # A power loss can leave a run of NUL bytes in the log (the file's length is committed before its last data is), and
+            # the next entry Earshot writes follows the run on the same line. The run is no part of the entry: without taking
+            # it off, the stamp is not at the start of the line, its time is never read, and the line is kept whatever its time.
+            $line = ([string]$rawLine).TrimStart([char]0)
             if ($line -notmatch [regex]::Escape($Pattern)) { continue }
             if ($SinceUtc -gt [datetime]::MinValue)
             {
