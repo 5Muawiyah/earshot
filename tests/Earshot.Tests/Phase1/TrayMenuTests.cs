@@ -21,7 +21,7 @@ public sealed class TrayMenuTests
         "Speak status", "-",
         "Show on the taskbar", "Left click connects straight away", "Low battery alert", "Threshold",
         "Name your other device...", "-",
-        "Choose device...", "Set up Earshot...", "Fix connection...", "-",
+        "Choose device...", "Set up Earshot...", "Fix connection...", "Pair AirPods...", "-",
         "Check for updates", "Check automatically", "-",
         "Copy diagnostics", "Exit",
     ];
