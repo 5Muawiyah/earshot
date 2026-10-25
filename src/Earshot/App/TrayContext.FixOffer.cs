@@ -77,6 +77,11 @@ internal sealed partial class TrayContext
             ToggleReport report = await _coordinator.ConnectInWindowsAsync(new ToggleRequest(true, container, title, place), _lifetime.Token);
             _log.Write(report.IsSuccess || report.Cancelled ? LogLevel.Info : LogLevel.Warn,
                 TrayReport.Describe("connect in windows", report.Status, report.UserMessage, report.Steps));
+            if (report.StartPairAirPods)
+            {
+                // Not set up and no AirPods paired: there is nothing to connect in Windows, so the person is taken to pairing.
+                StartPairAirPods(place);
+            }
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {

@@ -53,6 +53,8 @@ public sealed class PairAirPodsTests
         LockName = lockName ?? @"Local\Earshot.Tests.Pair." + Guid.NewGuid().ToString("N"),
     };
 
+    private static MouseEventArgs Press(MouseButtons button) => new(button, clicks: 1, x: 0, y: 0, delta: 0);
+
     private static void Click(TrayHarness tray)
     {
         tray.Context.Menu.Refresh();
@@ -219,6 +221,34 @@ public sealed class PairAirPodsTests
                 release.Set();
                 other.Join();
             }
+        });
+    }
+
+    [TestMethod]
+    public void ConnectInWindowsBeforeSetUpWithNothingPairedStartsPairAirPods()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            var paired = new FakePairedAirPodsCheck { Reading = new PairedAirPodsReading(true, 0) };
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { PairedAirPods = paired },
+                arrange: h => h.Block.Status = Block(BlockState.NotSetUp));
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            tray.Cards.Shown[^1].Content.Action!.OnClick();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(1, paired.Reads);
+            Assert.HasCount(1, rig.Prompter.Asked, "Pair AirPods asked its first question.");
+            Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
         });
     }
 
