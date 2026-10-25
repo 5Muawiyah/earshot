@@ -1445,7 +1445,8 @@ internal sealed class TrayHarness : IDisposable
         Func<string>? diagnosticsLogPath = null,
         PairAirPodsServices? pairAirPods = null,
         CoordinatorServices? coordinatorServices = null,
-        Earshot.Infra.ISettingsLauncher? settingsLauncher = null)
+        Earshot.Infra.ISettingsLauncher? settingsLauncher = null,
+        Earshot.Tracing.ITraceRecorder? traceRecorder = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1604,6 +1605,7 @@ internal sealed class TrayHarness : IDisposable
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
             PairAirPods = pairAirPods,
             SettingsLauncher = settingsLauncher,
+            TraceRecorder = traceRecorder,
         };
         if (displaySource is not null)
         {

@@ -174,6 +174,9 @@ internal sealed partial class TrayContext
             case RadioAction.BluetoothSettings:
                 ShowCardWithButton(TrayStatus.AppName, line, RadioLines.BluetoothSettingsButton, () => Launch("open bluetooth settings", () => OpenBluetoothSettingsAsync(place), place), place);
                 break;
+            case RadioAction.RecordTrace when _traceRecorder is not null && !_registry.SafeMode:
+                ShowCardWithButton(TrayStatus.AppName, line, RadioLines.RecordTraceButton, () => StartTrace(place), place);
+                break;
             default:
                 ShowCard(TrayStatus.AppName, line, place);
                 break;
@@ -337,8 +340,19 @@ internal sealed partial class TrayContext
             return;
         }
 
+        // The AirPods were found but could not be reached: the one case where a trace may show where it stopped.
+        if (result.Unreachable)
+        {
+            ShowRadioCard(UnreachableCheck, place);
+            return;
+        }
+
         ShowCard(TrayStatus.AppName, result.CardLine ?? PairingText.Cancelled, place);
     }
+
+    // What the card needs of a check to say Unreachable when the session ran without one.
+    private static readonly RadioCheckResult UnreachableCheck = new(
+        RadioCheckState.Unreachable, RadioLines.Unreachable, RadioAction.RecordTrace, null, null, null, null, null, null, null, [], 0);
 
     // Another pair taking the place of the pinned one drops the previous pair's last readings and link, so the card and the gauge
     // never show the replaced pair's figures under the new one. Nothing is dropped when no valid pair was pinned before, or when

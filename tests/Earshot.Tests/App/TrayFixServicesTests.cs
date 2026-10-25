@@ -58,6 +58,19 @@ public sealed class TrayFixServicesTests
     }
 
     [TestMethod]
+    public void TheTraceRecorderIsRealOnlyWhereTheHelperCouldRun()
+    {
+        var safe = Paths.FromEnvironment(name => name == Paths.SafeModeVariable ? "1" : null);
+        var redirected = Paths.FromEnvironment(name => name == Paths.DataRootVariable ? Path.GetTempPath() : null);
+
+        Assert.IsNull(Program.CreateTraceRecorder(safe, new CapturingLog()), "The helper refuses safe mode.");
+        Assert.IsNull(Program.CreateTraceRecorder(redirected, new CapturingLog()), "The helper refuses a redirected data folder.");
+        using Earshot.Tracing.ITraceRecorder? real = Program.CreateTraceRecorder(Paths.FromEnvironment(_ => null), new CapturingLog());
+        Assert.IsInstanceOfType<Earshot.Tracing.TraceRecorder>(real);
+        Assert.AreEqual(Earshot.Tracing.TraceState.Idle, real.State, "Making it starts nothing.");
+    }
+
+    [TestMethod]
     public void WithoutASystemWorkerThereIsNothingToAnswerWith()
     {
         CoordinatorServices services = Build(Paths.FromEnvironment(_ => null), null);

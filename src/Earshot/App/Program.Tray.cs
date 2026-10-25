@@ -350,6 +350,28 @@ internal static partial class Program
         };
     }
 
+    // The recorder for a Bluetooth trace. Not in safe mode or against a redirected data folder, where the elevated helper would
+    // refuse; and not when there is no program to elevate or no Documents folder to copy the trace to. Making it starts nothing.
+    // The installed copy is the one elevated when there is one, otherwise the running copy.
+    internal static Tracing.ITraceRecorder? CreateTraceRecorder(Paths paths, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(log);
+        string? executable = File.Exists(paths.InstalledExe) ? paths.InstalledExe : Environment.ProcessPath;
+        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (paths.IsSafeMode || paths.IsRedirected || string.IsNullOrEmpty(executable) || string.IsNullOrEmpty(documents))
+        {
+            return null;
+        }
+
+        return new Tracing.TraceRecorder(
+            new Tracing.TraceRecorderOptions(false, executable, documents, Environment.ProcessId, NewTraceNonce),
+            new ShellRunasLauncher(), new Tracing.TrayTraceSignalsFactory(), new Tracing.TraceUserFiles(Path.Combine(paths.MachineFolder, "trace")), log);
+    }
+
+    // 32 lower-case hex characters, from a random source: the name the tray's signals and the helper's folder share.
+    private static string NewTraceNonce() => Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
+
     private static int RunPrimaryTray(Paths paths, ILog log, bool startedAtLogon, out string? startAfterExit, out StartAfterExitKind startKind)
     {
         startAfterExit = null;
@@ -463,6 +485,7 @@ internal static partial class Program
                     DataRootRedirected = paths.IsRedirected,
                     InstalledExePath = paths.InstalledExe,
                     PairAirPods = paths.IsSafeMode ? null : PairAirPodsServices.CreateReal(paths, log),
+                    TraceRecorder = CreateTraceRecorder(paths, log),
                     UpdateOutcome = paths.IsSafeMode || paths.IsRedirected
                         ? null
                         : new UpdateOutcomeSource(paths.MachineFolder, Path.Combine(paths.LocalFolder, "update", "outcome-shown.txt")),

@@ -222,6 +222,10 @@ internal sealed class FakeCardHost : IWidgetCardHost
 
     public void PairAirPods() => PairAirPodsCalls++;
 
+    public int RecordTraceCalls { get; private set; }
+
+    public void RecordTrace() => RecordTraceCalls++;
+
     public void SwitchToInstalled() => SwitchCalls++;
 }
 

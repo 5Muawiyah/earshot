@@ -216,6 +216,9 @@ internal interface IWidgetCardHost
     // Starts Pair AirPods, which looks for AirPods in pairing mode and asks its own questions on screen.
     void PairAirPods();
 
+    // Starts a Bluetooth trace, or stops one that is running. One administrator prompt.
+    void RecordTrace();
+
     void SwitchToInstalled();
 
     // Raised, on any thread, whenever the update flow moves.

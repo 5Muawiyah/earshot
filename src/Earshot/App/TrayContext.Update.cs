@@ -73,6 +73,7 @@ internal sealed partial class TrayContext
         WireRepair(options);
         WireFixConnection();
         WirePairAirPods(options);
+        WireTrace(options);
         RemoveStaleUpdateStaging();
         ApplyUpdates();
         if (options.UpdateOutcome is { } outcomeSource)

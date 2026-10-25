@@ -169,6 +169,9 @@ internal sealed record TrayStartOptions(
     // the machine's Bluetooth.
     public PairAirPodsServices? PairAirPods { get; init; }
 
+    // Records a Bluetooth trace: the real recorder in the program, a fake in a test. Null means this tray cannot record one.
+    public Earshot.Tracing.ITraceRecorder? TraceRecorder { get; init; }
+
     // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
     // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
     // widget-enabled tray-level test injects a fake instead, so GaugeController's own fallback logic
@@ -667,6 +670,7 @@ internal sealed partial class TrayContext : ApplicationContext
         if (disposing)
         {
             Close();
+            UnwireTrace();
             _registry.Monitor.SnapshotChanged -= OnSnapshotChanged;
             _registry.Settings.Changed -= OnSettingsChanged;
             _coordinator.Changed -= OnCoordinatorChanged;

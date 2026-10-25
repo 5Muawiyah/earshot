@@ -289,6 +289,8 @@ internal sealed partial class TrayContext
 
         public void PairAirPods() => _tray.PairAirPodsFromSettings();
 
+        public void RecordTrace() => _tray.RecordTraceFromSettings();
+
         public void SwitchToInstalled() => _tray.SwitchToInstalledCopy();
 
         private void Write(string what, Action<EarshotSettings> mutate, CardPlace place)
