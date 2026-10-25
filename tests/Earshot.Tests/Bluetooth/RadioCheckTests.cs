@@ -166,6 +166,17 @@ public sealed class RadioCheckTests
     }
 
     [TestMethod]
+    public async Task TheCheckIsTimedInTheLog()
+    {
+        var log = new CapturingLog();
+        var check = new RadioCheck(new FakeRadioApi(_ => Task.FromResult(Adapter(RadioStateValues.Off))), new FakeNodes(Node()), null, log);
+
+        await check.CheckAsync(CancellationToken.None);
+
+        Assert.IsTrue(log.Has(LogLevel.Info, "radio check: Off in "), string.Join("; ", log.Entries.Select(e => e.Message)));
+    }
+
+    [TestMethod]
     public async Task ACancelledCheckThrowsRatherThanReportingAState()
     {
         using var cts = new CancellationTokenSource();

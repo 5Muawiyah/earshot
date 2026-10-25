@@ -157,6 +157,13 @@ internal sealed class RadioCheck : IRadioCheck
 
     public async Task<RadioCheckResult> CheckAsync(CancellationToken ct)
     {
+        RadioCheckResult result = await CheckCoreAsync(ct).ConfigureAwait(false);
+        _log?.Info("radio check: " + result.State + " in " + result.ElapsedMs.ToString(CultureInfo.InvariantCulture) + " ms.");
+        return result;
+    }
+
+    private async Task<RadioCheckResult> CheckCoreAsync(CancellationToken ct)
+    {
         var watch = Stopwatch.StartNew();
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         Task<AdapterReading> read = _api.ReadAsync(cts.Token);
