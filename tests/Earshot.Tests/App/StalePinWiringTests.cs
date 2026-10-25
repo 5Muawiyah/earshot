@@ -180,6 +180,29 @@ public sealed class StalePinWiringTests
     }
 
     [TestMethod]
+    public void AFailedConnectToAPairThatIsNoLongerPairedOffersPairAirPodsNotFixOrConnectInWindows()
+    {
+        StaThread.Run(() =>
+        {
+            // The harness pins the pair its snapshot shows; the rig's Windows holds a different one, so the pin is stale.
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            tray.Cards.Shown.Clear();
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+
+            tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+            tray.PumpUntilIdle();
+
+            CardContent card = Last(tray);
+            Assert.AreEqual("No AirPods are paired with this PC.", card.Status);
+            Assert.AreEqual("Pair AirPods", card.Action?.Label);
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Action?.Label is "Fix connection" or "Connect in Windows"));
+        });
+    }
+
+    [TestMethod]
     public void SetUpWithAPairThatIsStillThereGoesAhead()
     {
         StaThread.Run(() =>

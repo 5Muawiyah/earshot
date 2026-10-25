@@ -1000,11 +1000,18 @@ internal sealed partial class TrayContext : ApplicationContext
             }
             else if (fixOffered)
             {
-                ShowFixOffer(intent.DeviceName, report.UserMessage, place);
+                // A pinned pair that is no longer paired cannot be fixed or connected: the person is told so and offered Pair AirPods.
+                if (await CheckPinnedPairAsync("connect failed", place))
+                {
+                    ShowFixOffer(intent.DeviceName, report.UserMessage, place);
+                }
             }
             else if (!_registry.SafeMode && ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
             {
-                ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
+                if (await CheckPinnedPairAsync("connect failed", place))
+                {
+                    ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
+                }
             }
 
             // A click sees the result on the icon; a hotkey has nothing else to show it, so it gets a
