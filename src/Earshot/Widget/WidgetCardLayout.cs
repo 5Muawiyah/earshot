@@ -425,7 +425,7 @@ internal static class WidgetCardLayout
         int repairWidth = buttonWidth;
         int fourteen = CardPlacement.Scale(14, dpi);
         int labelLine = TextFit.Grow(SettingsPageLayout.LabelLineAt96, dpi, textScale);
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < 5; i++)
         {
             if (i == 2 && !rows.ShowRepair)
             {
@@ -437,7 +437,7 @@ internal static class WidgetCardLayout
 
             // The name wraps in the room left of the control, and the row is as high as it needs: the control row (20t + 12) or the
             // name's lines, whichever is more, with 8 above and below.
-            string name = i switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, 2 => WidgetCopy.RepairEarshot, _ => WidgetCopy.FixConnectionRow };
+            string name = i switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, 2 => WidgetCopy.RepairEarshot, 3 => WidgetCopy.FixConnectionRow, _ => WidgetCopy.PairAirPodsRow };
             int labelWidth = Math.Max(1, (surface.Right - padRight - controlWidth) - gap - labelLeft);
             int nameLines = measure is null ? 1 : Math.Max(1, measure.Lines(name, labelWidth, fourteen, labelLine));
             int nameHeight = labelLine * nameLines;
