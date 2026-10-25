@@ -66,6 +66,41 @@ public sealed class FileLogTests
     }
 
     // An elevated run logging under a user's profile never renames or replaces a file there.
+    // The log of an install run must survive a day of logging after it: one backup of 1 MB was rolled away within hours, which is
+    // how the lines of the 13 October install were lost. Two backups keep the file and the two before it.
+    [TestMethod]
+    public void RollingKeepsTwoBackups()
+    {
+        using var temp = new TempFolder();
+        var log = new FileLog(temp.Path, maxBytes: 2048);
+
+        // About 40 bytes a line, 50 lines a file: 400 lines are 8 files' worth.
+        for (int i = 0; i < 400; i++)
+        {
+            log.Info("line " + i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        Assert.IsTrue(File.Exists(log.FilePath));
+        Assert.IsTrue(File.Exists(log.RolledFilePath));
+        Assert.IsTrue(File.Exists(log.SecondRolledFilePath), "There is no second backup.");
+        Assert.IsFalse(File.Exists(Path.Combine(temp.Path, "earshot.3.log")), "A third backup is kept.");
+        Assert.IsLessThanOrEqualTo(2048L, new FileInfo(log.SecondRolledFilePath).Length);
+        int firstOfCurrent = FirstLine(log.FilePath);
+        int firstOfFirst = FirstLine(log.RolledFilePath);
+        int firstOfSecond = FirstLine(log.SecondRolledFilePath);
+        Assert.IsLessThan(firstOfFirst, firstOfSecond, "The second backup is not older than the first.");
+        Assert.IsLessThan(firstOfCurrent, firstOfFirst, "The first backup is not older than the file.");
+        Assert.AreEqual(firstOfFirst, LastLine(log.SecondRolledFilePath) + 1, "A line was lost between the second backup and the first.");
+        Assert.AreEqual(firstOfCurrent, LastLine(log.RolledFilePath) + 1, "A line was lost between the first backup and the file.");
+        Assert.AreEqual(399, LastLine(log.FilePath));
+    }
+
+    private static int FirstLine(string file) => LineNumber(File.ReadLines(file).First());
+
+    private static int LastLine(string file) => LineNumber(File.ReadLines(file).Last());
+
+    private static int LineNumber(string entry) => int.Parse(entry[^4..], System.Globalization.CultureInfo.InvariantCulture);
+
     [TestMethod]
     public void ALogThatDoesNotRollOnlyAppends()
     {
