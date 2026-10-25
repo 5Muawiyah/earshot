@@ -43,7 +43,12 @@ internal static class DoctorFixture
             { "name": "BTAGService", "state": "Stopped" },
             { "name": "BthAvctpSvc", "state": "" }
           ],
-          "radio": { "found": true, "driverVersion": "23.60.0.2" },
+          "radio": {
+            "found": true, "driverVersion": "23.60.0.2", "adapterFound": true, "classicSupported": true, "state": "Problem", "radioState": "On",
+            "devNodeStatus": "0x00000400", "problemCode": 10, "driverDate": "2024-03-09",
+            "readCodes": [ "cm-status-radio:CR_SUCCESS", "bluetooth-radio:S_OK" ]
+          },
+          "startup": { "runCommand": "\"C:\\Users\\jonathan\\AppData\\Local\\Programs\\Earshot\\Earshot.exe\" --startup", "targetExists": false, "approvedFlag": "02" },
           "filters": [
             { "name": "BattMonFltr", "on": "airpods" },
             { "name": "BthEnum", "on": "rfcomm" }
@@ -60,6 +65,11 @@ internal static class DoctorFixture
               "{\"time\":11111822610060,\"step\":11111822610060,\"outcome\":\"seen 00000A1B2C3D4E8C and 11111822610060\",\"reason\":\"ok\"}",
               "{\"time\":\"2026-10-12T09:15:30.123Z\",\"step\":\"connect\",\"outcome\":\"ok\",\"code\":0,\"attempt\":1,\"durationMs\":850}",
               "{\"time\":\"11111822610060\",\"step\":\"connect\",\"outcome\":\"ok\",\"code\":\"11111822610060\"}"
+            ],
+            "pairing": [
+              { "time": "2026-10-25T20:03:40Z", "outcome": "failed", "status": "AuthenticationFailure", "statusValue": 9, "modelCheck": null, "durationMs": 61000 },
+              { "time": "2026-10-25T20:08:22Z", "outcome": "paired", "status": "Paired", "statusValue": 0, "modelCheck": "airpods", "durationMs": 21000 },
+              { "time": "Jonathan at 0A1B2C3D4E8C", "outcome": "Jonathan's AirPods Pro", "status": "see 0A:1B:2C:3D:4E:8C", "statusValue": 11111822610060, "modelCheck": "x y", "durationMs": -4 }
             ]
           },
           "lastReadingSaved": true,

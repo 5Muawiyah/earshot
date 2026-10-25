@@ -62,7 +62,13 @@ internal static class DoctorReport
     // A time written as text must be a plain UTC time and nothing else.
     private static readonly Regex IsoTime = new(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?Z$", RegexOptions.CultureInvariant);
 
-    private static readonly Regex OneWord =new("^[A-Za-z0-9_.:-]{1,40}$", RegexOptions.CultureInvariant);
+    private static readonly Regex ApprovedByte = new("^[0-9A-Fa-f]{2}$", RegexOptions.CultureInvariant);
+
+    private static readonly Regex HexNumber = new("^0x[0-9A-Fa-f]{1,8}$", RegexOptions.CultureInvariant);
+
+    private static readonly Regex IsoDate = new(@"^\d{4}-\d{2}-\d{2}$", RegexOptions.CultureInvariant);
+
+    private static readonly Regex OneWord = new("^[A-Za-z0-9_.:-]{1,40}$", RegexOptions.CultureInvariant);
 
     public static string Build(DoctorFacts f)
     {
@@ -95,24 +101,25 @@ internal static class DoctorReport
         known.Add(computer);
         string Safe(string? text) => DiagnosticsRedactor.Redact(text, known, user);
 
-        InstallFacts? install = f.Install;
-        string? folder = null;
-        if (!string.IsNullOrEmpty(install?.Folder))
+        // A path with the profile or the local app data folder in it is written with the variable in its place.
+        string Shorten(string path)
         {
-            folder = install.Folder;
             string localApp = f.Identity?.LocalAppData ?? "";
             string profile = f.Identity?.Profile ?? "";
-            if (localApp.Length > 0 && folder.StartsWith(localApp, StringComparison.OrdinalIgnoreCase))
+            if (localApp.Length > 0 && path.StartsWith(localApp, StringComparison.OrdinalIgnoreCase))
             {
-                folder = "%LOCALAPPDATA%" + folder[localApp.Length..];
+                path = "%LOCALAPPDATA%" + path[localApp.Length..];
             }
-            else if (profile.Length > 0 && folder.StartsWith(profile, StringComparison.OrdinalIgnoreCase))
+            else if (profile.Length > 0 && path.StartsWith(profile, StringComparison.OrdinalIgnoreCase))
             {
-                folder = "%USERPROFILE%" + folder[profile.Length..];
+                path = "%USERPROFILE%" + path[profile.Length..];
             }
 
-            folder = Safe(folder);
+            return Safe(path);
         }
+
+        InstallFacts? install = f.Install;
+        string? folder = string.IsNullOrEmpty(install?.Folder) ? null : Shorten(install.Folder);
 
         int trayCount = f.TrayProcesses ?? 0;
 
@@ -127,6 +134,35 @@ internal static class DoctorReport
         WriteStringOrNull(w, "installedAppsVersion", string.IsNullOrEmpty(install?.AppsVersion) ? null : Safe(install.AppsVersion));
         w.WriteBoolean("startMenuShortcut", install?.StartMenuShortcut == true);
         w.WriteBoolean("runValue", install?.RunValue == true);
+        w.WriteEndObject();
+
+        // Where the sign-in start points. The flag's byte is raw: the format is undocumented, and bit 0x1 set is how the tray
+        // reads "turned off in Windows".
+        string? target = StartupFact.TargetOf(f.Startup?.RunCommand);
+        w.WriteStartObject("startup");
+        w.WriteBoolean("runValue", target is not null);
+        WriteStringOrNull(w, "target", target is null ? null : Shorten(target));
+        if (target is not null && f.Startup?.TargetExists is bool exists)
+        {
+            w.WriteBoolean("targetExists", exists);
+        }
+        else
+        {
+            w.WriteNull("targetExists");
+        }
+
+        string? flag = f.Startup?.ApprovedFlag;
+        bool flagIsByte = flag is not null && ApprovedByte.IsMatch(flag);
+        WriteStringOrNull(w, "approvedFlag", flagIsByte ? flag : null);
+        if (flagIsByte)
+        {
+            w.WriteBoolean("turnedOffInWindows", (Convert.ToInt32(flag, 16) & 1) != 0);
+        }
+        else
+        {
+            w.WriteNull("turnedOffInWindows");
+        }
+
         w.WriteEndObject();
 
         w.WriteStartObject("tray");
@@ -207,9 +243,32 @@ internal static class DoctorReport
 
         w.WriteEndArray();
 
+        RadioFact? radio = f.Radio;
         w.WriteStartObject("radio");
-        w.WriteBoolean("found", f.Radio?.Found == true);
-        WriteStringOrNull(w, "driverVersion", string.IsNullOrEmpty(f.Radio?.DriverVersion) ? null : Safe(f.Radio.DriverVersion));
+        w.WriteBoolean("found", radio?.Found == true);
+        WriteBoolOrNull(w, "adapterFound", radio?.AdapterFound);
+        WriteBoolOrNull(w, "classicSupported", radio?.ClassicSupported);
+        WriteWordOrNull(w, "state", radio?.State);
+        WriteWordOrNull(w, "radioState", radio?.RadioState);
+        WriteStringOrNull(w, "devNodeStatus", radio?.DevNodeStatus is { } status && HexNumber.IsMatch(status) ? status : null);
+        if (radio?.ProblemCode is int problemCode)
+        {
+            w.WriteNumber("problemCode", problemCode);
+        }
+        else
+        {
+            w.WriteNull("problemCode");
+        }
+
+        WriteStringOrNull(w, "driverVersion", string.IsNullOrEmpty(radio?.DriverVersion) ? null : Safe(radio.DriverVersion));
+        WriteStringOrNull(w, "driverDate", radio?.DriverDate is { } driverDate && IsoDate.IsMatch(driverDate) ? driverDate : null);
+        w.WriteStartArray("readCodes");
+        foreach (string code in radio?.ReadCodes ?? [])
+        {
+            w.WriteStringValue(Safe(code.Length > 80 ? code[..80] : code));
+        }
+
+        w.WriteEndArray();
         w.WriteEndObject();
 
         w.WriteStartArray("filterDrivers");
@@ -245,6 +304,38 @@ internal static class DoctorReport
         w.WriteEndArray();
         w.WriteEndObject();
 
+        // The last pairing runs, as plain tokens; a value that is not one is dropped, so no free text from a writer survives.
+        w.WriteStartArray("pairing");
+        foreach (PairingFact run in (f.History?.Pairing ?? []).TakeLast(5))
+        {
+            w.WriteStartObject();
+            WriteStringOrNull(w, "time", run.Time is { } time && IsoTime.IsMatch(time) ? time : null);
+            WriteWordOrNull(w, "outcome", run.Outcome);
+            WriteWordOrNull(w, "status", run.Status);
+            if (run.StatusValue is long statusValue && statusValue is >= int.MinValue and <= uint.MaxValue)
+            {
+                w.WriteNumber("statusValue", statusValue);
+            }
+            else
+            {
+                w.WriteNull("statusValue");
+            }
+
+            WriteWordOrNull(w, "modelCheck", run.ModelCheck);
+            if (run.DurationMs is long duration && duration is >= 0 and <= 86_400_000)
+            {
+                w.WriteNumber("durationMs", duration);
+            }
+            else
+            {
+                w.WriteNull("durationMs");
+            }
+
+            w.WriteEndObject();
+        }
+
+        w.WriteEndArray();
+
         w.WriteStartObject("protection");
         w.WriteBoolean("pinned", f.Protection?.Pinned == true);
         if (f.Protection is { } protection)
@@ -275,6 +366,22 @@ internal static class DoctorReport
         w.WriteEndArray();
         w.WriteEndObject();
     }
+
+    private static void WriteBoolOrNull(Utf8JsonWriter w, string name, bool? value)
+    {
+        if (value is bool b)
+        {
+            w.WriteBoolean(name, b);
+        }
+        else
+        {
+            w.WriteNull(name);
+        }
+    }
+
+    // A value kept only when it is one plain word, so free text under a word key never reaches the report.
+    private static void WriteWordOrNull(Utf8JsonWriter w, string name, string? value) =>
+        WriteStringOrNull(w, name, value is not null && OneWord.IsMatch(value) ? value : null);
 
     private static void WriteStringOrNull(Utf8JsonWriter w, string name, string? value)
     {
@@ -413,9 +520,39 @@ internal static class DoctorReport
         }
 
         JsonElement radio = report.GetProperty("radio");
-        sb.AppendLine(radio.GetProperty("found").GetBoolean()
-            ? "Bluetooth radio driver: " + (radio.GetProperty("driverVersion").GetString() ?? "version unknown") + "."
-            : "Bluetooth radio: none found.");
+        string? radioState = radio.GetProperty("state").GetString();
+        if (radio.GetProperty("found").GetBoolean())
+        {
+            string problem = radio.GetProperty("problemCode").ValueKind == JsonValueKind.Number && radio.GetProperty("problemCode").GetInt32() != 0
+                ? ", problem code " + radio.GetProperty("problemCode").GetInt32().ToString(CultureInfo.InvariantCulture)
+                : "";
+            string date = radio.GetProperty("driverDate").GetString() is { Length: > 0 } day ? " (" + day + ")" : "";
+            sb.AppendLine("Bluetooth radio: " + (radioState ?? "state unknown") + problem + ", driver " + (radio.GetProperty("driverVersion").GetString() ?? "version unknown") + date + ".");
+        }
+        else
+        {
+            sb.AppendLine("Bluetooth radio: none found" + (radioState is null ? "" : " (" + radioState + ")") + ".");
+        }
+
+        JsonElement startup = report.GetProperty("startup");
+        if (startup.GetProperty("runValue").GetBoolean() && startup.GetProperty("targetExists").ValueKind == JsonValueKind.False)
+        {
+            sb.AppendLine("Open on startup: the Run value points at a file that is not there.");
+        }
+
+        if (startup.GetProperty("turnedOffInWindows").ValueKind == JsonValueKind.True)
+        {
+            sb.AppendLine("Open on startup: turned off in Windows' startup settings.");
+        }
+
+        JsonElement pairing = report.GetProperty("pairing");
+        if (pairing.GetArrayLength() > 0)
+        {
+            JsonElement last = pairing[pairing.GetArrayLength() - 1];
+            sb.AppendLine("Last pairing: " + (last.GetProperty("outcome").GetString() ?? "unknown") + " (" + (last.GetProperty("status").GetString() ?? "no status") + ")" +
+                (last.GetProperty("time").GetString() is { } at ? " at " + at : "") + ".");
+        }
+
         List<string> filters = report.GetProperty("filterDrivers").EnumerateArray()
             .Select(x => x.GetProperty("name").GetString() + " (" + x.GetProperty("on").GetString() + ")").ToList();
         sb.AppendLine(filters.Count > 0 ? "Filter drivers: " + string.Join(", ", filters) + "." : "Filter drivers: none.");

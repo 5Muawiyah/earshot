@@ -3,8 +3,10 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
+using Earshot.Bluetooth;
 using Earshot.Boot;
 using Earshot.Contracts;
+using Earshot.Pairing;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Enumeration;
 
@@ -33,7 +35,10 @@ internal enum FixPairKind
 
 internal sealed record PairedDevice(string Id, string Name, string Address12, Guid ContainerId);
 
-internal sealed record UnpairedDevice(string Id, string Name, string Address12, bool IsAudioVideo);
+// A device the scan listed. MinorClass and IsPresent are null until a watcher event reports them; the Bluetooth class of device
+// is major then minor (Audio/Video, then Headphones or Wearable headset for AirPods).
+// https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothminorclass
+internal sealed record UnpairedDevice(string Id, string Name, string Address12, bool IsAudioVideo, uint? MinorClass = null, bool? IsPresent = null);
 
 internal enum WatchEventKind
 {
@@ -47,8 +52,9 @@ internal sealed record WatchEvent(WatchEventKind Kind, UnpairedDevice? Device);
 
 internal sealed record PairedListResult(IReadOnlyList<PairedDevice> Devices, IReadOnlyList<StepOutcome> Steps);
 
-// A status Windows returned: the enum name, its number, and whether it means done.
-internal sealed record PairingCallResult(string Name, int Code, bool Success, string? Detail);
+// A status Windows returned: the enum name, its number, and whether it means done. Threw says the call raised an exception
+// instead: Name is then the exception type and Code its HRESULT, not a status.
+internal sealed record PairingCallResult(string Name, int Code, bool Success, string? Detail, bool Threw = false);
 
 internal interface IPairingPrompt
 {
@@ -88,12 +94,15 @@ internal sealed partial class WinRtPairingApi : IPairingApi
     internal const string AddressProperty = "System.Devices.Aep.DeviceAddress";
     internal const string ContainerProperty = "System.Devices.Aep.ContainerId";
     internal const string MajorClassProperty = "System.Devices.Aep.Bluetooth.Cod.Major";
+    internal const string MinorClassProperty = "System.Devices.Aep.Bluetooth.Cod.Minor";
+    internal const string IsPresentProperty = "System.Devices.Aep.IsPresent";
+    internal const string NameProperty = "System.ItemNameDisplay";
 
     // Class of device, major class: Audio/Video.
     // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothmajorclass
     private const uint AudioVideoMajorClass = 4;
 
-    private static readonly string[] RequestedProperties = [AddressProperty, ContainerProperty, MajorClassProperty];
+    private static readonly string[] RequestedProperties = [AddressProperty, ContainerProperty, MajorClassProperty, MinorClassProperty, IsPresentProperty, NameProperty];
 
     [GeneratedRegex(@"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", RegexOptions.CultureInvariant)]
     private static partial Regex MacInId();
@@ -167,7 +176,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
     {
         if (!FixPlatform.HasDeviceEnumeration)
         {
-            return new PairingCallResult("NotAvailable", -1, false, "Windows is older than 10.0.19041.");
+            return new PairingCallResult("NotAvailable", -1, false, "Windows is older than 10.0.19041.", Threw: true);
         }
 
         return await UnpairGuardedAsync(deviceId, ct).ConfigureAwait(false);
@@ -186,7 +195,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException or ArgumentException)
         {
-            return new PairingCallResult(ex.GetType().Name, ex.HResult, false, "HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture));
+            return new PairingCallResult(ex.GetType().Name, ex.HResult, false, "HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture), Threw: true);
         }
     }
 
@@ -215,7 +224,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
         ArgumentNullException.ThrowIfNull(prompt);
         if (!FixPlatform.HasDeviceEnumeration)
         {
-            return new PairingCallResult("NotAvailable", -1, false, "Windows is older than 10.0.19041.");
+            return new PairingCallResult("NotAvailable", -1, false, "Windows is older than 10.0.19041.", Threw: true);
         }
 
         return await PairGuardedAsync(deviceId, prompt, ct).ConfigureAwait(false);
@@ -246,7 +255,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
         }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException or ArgumentException)
         {
-            return new PairingCallResult(ex.GetType().Name, ex.HResult, false, "HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture));
+            return new PairingCallResult(ex.GetType().Name, ex.HResult, false, "HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture), Threw: true);
         }
     }
 
@@ -269,6 +278,45 @@ internal sealed partial class WinRtPairingApi : IPairingApi
         }
     }
 
+    // What one event carries. A property the event lacks stays null (or false for the class), and the session merges the
+    // events of one device, so a later update that carries only the name or the class fills in what was missing.
+    internal static UnpairedDevice DescribeDevice(string id, string name, IReadOnlyDictionary<string, object> properties)
+    {
+        string address = "";
+        if (properties.TryGetValue(AddressProperty, out object? a) && a is string text)
+        {
+            string hex = new(text.Where(Uri.IsHexDigit).ToArray());
+            address = hex.Length == 12 ? hex.ToUpperInvariant() : "";
+        }
+
+        if (address.Length == 0)
+        {
+            MatchCollection matches = MacInId().Matches(id);
+            address = matches.Count > 0 ? matches[^1].Value.Replace(":", "", StringComparison.Ordinal).ToUpperInvariant() : "";
+        }
+
+        if (name.Length == 0 && properties.TryGetValue(NameProperty, out object? shown) && shown is string display)
+        {
+            name = display;
+        }
+
+        bool av = properties.TryGetValue(MajorClassProperty, out object? m) && AsUInt(m) == AudioVideoMajorClass;
+        uint? minor = properties.TryGetValue(MinorClassProperty, out object? n) ? AsUInt(n) : null;
+        bool? present = properties.TryGetValue(IsPresentProperty, out object? p) && p is bool b ? b : null;
+        return new UnpairedDevice(id, name, address, av, minor, present);
+    }
+
+    // The numeric types a property bag may hand back for a class of device field.
+    private static uint? AsUInt(object? value) => value switch
+    {
+        uint u => u,
+        int i and >= 0 => (uint)i,
+        ushort us => us,
+        short sh and >= 0 => (uint)sh,
+        byte by => by,
+        _ => null,
+    };
+
     [SupportedOSPlatform("windows10.0.19041.0")]
     private sealed class RealWatch : IUnpairedWatch
     {
@@ -281,8 +329,8 @@ internal sealed partial class WinRtPairingApi : IPairingApi
             {
                 string selector = BluetoothDevice.GetDeviceSelectorFromPairingState(false);
                 _watcher = DeviceInformation.CreateWatcher(selector, RequestedProperties);
-                _watcher.Added += (_, info) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Added, Describe(info.Id, info.Name, info.Properties)));
-                _watcher.Updated += (_, update) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Updated, Describe(update.Id, "", update.Properties)));
+                _watcher.Added += (_, info) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Added, DescribeDevice(info.Id, info.Name, info.Properties)));
+                _watcher.Updated += (_, update) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Updated, DescribeDevice(update.Id, "", update.Properties)));
                 _watcher.Removed += (_, update) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Removed, new UnpairedDevice(update.Id, "", "", false)));
                 _watcher.EnumerationCompleted += (_, _) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.InitialListDone, null));
                 _watcher.Start();
@@ -295,25 +343,6 @@ internal sealed partial class WinRtPairingApi : IPairingApi
                     yield return e;
                 }
             }
-        }
-
-        private static UnpairedDevice Describe(string id, string name, IReadOnlyDictionary<string, object> properties)
-        {
-            string address = "";
-            if (properties.TryGetValue(AddressProperty, out object? a) && a is string text)
-            {
-                string hex = new(text.Where(Uri.IsHexDigit).ToArray());
-                address = hex.Length == 12 ? hex.ToUpperInvariant() : "";
-            }
-
-            if (address.Length == 0)
-            {
-                MatchCollection matches = MacInId().Matches(id);
-                address = matches.Count > 0 ? matches[^1].Value.Replace(":", "", StringComparison.Ordinal).ToUpperInvariant() : "";
-            }
-
-            bool av = properties.TryGetValue(MajorClassProperty, out object? m) && m is uint major && major == AudioVideoMajorClass;
-            return new UnpairedDevice(id, name, address, av);
         }
 
         public void Dispose()
@@ -344,9 +373,11 @@ internal enum RePairFailure
     Cancelled,
     PairFailed,
     NotAirPodsAfterPair,
+    RadioNotReady,
 }
 
-// Touched: something was removed or a scan began, so the normal block must follow.
+// Touched: something was removed or a scan began, so the normal block must follow. Session is the pairing session's result when
+// one ran (or was refused by the radio check), for the one connect-history entry of the run.
 internal sealed record RePairResult(
     bool Paired,
     RePairFailure Failure,
@@ -355,8 +386,10 @@ internal sealed record RePairResult(
     IReadOnlyList<string> Lines,
     bool Touched,
     bool NodesRemainedAfterUnpair,
-    IReadOnlyList<StepOutcome> Steps);
+    IReadOnlyList<StepOutcome> Steps,
+    PairingSessionResult? Session = null);
 
+// Fix connection's second step: remove the pinned pair, then pair again through the shared pairing session.
 internal sealed class RePairer
 {
     private readonly IPairingApi _api;
@@ -364,8 +397,9 @@ internal sealed class RePairer
     private readonly IFixRePairUi _ui;
     private readonly FixOptions _options;
     private readonly ILog _log;
+    private readonly IRadioCheck? _radio;
 
-    public RePairer(IPairingApi api, INodeReader nodes, IFixRePairUi ui, FixOptions options, ILog log)
+    public RePairer(IPairingApi api, INodeReader nodes, IFixRePairUi ui, FixOptions options, ILog log, IRadioCheck? radio = null)
     {
         ArgumentNullException.ThrowIfNull(api);
         ArgumentNullException.ThrowIfNull(nodes);
@@ -377,13 +411,8 @@ internal sealed class RePairer
         _ui = ui;
         _options = options;
         _log = log;
+        _radio = radio;
     }
-
-    // Apple's words for putting AirPods in pairing mode.
-    // https://support.apple.com/en-us/108786
-    public const string PairingModeInstruction =
-        "Open the case lid. For AirPods Pro 3, double-tap the front of the case until the status light flashes white. " +
-        "For older AirPods, press and hold the setup button on the back of the case until the status light flashes white.";
 
     public async Task<RePairResult> RunAsync(FixConsent consent, RePairTarget? target, CancellationToken ct)
     {
@@ -398,6 +427,17 @@ internal sealed class RePairer
         var steps = new List<StepOutcome>();
         bool touched = false;
         bool remained = false;
+        var session = new PairingSession(_api, _nodes, _ui, _options, _log, _radio);
+
+        // The radio is read before anything is removed: a pair is never taken away from a PC whose Bluetooth cannot pair it again.
+        RadioCheckResult? radio = await session.CheckRadioAsync(ct).ConfigureAwait(false);
+        if (radio is { BlocksRepair: true })
+        {
+            PairingSessionResult refused = await session.RunAsync(excludeAlreadyListed: true, ct, radio).ConfigureAwait(false);
+            lines.AddRange(refused.Lines);
+            steps.AddRange(refused.Steps);
+            return Done(false, RePairFailure.RadioNotReady, null, refused);
+        }
 
         if (target is not null)
         {
@@ -437,186 +477,29 @@ internal sealed class RePairer
                 : "The device entries for it are gone from Windows' list.");
         }
 
-        // The scan. It starts only here, after the second OK.
+        // The scan. It starts only here, after the second OK. The removed pair is still listed by the watcher, so what was listed
+        // before the instruction is never offered back.
         touched = true;
-        using IUnpairedWatch watch = _api.Watch();
-        using var pumpCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var seen = new List<WatchEvent>();
-        var baselineDone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task pump = PumpAsync(watch, seen, baselineDone, pumpCts.Token);
-
-        try
+        PairingSessionResult ran = await session.RunAsync(excludeAlreadyListed: true, ct, radio).ConfigureAwait(false);
+        lines.AddRange(ran.Lines);
+        steps.AddRange(ran.Steps);
+        if (ran.PairStatus is not null)
         {
-            using (var baselineWait = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            {
-                // A real wait, not the injected one: the list Windows already holds is read for as long as it takes, up to this.
-                Task limit = Task.Delay(_options.BaselineWait, baselineWait.Token);
-                await Task.WhenAny(baselineDone.Task, limit).ConfigureAwait(false);
-                await baselineWait.CancelAsync().ConfigureAwait(false);
-            }
-
-            HashSet<string> baseline;
-            int mark;
-            lock (seen)
-            {
-                // Everything up to the end of the first listing is what Windows already knew. Events that came in after that
-                // point, even before this line ran, are not part of it.
-                int listed = seen.FindIndex(e => e.Kind == WatchEventKind.InitialListDone);
-                mark = listed >= 0 ? listed + 1 : seen.Count;
-                baseline = seen.Take(mark).Where(e => e.Device is not null).Select(e => e.Device!.Id).ToHashSet(StringComparer.Ordinal);
-            }
-
-            _ui.ShowInstruction(PairingModeInstruction);
-
-            List<UnpairedDevice> candidates = await WaitForCandidatesAsync(seen, mark, baseline, pump, ct).ConfigureAwait(false);
-            if (candidates.Count == 0)
-            {
-                lines.Add("No new Bluetooth audio device appeared. Nothing was paired.");
-                return Done(false, RePairFailure.NoDevice);
-            }
-
-            UnpairedDevice? chosen = await _ui.PickAsync(candidates).ConfigureAwait(false);
-            if (chosen is null)
-            {
-                lines.Add("No device was chosen. Nothing was paired.");
-                return Done(false, RePairFailure.Cancelled);
-            }
-
-            // The scan has done its job; stop it before pairing starts.
-            await pumpCts.CancelAsync().ConfigureAwait(false);
-            PairingCallResult pair = await _api.PairAsync(chosen.Id, new Prompt(_ui), ct).ConfigureAwait(false);
-            statuses.Add(pair);
-            lines.Add("Pair " + chosen.Name + ": " + pair.Name + " (" + pair.Code.ToString(CultureInfo.InvariantCulture) + ")" + (pair.Detail is null ? "." : ", " + pair.Detail + "."));
-            if (!pair.Success)
-            {
-                lines.Add("Windows did not pair it. If pairing from Earshot does not work on this PC, pair the AirPods in Windows Settings (Bluetooth and devices, Add device), then run Fix connection again.");
-                return Done(false, RePairFailure.PairFailed);
-            }
-
-            PairedListResult now = await _api.ListPairedAsync(ct).ConfigureAwait(false);
-            steps.AddRange(now.Steps);
-            PairedDevice? newPaired = now.Devices.Count(d => d.Address12 == chosen.Address12) == 1 && chosen.Address12.Length == 12
-                ? now.Devices.Single(d => d.Address12 == chosen.Address12)
-                : null;
-            AirPodsCandidate? match = null;
-            if (newPaired is not null)
-            {
-                for (TimeSpan waited = TimeSpan.Zero; ; waited += TimeSpan.FromSeconds(1))
-                {
-                    AirPodsDiscoveryResult found = AirPodsDiscovery.Find(_nodes);
-                    steps.AddRange(found.Steps.Where(s => !s.Ok));
-                    match = found.Candidates.FirstOrDefault(c => c.Address == newPaired.Address12 && c.ContainerId == newPaired.ContainerId);
-                    if (match is not null || waited >= _options.PostPairWait)
-                    {
-                        break;
-                    }
-
-                    await _options.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
-                }
-            }
-
-            if (match is null)
-            {
-                lines.Add(chosen.Name + " is paired but is not AirPods by Earshot's rule. It stays paired. Nothing was adopted.");
-                return Done(true, RePairFailure.NotAirPodsAfterPair);
-            }
-
-            lines.Add(chosen.Name + " is paired and is AirPods by Earshot's rule.");
-            return Done(true, RePairFailure.None, match);
-        }
-        finally
-        {
-            await pumpCts.CancelAsync().ConfigureAwait(false);
-            await pump.ConfigureAwait(false);
-            _ui.Close();
+            statuses.Add(ran.PairStatus);
         }
 
-        RePairResult Done(bool paired, RePairFailure failure, AirPodsCandidate? adoptable = null) =>
-            new(paired, failure, adoptable, statuses, lines, touched, remained, steps);
-    }
-
-    // Reads the watcher into the list until it ends or the scan is cancelled. The end of a scan by cancellation is how the scan
-    // is meant to stop, and is recorded in the log; any other failure is not swallowed.
-    private async Task PumpAsync(IUnpairedWatch watch, List<WatchEvent> seen, TaskCompletionSource baselineDone, CancellationToken ct)
-    {
-        try
+        RePairFailure failure = ran.Reason switch
         {
-            await foreach (WatchEvent e in watch.EventsAsync(ct).ConfigureAwait(false))
-            {
-                lock (seen)
-                {
-                    seen.Add(e);
-                }
-
-                if (e.Kind == WatchEventKind.InitialListDone)
-                {
-                    baselineDone.TrySetResult();
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            _log.Info("fix: the scan for unpaired devices was stopped.");
-        }
-        finally
-        {
-            baselineDone.TrySetResult();
-        }
-    }
-
-    private async Task<List<UnpairedDevice>> WaitForCandidatesAsync(List<WatchEvent> seen, int mark, HashSet<string> baseline, Task pump, CancellationToken ct)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeout.CancelAfter(_options.ScanTimeout);
-        bool settling = false;
-        while (true)
-        {
-            List<UnpairedDevice> found = CandidatesNow(seen, mark, baseline);
-            if (found.Count > 0 && !settling)
-            {
-                settling = true;
-                timeout.CancelAfter(_options.SettleWait);
-            }
-
-            if (pump.IsCompleted || timeout.IsCancellationRequested)
-            {
-                // One last look: events that arrived while the wait ended.
-                return CandidatesNow(seen, mark, baseline);
-            }
-
-            try
-            {
-                await Task.WhenAny(pump, _options.Delay(TimeSpan.FromMilliseconds(10), timeout.Token)).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                ct.ThrowIfCancellationRequested();
-            }
-        }
-    }
-
-    // A classic device of the Audio/Video major class that first appeared after the prompt was shown. A device already in the
-    // list before the prompt is never a candidate: it is whatever Windows already knew about.
-    private static List<UnpairedDevice> CandidatesNow(List<WatchEvent> seen, int mark, HashSet<string> baseline)
-    {
-        lock (seen)
-        {
-            return seen.Skip(mark)
-                .Where(e => e.Kind is WatchEventKind.Added or WatchEventKind.Updated && e.Device is { IsAudioVideo: true } d && !baseline.Contains(d.Id))
-                .Select(e => e.Device!)
-                .DistinctBy(d => d.Id)
-                .ToList();
-        }
-    }
-
-    private sealed class Prompt(IFixRePairUi ui) : IPairingPrompt
-    {
-        public Task<bool> ConfirmAsync(FixPairKind kind, string? pin) => kind switch
-        {
-            // The second question already said Windows will pair the device; a bare confirmation needs no more.
-            FixPairKind.ConfirmOnly => Task.FromResult(true),
-            FixPairKind.ConfirmPinMatch or FixPairKind.DisplayPin => ui.ConfirmPinAsync(kind, pin),
-            _ => Task.FromResult(false),
+            PairFailureReason.None => RePairFailure.None,
+            PairFailureReason.NoDevice => RePairFailure.NoDevice,
+            PairFailureReason.Cancelled => RePairFailure.Cancelled,
+            PairFailureReason.NotAirPods => RePairFailure.NotAirPodsAfterPair,
+            PairFailureReason.RadioNotReady => RePairFailure.RadioNotReady,
+            _ => RePairFailure.PairFailed,
         };
+        return Done(ran.Paired, failure, ran.Adoptable, ran);
+
+        RePairResult Done(bool paired, RePairFailure fail, AirPodsCandidate? adoptable = null, PairingSessionResult? run = null) =>
+            new(paired, fail, adoptable, statuses, lines, touched, remained, steps, run);
     }
 }

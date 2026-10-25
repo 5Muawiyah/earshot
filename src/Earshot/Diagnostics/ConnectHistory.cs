@@ -13,6 +13,9 @@ internal static class ConnectHistoryActions
     public const string ConnectInWindows = "connect-in-windows";
     public const string WindowsConnection = "windows-connection";
     public const string HandBack = "hand-back";
+
+    // One entry per Pair AirPods run (and per Fix re-pair), whatever its outcome.
+    public const string Pair = "pair";
 }
 
 internal static class ConnectHistoryOutcomes
@@ -23,6 +26,10 @@ internal static class ConnectHistoryOutcomes
     public const string Cancelled = "cancelled";
     public const string Allowed = "allowed";
     public const string Blocked = "blocked";
+    public const string Paired = "paired";
+
+    // The pairing worked, but the device is not AirPods by Earshot's rule, so nothing was adopted.
+    public const string NotAirPods = "not-airpods";
 }
 
 // One step of a switch as the history keeps it: what kind of step, and the raw code. Never an instance id, an address, a

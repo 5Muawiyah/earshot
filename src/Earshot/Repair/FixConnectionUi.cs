@@ -1,4 +1,5 @@
 using System.Windows.Forms;
+using Earshot.Pairing;
 
 namespace Earshot.Repair;
 
@@ -29,11 +30,11 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MinimizeBox = false,
                 MaximizeBox = false,
-                ClientSize = new System.Drawing.Size(460, 170),
+                ClientSize = new System.Drawing.Size(460, 190),
                 ShowInTaskbar = true,
             };
-            _label = new Label { Left = 16, Top = 16, Width = 428, Height = 90, Text = text };
-            var cancel = new Button { Text = "Cancel", Left = 364, Top = 124, Width = 80 };
+            _label = new Label { Left = 16, Top = 16, Width = 428, Height = 110, Text = text };
+            var cancel = new Button { Text = "Cancel", Left = 364, Top = 144, Width = 80 };
             cancel.Click += (_, _) => _cancel.Cancel();
             _form.Controls.Add(_label);
             _form.Controls.Add(cancel);
@@ -49,25 +50,29 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        var prompt = new FixPrompt(
-            FixPromptText.Title,
-            "Which device is your AirPods?",
-            "Earshot found these Bluetooth audio devices that appeared just now. Pick your AirPods. If none is yours, cancel.",
-            [],
-            candidates.Select(c => string.IsNullOrWhiteSpace(c.Name) ? "Unnamed device" : c.Name).ToList(),
-            "Pair this one");
-        FixPromptAnswer answer = new TaskDialogPrompter().Ask(prompt);
+        FixPromptAnswer answer = new TaskDialogPrompter().Ask(PickPrompt(candidates));
         return Task.FromResult<UnpairedDevice?>(answer.Answer == FixAnswer.Ok && answer.Chosen >= 0 ? candidates[answer.Chosen] : null);
     }
 
-    public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin)
+    // One row per candidate, none chosen for the person; pressing the button is the "Pair" press on that one device.
+    internal static FixPrompt PickPrompt(IReadOnlyList<UnpairedDevice> candidates)
     {
-        string text = kind == FixPairKind.ConfirmPinMatch
-            ? "Does this number match the one shown on the AirPods or the device? " + pin
-            : "Windows is showing this number to pair: " + pin;
-        var prompt = new FixPrompt(FixPromptText.Title, "Pairing number", text, [], [], kind == FixPairKind.ConfirmPinMatch ? "It matches" : "Continue");
-        return Task.FromResult(new TaskDialogPrompter().Ask(prompt).Answer == FixAnswer.Ok);
+        ArgumentNullException.ThrowIfNull(candidates);
+        return new FixPrompt(
+            FixPromptText.Title,
+            PairingText.Choose,
+            "These Bluetooth headphones are in pairing mode nearby. Choose your AirPods, then press Pair. If none is yours, cancel.",
+            [],
+            candidates.Select(c => string.IsNullOrWhiteSpace(c.Name) ? PairingText.NoName : c.Name).ToList(),
+            PairingText.PairButton);
     }
+
+    public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin) =>
+        Task.FromResult(new TaskDialogPrompter().Ask(PinPrompt(kind, pin)).Answer == FixAnswer.Ok);
+
+    internal static FixPrompt PinPrompt(FixPairKind kind, string? pin) => kind == FixPairKind.ConfirmPinMatch
+        ? new FixPrompt(FixPromptText.Title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")
+        : new FixPrompt(FixPromptText.Title, "Enter " + pin + " on your device", "Windows is showing this number to pair.", [], [], "Continue");
 
     public void ShowResult(string text)
     {

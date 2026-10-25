@@ -105,4 +105,22 @@ public sealed class FixOfferTrackerTests
         Assert.AreEqual(1, afterOne.Consecutive);
         Assert.AreEqual(0, afterTwo.Consecutive, "Two already offered once, and the count started again.");
     }
+
+    // A pairing entry is not a connect: a run of failed pairings, even ones classed PcSide, never raises the Fix offer, and a
+    // pairing between two failed connects neither adds to the count nor resets it. This pins the rule; it passed before the
+    // pair action existed because the replay already counted only connect entries.
+    [TestMethod]
+    public void PairEntriesNeverMoveTheOfferCount()
+    {
+        DateTimeOffset now = new(2026, 10, 25, 20, 0, 0, TimeSpan.Zero);
+        ConnectHistoryEntry Entry(string action, string outcome, string cls) => new(now, action, "none", "custom-pairing", [], false, outcome, cls, 100);
+        ConnectHistoryEntry Failed(string action) => Entry(action, ConnectHistoryOutcomes.Failed, "PcSide");
+
+        FixOfferTracker onlyPairs = FixOfferTracker.Replay([Failed(ConnectHistoryActions.Pair), Failed(ConnectHistoryActions.Pair), Failed(ConnectHistoryActions.Pair)]);
+        FixOfferTracker between = FixOfferTracker.Replay(
+            [Failed(ConnectHistoryActions.Connect), Entry(ConnectHistoryActions.Pair, ConnectHistoryOutcomes.Paired, "None"), Failed(ConnectHistoryActions.Pair)]);
+
+        Assert.AreEqual(0, onlyPairs.Consecutive);
+        Assert.AreEqual(1, between.Consecutive, "The one failed connect still counts; the pair entries around it do not.");
+    }
 }

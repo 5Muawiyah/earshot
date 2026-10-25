@@ -3,8 +3,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security;
 using Earshot.App;
+using Earshot.Bluetooth;
 using Earshot.Boot;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Infra;
 using Earshot.Interop;
 using Earshot.Service;
@@ -35,6 +37,7 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
         facts.Devices = Part(facts, "devices", ReadDevices);
         facts.BtServices = Part(facts, "btServices", ReadBluetoothServices);
         facts.Radio = Part(facts, "radio", ReadRadio);
+        facts.Startup = Part(facts, "startup", ReadStartup);
         List<string> airpodsIds = (facts.Devices ?? []).Where(d => !string.IsNullOrEmpty(AirPodsModels.ModelOf(d.InstanceId))).Select(d => d.InstanceId).ToList();
         facts.Filters = Part(facts, "filters", () => ReadFilters(airpodsIds));
         facts.History = Part(facts, "history", ReadHistory);
@@ -279,54 +282,51 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
         return reading.Read ? new ProtectionFact { Pinned = reading.Pinned, Unprotected = reading.Unprotected } : null;
     }
 
-    // The Bluetooth radio is the present node of the Bluetooth class on the USB, PCI or ACPI bus; its driver's version is on the
-    // driver key the node names.
-    private static RadioFact ReadRadio()
+    // The radio Windows uses, from the radio check: the default adapter, its radio state, and its device node's status, problem
+    // number and driver. Replaces the walk over the USB, PCI and ACPI registry keys, which read the first Bluetooth-class node it
+    // found and not the adapter Windows uses. Every read is read-only.
+    private RadioFact ReadRadio()
     {
-        var reader = new CfgMgr32NodeReader();
-        foreach (string bus in new[] { "USB", "PCI", "ACPI" })
+        // Off the calling thread's context: a WinRT wait must not depend on one.
+        RadioCheckResult result = Task.Run(() => RadioCheck.CreateReal(log).CheckAsync(CancellationToken.None)).GetAwaiter().GetResult();
+        return new RadioFact
         {
-            using RegistryKey? busKey = Registry.LocalMachine.OpenSubKey(EnumKey + "\\" + bus);
-            if (busKey is null)
-            {
-                continue;
-            }
+            Found = result.AdapterFound == true && result.DevNodeStatus is not null,
+            DriverVersion = result.DriverVersion,
+            AdapterFound = result.AdapterFound,
+            ClassicSupported = result.ClassicSupported,
+            State = result.State.ToString(),
+            RadioState = result.RadioState is int value ? RadioStateName(value) : null,
+            DevNodeStatus = result.DevNodeStatus is uint status ? "0x" + status.ToString("X8", CultureInfo.InvariantCulture) : null,
+            ProblemCode = result.ProblemCode,
+            DriverDate = result.DriverDate,
+            ReadCodes = result.ReadCodes.Select(c => c.Step + ":" + c.CodeName).ToList(),
+        };
+    }
 
-            foreach (string device in busKey.GetSubKeyNames())
-            {
-                using RegistryKey? deviceKey = busKey.OpenSubKey(device);
-                if (deviceKey is null)
-                {
-                    continue;
-                }
+    // Windows.Devices.Radios.RadioState.
+    // https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
+    private static string RadioStateName(int value) => value switch
+    {
+        RadioStateValues.On => "On",
+        RadioStateValues.Off => "Off",
+        RadioStateValues.Disabled => "Disabled",
+        _ => "Unknown",
+    };
 
-                foreach (string instance in deviceKey.GetSubKeyNames())
-                {
-                    using RegistryKey? node = deviceKey.OpenSubKey(instance);
-                    if (node is null || !string.Equals(node.GetValue("ClassGUID") as string, BluetoothClass, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    string id = bus + "\\" + device + "\\" + instance;
-                    if (reader.Locate(id, includeNonPresent: false, out _) != CfgMgr32.CR_SUCCESS)
-                    {
-                        continue;
-                    }
-
-                    string? version = null;
-                    if (node.GetValue("Driver") is string driver)
-                    {
-                        using RegistryKey? driverKey = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\" + driver);
-                        version = driverKey?.GetValue("DriverVersion") as string;
-                    }
-
-                    return new RadioFact { Found = true, DriverVersion = version };
-                }
-            }
-        }
-
-        return new RadioFact { Found = false, DriverVersion = null };
+    // The Run value's command, whether the file it starts is there, and the StartupApproved flag's first byte. Read only.
+    private static StartupFact ReadStartup()
+    {
+        var registry = new Tray.CurrentUserStartupRegistry();
+        string? command = registry.ReadRunValue(Tray.StartupRegistration.ValueName);
+        string? target = StartupFact.TargetOf(command);
+        byte[]? approved = registry.ReadStartupApproved(Tray.StartupRegistration.ValueName);
+        return new StartupFact
+        {
+            RunCommand = command,
+            TargetExists = target is null ? null : File.Exists(Environment.ExpandEnvironmentVariables(target)),
+            ApprovedFlag = approved is { Length: > 0 } ? approved[0].ToString("X2", CultureInfo.InvariantCulture) : null,
+        };
     }
 
     // Lower and upper filter drivers on the AirPods' nodes, on the RFCOMM nodes and on the Bluetooth class, by name.
@@ -388,10 +388,28 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
         string path = Path.Combine(paths.LogFolder, "connect-history.jsonl");
         if (!File.Exists(path))
         {
-            return new HistoryFact { Exists = false, Lines = 0, Last = [] };
+            return new HistoryFact { Exists = false, Lines = 0, Last = [], Pairing = [] };
         }
 
         List<string> all = File.ReadAllLines(path).Where(l => l.Trim().Length > 0).ToList();
-        return new HistoryFact { Exists = true, Lines = all.Count, Last = all.TakeLast(5).ToList() };
+        var history = new ConnectHistory(path, TimeProvider.System, log);
+        List<PairingFact> pairing = history.Read().Where(e => e.Action == ConnectHistoryActions.Pair).TakeLast(5).Select(PairingOf).ToList();
+        return new HistoryFact { Exists = true, Lines = all.Count, Last = all.TakeLast(5).ToList(), Pairing = pairing };
+    }
+
+    // One pair entry as the doctor shows it. The status is the pair step's code name and value; the model check is its code.
+    internal static PairingFact PairingOf(ConnectHistoryEntry entry)
+    {
+        HistoryStep? pair = entry.Steps.FirstOrDefault(s => s.Name == "pair");
+        HistoryStep? model = entry.Steps.FirstOrDefault(s => s.Name == "model-check");
+        return new PairingFact
+        {
+            Time = entry.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+            Outcome = entry.Outcome,
+            Status = pair?.CodeName,
+            StatusValue = pair?.Code,
+            ModelCheck = model is null ? null : model.Code == 0 ? "airpods" : "not-airpods",
+            DurationMs = entry.DurationMs,
+        };
     }
 }

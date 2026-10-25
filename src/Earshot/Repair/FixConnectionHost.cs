@@ -1,7 +1,9 @@
 using System.Text.Json;
+using Earshot.Bluetooth;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Infra;
 using Earshot.Service;
 
@@ -55,8 +57,11 @@ internal sealed class FixOptions
     // How long the watcher may list what is already known before the prompt is shown.
     public TimeSpan BaselineWait { get; init; } = TimeSpan.FromSeconds(15);
 
-    // How long to wait for a device to appear after the prompt.
-    public TimeSpan ScanTimeout { get; init; } = TimeSpan.FromSeconds(90);
+    // How long to wait for a device to appear after the prompt (a design choice: 60 s).
+    public TimeSpan ScanTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    // How long PairAsync may run before the pairing is cancelled (a design choice: 60 s).
+    public TimeSpan PairTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     // After the first candidate appears, how long to wait for others before the person is asked.
     public TimeSpan SettleWait { get; init; } = TimeSpan.FromSeconds(3);
@@ -96,6 +101,14 @@ internal sealed class FixHost
     public required ILog Log { get; init; }
 
     public FixOptions Options { get; init; } = new();
+
+    // The radio check before anything is removed. Null in a host that has none (a test, or a build with no WinRT radio).
+    public IRadioCheck? Radio { get; init; }
+
+    // Where the run's one pairing entry goes. Null when the run has no history file to write to.
+    public ConnectHistory? History { get; init; }
+
+    public TimeProvider Time { get; init; } = TimeProvider.System;
 
     // The machine folder, where the elevated run leaves its step codes. Null when there is none to read.
     public string? MachineFolder { get; init; }

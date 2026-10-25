@@ -1,6 +1,8 @@
+using Earshot.Bluetooth;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Repair;
 using Earshot.Tests.Phase4;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -99,10 +101,14 @@ internal sealed class FakeRePairUi : IFixRePairUi
 
     public List<string> PinsShown { get; } = new();
 
+    // Runs as the pick is asked, before it is answered.
+    public Action? OnPick { get; set; }
+
     public void ShowInstruction(string text) => Shown.Add(text);
 
     public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
     {
+        OnPick?.Invoke();
         Shown.Add("pick:" + string.Join("|", candidates.Select(c => c.Name)));
         return Task.FromResult(Pick >= 0 && Pick < candidates.Count ? candidates[Pick] : null);
     }
@@ -174,6 +180,9 @@ internal sealed class FakePairing : IPairingApi
 
     public Exception? ThrowOnPair { get; set; }
 
+    // PairAsync waits until it is cancelled, as a pairing that never answers does.
+    public bool HangOnPair { get; set; }
+
     public Task<PairedListResult> ListPairedAsync(CancellationToken ct)
     {
         Calls.Add("list-paired");
@@ -208,6 +217,11 @@ internal sealed class FakePairing : IPairingApi
         if (ThrowOnPair is not null)
         {
             throw ThrowOnPair;
+        }
+
+        if (HangOnPair)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
         }
 
         foreach ((FixPairKind kind, string? pin) in Requests)
@@ -299,6 +313,10 @@ internal sealed class FixRig : IDisposable
 
     public StubLeftovers Leftovers { get; } = new();
 
+    public IRadioCheck? Radio { get; set; }
+
+    public ConnectHistory? History { get; set; }
+
     public FixHost Host() => new()
     {
         Nodes = Nodes,
@@ -314,11 +332,14 @@ internal sealed class FixRig : IDisposable
         Recovery = Recovery,
         Output = Output,
         Log = Log,
+        Radio = Radio,
+        History = History,
         Options = new FixOptions
         {
             BaselineWait = TimeSpan.FromMilliseconds(50),
             ScanTimeout = TimeSpan.FromMilliseconds(200),
             SettleWait = TimeSpan.FromMilliseconds(20),
+            PairTimeout = TimeSpan.FromMilliseconds(300),
             PostPairWait = TimeSpan.Zero,
             Delay = (_, _) => Task.CompletedTask,
         },
@@ -366,4 +387,15 @@ internal sealed class StubLeftovers : IFixLeftovers
     public List<string> Items { get; } = new();
 
     public IReadOnlyList<string> Read() => Items.ToList();
+}
+
+internal sealed class FakeRadioCheck(RadioCheckResult result) : IRadioCheck
+{
+    public int Checks { get; private set; }
+
+    public Task<RadioCheckResult> CheckAsync(CancellationToken ct)
+    {
+        Checks++;
+        return Task.FromResult(result);
+    }
 }

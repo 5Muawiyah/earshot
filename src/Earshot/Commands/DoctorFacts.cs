@@ -6,6 +6,8 @@ internal sealed class DoctorFacts
 {
     public InstallFacts? Install { get; set; }
 
+    public StartupFact? Startup { get; set; }
+
     public int? TrayProcesses { get; set; }
 
     public List<TaskFact>? Tasks { get; set; }
@@ -92,11 +94,83 @@ internal sealed class BtServiceFact
     public string? State { get; set; }
 }
 
+// What the radio check read: the adapter Windows uses, its radio state, its device node's status bits and problem number, and the
+// driver's version and date. Everything is a plain code or a number; a part that could not be read is null and its raw code is in
+// ReadCodes. Found stays "a radio was read".
 internal sealed class RadioFact
 {
     public bool Found { get; set; }
 
     public string? DriverVersion { get; set; }
+
+    public bool? AdapterFound { get; set; }
+
+    public bool? ClassicSupported { get; set; }
+
+    // The radio check's verdict by name: Ok, Off, SwitchedOff, Problem, NoAdapter or Unknown.
+    public string? State { get; set; }
+
+    // Windows.Devices.Radios.RadioState by name: Unknown, On, Off or Disabled.
+    public string? RadioState { get; set; }
+
+    // DN_* status bits as 0x-prefixed hex.
+    public string? DevNodeStatus { get; set; }
+
+    public int? ProblemCode { get; set; }
+
+    // yyyy-MM-dd
+    public string? DriverDate { get; set; }
+
+    // "step:code name" of each read, for the ones an AI follows up.
+    public List<string>? ReadCodes { get; set; }
+}
+
+// The sign-in start of Earshot: the Run value's command, whether the file it names is there, and the first byte of the
+// StartupApproved flag as hex (the format is undocumented; the tray reads bit 0x1 as "turned off in Windows").
+internal sealed class StartupFact
+{
+    public string? RunCommand { get; set; }
+
+    public bool? TargetExists { get; set; }
+
+    public string? ApprovedFlag { get; set; }
+
+    // The program file a Run command starts: the quoted path, or an unquoted one up to its first option. Null for no command.
+    public static string? TargetOf(string? command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return null;
+        }
+
+        string text = command.Trim();
+        if (text[0] == '"')
+        {
+            int close = text.IndexOf('"', 1);
+            return close > 1 ? text[1..close] : text[1..];
+        }
+
+        int option = text.IndexOf(" --", StringComparison.Ordinal);
+        return option > 0 ? text[..option] : text;
+    }
+}
+
+// One pairing run as the connect history kept it: when, how it ended, the status Windows answered, the model check and how
+// long it took. No name, address or id.
+internal sealed class PairingFact
+{
+    public string? Time { get; set; }
+
+    public string? Outcome { get; set; }
+
+    public string? Status { get; set; }
+
+    public long? StatusValue { get; set; }
+
+    // "airpods", "not-airpods", or null when the run ended before the check.
+    public string? ModelCheck { get; set; }
+
+    public long? DurationMs { get; set; }
 }
 
 internal sealed class FilterFact
@@ -113,6 +187,9 @@ internal sealed class HistoryFact
     public int? Lines { get; set; }
 
     public List<string>? Last { get; set; }
+
+    // The last five pairing runs, newest last.
+    public List<PairingFact>? Pairing { get; set; }
 }
 
 // Whether Earshot holds a record of the AirPods it protects, and how many paired sets of AirPods are not that one. Counts only, so
