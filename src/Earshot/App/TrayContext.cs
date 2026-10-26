@@ -1021,14 +1021,14 @@ internal sealed partial class TrayContext : ApplicationContext
             else if (fixOffered)
             {
                 // A pinned pair that is no longer paired cannot be fixed or connected: the person is told so and offered Pair AirPods.
-                if (await CheckPinnedPairAsync("connect failed", place, cts.Token))
+                if (await CheckPinnedPairAsync("connect failed", place, cts.Token) && !cts.IsCancellationRequested)
                 {
                     ShowFixOffer(intent.DeviceName, report.UserMessage, place);
                 }
             }
             else if (!_registry.SafeMode && ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
             {
-                if (await CheckPinnedPairAsync("connect failed", place, cts.Token))
+                if (await CheckPinnedPairAsync("connect failed", place, cts.Token) && !cts.IsCancellationRequested)
                 {
                     ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
                 }

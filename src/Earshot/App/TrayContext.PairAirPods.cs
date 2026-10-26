@@ -408,7 +408,7 @@ internal sealed partial class TrayContext
                         case RadioSays.Unsure:
                             return true;
                         case RadioSays.Stop:
-                            return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
+                            return RadioStopped();
                     }
 
                     await OfferPairAirPodsAsync(place, force: reason == "setup");
@@ -425,7 +425,7 @@ internal sealed partial class TrayContext
                     case RadioSays.Unsure:
                         return true;
                     case RadioSays.Stop:
-                        return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
+                        return RadioStopped();
                 }
 
                 _log.Info("The pinned AirPods are no longer paired, so their last readings and link are dropped.");
@@ -460,6 +460,18 @@ internal sealed partial class TrayContext
             }
 
             return true;
+        }
+
+        // The radio read ended the look: a cancel (closing, or a press that superseded the connect) shows nothing more, as the
+        // look's other cancels do; a Pair AirPods started meanwhile answers for the pairs itself.
+        bool RadioStopped()
+        {
+            if (ct.IsCancellationRequested)
+            {
+                return _lifetime.IsCancellationRequested;
+            }
+
+            return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
         }
     }
 

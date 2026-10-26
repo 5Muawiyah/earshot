@@ -385,6 +385,45 @@ public sealed class StalePinWiringTests
         });
     }
 
+    // A click made while a failed connect's stale-pin look reads the radio ends that look, and the old connect offers nothing.
+    // Before, the cancelled radio read let the look go on, and the old connect offered Connect in Windows for a pair that is gone.
+    [TestMethod]
+    public void AClickDuringTheStalePinLookOfAFailedConnectOffersNothingForTheOldConnect()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok));
+            PairAirPodsServices plain = Services(rig);
+            var services = new PairAirPodsServices
+            {
+                StalePinBudget = plain.StalePinBudget, Api = plain.Api, Nodes = plain.Nodes, Prompter = plain.Prompter,
+                UiFactory = plain.UiFactory, Radio = radio, Options = plain.Options, LockName = plain.LockName,
+            };
+            long now = 0;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: services, tickCount: () => now);
+            tray.PumpUntilIdle();
+            tray.Cards.Shown.Clear();
+
+            // The read after the failure is quick; the look's own read, the one after it, is slow.
+            int lookRead = radio.Checks + 2;
+            radio.OnCheck = n => radio.Wait = n == lookRead ? TimeSpan.FromSeconds(2) : TimeSpan.Zero;
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+
+            tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+            TrayHarness.PumpUntil(() => radio.Checks == lookRead, "The stale-pin look did not read the radio.");
+            now += 5000;
+            tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(2, tray.Connection.Calls.Count(c => c.Connect), string.Join(", ", tray.Connection.Calls));
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Action?.Label is "Fix connection" or "Connect in Windows"), string.Join(" | ", tray.Cards.Statuses));
+            Assert.AreEqual("Pair AirPods", Last(tray).Action?.Label);
+        });
+    }
+
     [TestMethod]
     public void SetUpWithAPairThatIsStillThereGoesAhead()
     {

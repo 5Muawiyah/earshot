@@ -476,9 +476,13 @@ internal sealed class FakeRadioCheck(RadioCheckResult result) : IRadioCheck
     // How long a read takes, as a slow radio would.
     public TimeSpan Wait { get; set; }
 
+    // Called with the read's number as each read starts, so a test can make one read slow.
+    public Action<int>? OnCheck { get; set; }
+
     public async Task<RadioCheckResult> CheckAsync(CancellationToken ct)
     {
         Checks++;
+        OnCheck?.Invoke(Checks);
         if (Wait > TimeSpan.Zero)
         {
             await Task.Delay(Wait, ct);
