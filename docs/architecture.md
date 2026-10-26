@@ -1351,15 +1351,20 @@ user, through the same pairing session Fix connection's re-pair uses
 Every run goes in the connect history as one entry, whether it paired, failed,
 was cancelled or stopped before the scan, and no device name. Each step has its
 `DevicePairingResultStatus` or Win32 code, and the `-ms` step after it holds how
-long it took (`look-ms`, `radio-check-ms`, `scan-ms`, `pair-ms`,
+long it took (`look-ms`, `radio-check-ms`, `scan-ms`, `pick-ms`, `pair-ms`,
 `model-check-ms`, `replace-ms`, `adopt-ms`, `setup-ms`). The question and the
 marker's write lead the entry; a `replace` step holds the answer when that
-question was asked; a throw during set-up keeps the steps already taken. Codes that are Earshot's own (the lock, a question not answered, the
-pairing's own time limit) are named as such. Cancel in the Pair AirPods window ends the run as a
+question was asked; a throw during set-up keeps the steps already taken. An
+`adopt` the gate refused, and a `setup` that did not take (a declined prompt is
+1223, ERROR_CANCELLED), carry the code of their first failing step. A scan that
+Windows stopped (the watcher aborted) has a `scan-aborted` step and its own
+line, not "No AirPods turned up". Codes that are Earshot's own (the lock, a question not answered, the
+pairing's own time limit, and the radio read's as `earshot-timeout`) are named as such. Cancel in the
+Pair AirPods window, or closing that window, ends the run as a
 cancel; when Windows had already paired the AirPods, or a pairing that timed out
 had, the new pair is offered through the device picker and the recovery marker
 stays, and when what is paired cannot be read the card says only that. Exit
-during a run, the first question included, leaves its entry (the steps taken,
+during a run, the first question and the pick included, leaves its entry (the steps taken,
 then a `closing` step) and keeps the marker; Cancel leaves the steps taken too;
 and an unexpected throw leaves one with the steps taken, its type, its code and
 how long the run took. A pairing Earshot stopped
@@ -1372,7 +1377,7 @@ removed pairing left behind. From the press of Look for AirPods (not while only
 that question is up) until the run ends, the coordinator's
 checks for AirPods Earshot does not protect, its automatic blocks, and the
 tray's own stale-pin check (also when a pairing starts while it reads) wait for
-it, and a Fix pressed then says a pairing is running. When the run ends, the
+it, and a Fix or Choose device pressed then says a pairing is running. When the run ends, the
 coordinator reads the state again at once rather than after its doubled wait,
 and a check the start-time look gave way for runs then. When the person keeps the
 pinned pair, a new device that settles straight after is answered by the tray,
@@ -1412,8 +1417,8 @@ adopts, unpairs and blocks nothing itself.
 
 ### The radio check
 
-Read once after a Connect or a pairing fails, within a one second budget, and
-by `doctor`: the default adapter, whether it does Classic Bluetooth, the
+Read once after a Connect fails and before a pairing starts, within a one
+second budget, and by `doctor` (within five seconds): the default adapter, whether it does Classic Bluetooth, the
 radio's state, and the radio's device node (status bits, problem number,
 driver version and date). Read-only.
 https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothadapter.getdefaultasync
@@ -1455,7 +1460,8 @@ no button, and a Fix result's button gets the same answer from the tray.
 
 The tray makes three named events for the run and starts `Earshot.exe trace
 <tray pid> <nonce>` from `%ProgramFiles%\Earshot` through one administrator
-prompt. The helper:
+prompt. The helper refuses a tray process that is not in its own Windows
+session, since the trace is made readable for that process's user. Then it:
 
 1. Reads `%ProgramData%\Earshot` and its `trace` folder back after making them
    and refuses either unless it passes the machine folder's check (owner
@@ -1489,7 +1495,8 @@ prompt. The helper:
    name and renamed once whole, and one an Exit cut off is removed at the next
    start), and deletes its own copy; it deletes
    it too when the tray never says it copied it. A copy it could not delete is
-   reported, with where it is. A copy the tray could not make is not kept.
+   reported, with where it is. When the tray could not make its copy, the helper
+   deletes its own at once, and the card says where it is if that failed.
 
 The tray believes a result only from a trace folder that passes the machine
 folder's check, so a standard user cannot plant one. It raises only an installed

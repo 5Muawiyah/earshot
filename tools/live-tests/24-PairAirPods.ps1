@@ -361,7 +361,7 @@ try
             if ($trace -eq 'yes')
             {
                 $traceStart = (Get-Date).ToUniversalTime()
-                Wait-Owner -Run $run -Text 'Open Earshot settings and choose Record a Bluetooth trace. Read the note, then press Record on it. Allow the Windows permission prompt once. Wait about ten seconds, then press Stop. Wait for the card to say where it saved the trace, then come back here.'
+                Wait-Owner -Run $run -Text 'Open Earshot settings and press Record on the Bluetooth trace row. Read the note, then press Record on it. Allow the Windows permission prompt once. Wait about ten seconds, then press Stop. Wait for the card to say where it saved the trace, then come back here.'
                 # The tray's line when the helper is asked for: it says only that the trace was started, so the pass rests on Saved and the file.
                 $recording = Get-LogMatches -Pattern 'Bluetooth trace: ' -Regex 'Bluetooth trace: started; ' -Since $traceStart
                 # Saved only: SavedInPlace means the file stayed where only administrators can open it, so the person was not handed it.
