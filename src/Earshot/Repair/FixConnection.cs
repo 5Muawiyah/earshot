@@ -194,7 +194,7 @@ internal static class FixConnection
         if (plan.IsEmpty)
         {
             // Nothing to undo, and still a first question: the person agrees to go on before the second one is shown.
-            if (host.Prompter.Ask(NothingToUndoPrompt).Answer != FixAnswer.Ok)
+            if (host.Prompter.Ask(NothingToUndoPrompt, ct).Answer != FixAnswer.Ok)
             {
                 lines.Add("Declined. Nothing was changed.");
                 return FixOutcome.Declined;

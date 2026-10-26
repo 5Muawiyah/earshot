@@ -171,6 +171,12 @@ internal sealed partial class BlockCoordinator : IDisposable
     private const string ClosingBlockName = "block before closing";
     private const string InUseReason = "the AirPods are in use";
     internal const string RePairWindowReason = "a Fix connection run is pairing the AirPods again";
+    internal const string TrayPairingReason = "the tray's Pair AirPods is pairing";
+
+    // Why an automatic block waits for a pairing, or null: a Fix connection run's re-pair, or the tray's own Pair AirPods (or its
+    // look at a pairing that did not finish). The link that forms is the new pairing's, and the run ends in its own adoption.
+    private string? PairingUnderWay =>
+        _services.RePair.IsOpen ? RePairWindowReason : _services.TrayPairing.Active ? TrayPairingReason : null;
     public const string NotProtectedMessage = "AirPods on this PC are not protected by Earshot.";
     private bool _notProtectedShown;
     private const string ProtectMayRunReason = "an audio quality change this tray started may still be running";
@@ -2798,9 +2804,9 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         // The idle rule checks this too; this is the look just before the block, for a window that opened since.
-        if ((check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.ForeignLink) && _services.RePair.IsOpen)
+        if ((check.Reason is BlockReason.Idle or BlockReason.StartUp or BlockReason.ForeignLink) && PairingUnderWay is { } pairing)
         {
-            return new BlockDecision(RePairWindowReason);
+            return new BlockDecision(pairing);
         }
 
         if (automatic && status is null)
@@ -3301,9 +3307,9 @@ internal sealed partial class BlockCoordinator : IDisposable
         // A Fix connection run is pairing the AirPods again: the link that forms is the new pairing's, not a stranger's, and
         // the run ends with the normal block itself. Checked after the cases that settle without a block, so a quiet PC is
         // not read again for nothing; read again later, less often each time, because no notification says when the run ends.
-        if (_services.RePair.IsOpen)
+        if (PairingUnderWay is { } pairing)
         {
-            return (RePairWindowReason, IdleVerdict.Unsettled);
+            return (pairing, IdleVerdict.Unsettled);
         }
 
         // In use settles nothing while changes are not watched: no notification would say when that ends. After a

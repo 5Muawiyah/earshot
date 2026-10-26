@@ -73,9 +73,10 @@ internal sealed record PairingSessionResult(
 {
     // The one connect-history entry of this run. Steps the caller does afterwards (adopt, setup) are added as later. Nothing in
     // it names a device: kinds, codes and code names only.
-    public ConnectHistoryEntry ToHistoryEntry(DateTimeOffset at, IEnumerable<StepOutcome>? later = null)
+    // before: steps the caller took ahead of the session (Pair AirPods' question and its marker); later: those after it.
+    public ConnectHistoryEntry ToHistoryEntry(DateTimeOffset at, IEnumerable<StepOutcome>? later = null, IEnumerable<StepOutcome>? before = null)
     {
-        IEnumerable<StepOutcome> all = later is null ? HistorySteps : HistorySteps.Concat(later);
+        IEnumerable<StepOutcome> all = (before ?? []).Concat(HistorySteps).Concat(later ?? []);
         string outcome = Outcome switch
         {
             PairOutcome.Paired => ConnectHistoryOutcomes.Paired,
@@ -247,7 +248,8 @@ internal sealed class PairingSession
                 {
                     AirPodsDiscoveryResult found = AirPodsDiscovery.Find(_nodes);
                     steps.AddRange(found.Steps.Where(s => !s.Ok));
-                    match = found.Candidates.FirstOrDefault(c => c.Address == newPaired.Address12 && c.ContainerId == newPaired.ContainerId);
+                    // A removed pairing leaves its nodes behind, not present: only a set whose device node is here now is the new pair.
+                    match = found.Candidates.FirstOrDefault(c => c.DevicePresent && c.Address == newPaired.Address12 && c.ContainerId == newPaired.ContainerId);
                     looked = found.Listed && NodesArrived(newPaired.Address12, steps);
                     if (match is not null || waited >= _options.PostPairWait)
                     {
@@ -334,7 +336,7 @@ internal sealed class PairingSession
         pairCts.CancelAfter(_options.PairTimeout);
         try
         {
-            return await _api.PairAsync(deviceId, new Prompt(_ui), pairCts.Token).ConfigureAwait(false);
+            return await _api.PairAsync(deviceId, new Prompt(_ui, pairCts.Token), pairCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -470,12 +472,13 @@ internal sealed class PairingSession
 
     // The pairing request is answered after the person has pressed "Pair" on this one device, which is what a bare confirmation
     // asks. A number to compare or to enter is shown and asked.
-    private sealed class Prompt(IFixRePairUi ui) : IPairingPrompt
+    // The attempt's token goes with the number, so the question closes when the attempt ends.
+    private sealed class Prompt(IFixRePairUi ui, CancellationToken attempt) : IPairingPrompt
     {
         public Task<bool> ConfirmAsync(FixPairKind kind, string? pin) => kind switch
         {
             FixPairKind.ConfirmOnly => Task.FromResult(true),
-            FixPairKind.ConfirmPinMatch or FixPairKind.DisplayPin => ui.ConfirmPinAsync(kind, pin),
+            FixPairKind.ConfirmPinMatch or FixPairKind.DisplayPin => ui.ConfirmPinAsync(kind, pin, attempt),
             _ => Task.FromResult(false),
         };
     }

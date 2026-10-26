@@ -45,7 +45,8 @@ internal interface IFixRePairUi
     // Several or one: always asked, so a device that is not the AirPods is never paired without the person choosing it.
     Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates);
 
-    Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin);
+    // ct is the pairing attempt's: when it ends (Earshot's own time limit, Cancel, Exit), the question closes as a no.
+    Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin, CancellationToken ct);
 
     // The run's result. offerTrace adds a Record a Bluetooth trace button; true when the person pressed it.
     bool ShowResult(string text, bool offerTrace);

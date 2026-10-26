@@ -82,7 +82,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        FixPromptAnswer answer = OnUi(() => new TaskDialogPrompter().Ask(PickPrompt(candidates, _title)));
+        FixPromptAnswer answer = OnUi(() => new TaskDialogPrompter().Ask(PickPrompt(candidates, _title), _cancel.Token));
         return Task.FromResult<UnpairedDevice?>(answer.Answer == FixAnswer.Ok && answer.Chosen >= 0 ? candidates[answer.Chosen] : null);
     }
 
@@ -99,8 +99,8 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
             PairingText.PairButton);
     }
 
-    public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin) =>
-        Task.FromResult(OnUi(() => new TaskDialogPrompter().Ask(PinPrompt(kind, pin, _title)).Answer == FixAnswer.Ok));
+    public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin, CancellationToken ct) =>
+        Task.FromResult(OnUi(() => new TaskDialogPrompter().Ask(PinPrompt(kind, pin, _title), ct).Answer == FixAnswer.Ok));
 
     internal static FixPrompt PinPrompt(FixPairKind kind, string? pin, string title = FixPromptText.Title) => kind == FixPairKind.ConfirmPinMatch
         ? new FixPrompt(title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")

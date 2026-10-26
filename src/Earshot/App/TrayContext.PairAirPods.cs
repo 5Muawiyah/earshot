@@ -27,13 +27,22 @@ internal sealed partial class TrayContext
     // True while the start-time look at a pairing that did not finish runs: the run flag stays up for it whatever else ends.
     private bool _recoveringPair;
 
+    // When the person last kept the pinned pair over a new one. The new pair's device group can arrive just before that answer,
+    // and the coordinator's check for unprotected AirPods then fires a few seconds after it; the card the person was just shown
+    // already says the new pair is not protected, so for a short while the tray answers for a new device itself. A UI timing
+    // choice, not a measurement.
+    private DateTimeOffset? _keptPinnedPairAt;
+    internal static readonly TimeSpan KeptPairQuiet = TimeSpan.FromSeconds(30);
+
+    private bool KeptThePinnedPairJustNow() => _keptPinnedPairAt is { } at && _time.GetUtcNow() - at < KeptPairQuiet;
+
     private void WirePairAirPods(TrayStartOptions options)
     {
         _pairServices = options.PairAirPods;
         if (_pairServices is not null && !options.DataRootRedirected)
         {
             // A pair made or removed in Windows arrives as a new device group.
-            _coordinator.NewDeviceHook = async _ => !await CheckPinnedPairAsync("new device", CardPlace.NearTray);
+            _coordinator.NewDeviceHook = async _ => KeptThePinnedPairJustNow() || !await CheckPinnedPairAsync("new device", CardPlace.NearTray);
         }
 
         _menu.PairAirPodsClicked += (_, _) =>
@@ -123,11 +132,12 @@ internal sealed partial class TrayContext
             return true;
         }
 
-        // A Pair AirPods pressed while this looked answers for the pairs itself, and a card from here would race its own.
+        // A Pair AirPods pressed while this looked answers for the pairs itself, and a card from here would race its own. Nothing
+        // was shown, so the coordinator's own check is asked for (it waits while the pairing runs), and the marker stays.
         if (_elevatedRun == PairRun || _closing)
         {
             _log.Info("Pair AirPods: the look at the pairing that did not finish stops, because a pairing has started.");
-            return true;
+            return _closing;
         }
 
         if (!found.Listed)
@@ -266,6 +276,14 @@ internal sealed partial class TrayContext
             return true;
         }
 
+        // A Pair AirPods pressed while the paired list was read answers for the pairs itself: a card from here would show over
+        // its own, and a choice made on it would race its adoption.
+        if (_elevatedRun == PairRun)
+        {
+            _log.Info("Pairing check (" + reason + "): a pairing started while it looked, so it says nothing.");
+            return true;
+        }
+
         switch (result.State)
         {
             case StalePinState.NotPinned:
@@ -400,7 +418,7 @@ internal sealed partial class TrayContext
             return;
         }
 
-        PairRunEnd end;
+        PairRunEnd end = PairRunEnd.Nothing;
         var setupSteps = new List<StepOutcome>();
         System.Runtime.ExceptionServices.ExceptionDispatchInfo? unexpected = null;
         services.RunFlag.Active = true;
@@ -423,10 +441,22 @@ internal sealed partial class TrayContext
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // The run still leaves its one history entry, with the type and code of what stopped it; the caller logs it, once the
-            // run has let go and the check below has been asked for.
-            _coordinator.WriteHistory(EndedEarly(
-                StepOutcomes.FromHResult("unexpected", ex.HResult, ex.GetType().Name, ok: false), ConnectHistoryOutcomes.Failed, 0).Early!);
+            // The run still leaves its one history entry, with the type and code of what stopped it, after the steps it had
+            // already taken when the session had ended (a throw in set-up); the caller logs it, once the run has let go and the
+            // check below has been asked for.
+            StepOutcome stopped = StepOutcomes.FromHResult("unexpected", ex.HResult, ex.GetType().Name, ok: false);
+            if (end.Session is { } session)
+            {
+                List<StepOutcome> taken = StepsAfterTheSession(end);
+                taken.AddRange(setupSteps);
+                taken.Add(stopped);
+                _coordinator.WriteHistory(session.ToHistoryEntry(_time.GetUtcNow(), taken, _pairRunSteps));
+            }
+            else
+            {
+                _coordinator.WriteHistory(EndedEarly(stopped, ConnectHistoryOutcomes.Failed, 0).Early!);
+            }
+
             unexpected = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
             end = PairRunEnd.Nothing;
         }
@@ -457,11 +487,23 @@ internal sealed partial class TrayContext
             return;
         }
 
-        // Each step after the session's own, with its code and how long it took.
+        List<StepOutcome> later = StepsAfterTheSession(end);
+        later.AddRange(setupSteps);
+        _coordinator.WriteHistory(end.Session.ToHistoryEntry(_time.GetUtcNow(), later, _pairRunSteps));
+    }
+
+    // The steps a run took before its session (Look for AirPods and the marker's write), for its history entry. One pairing at a
+    // time, so one list; each run starts it again.
+    private readonly List<StepOutcome> _pairRunSteps = [];
+
+    // Each step after the session's own, with its code and how long it took.
+    private static List<StepOutcome> StepsAfterTheSession(PairRunEnd end)
+    {
         var later = new List<StepOutcome>();
         if (end.Replace is { } replaceStep)
         {
             later.Add(replaceStep);
+            later.Add(Milliseconds("replace-ms", end.ReplaceMs));
         }
 
         if (end.Adopted is { } adopted && end.Replace is not { Ok: false })
@@ -475,8 +517,7 @@ internal sealed partial class TrayContext
             later.Add(Milliseconds("adopt-ms", end.AdoptMs));
         }
 
-        later.AddRange(setupSteps);
-        _coordinator.WriteHistory(end.Session.ToHistoryEntry(_time.GetUtcNow(), later));
+        return later;
     }
 
     // The one history entry of a run that ended before the session gave one: the step it stopped at, with its code and the time.
@@ -518,8 +559,10 @@ internal sealed partial class TrayContext
 
         public DeviceChoiceResult? Adoption { get; init; }
 
-        // The answer to "use these instead?", when it was asked.
+        // The answer to "use these instead?", when it was asked, and how long it took.
         public StepOutcome? Replace { get; init; }
+
+        public long ReplaceMs { get; init; }
     }
 
     private async Task<PairRunEnd> PairAndAdoptAsync(PairAirPodsServices services, CardPlace place)
@@ -535,6 +578,7 @@ internal sealed partial class TrayContext
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         IFixRePairUi ui = services.UiFactory(cancel);
         var watch = System.Diagnostics.Stopwatch.StartNew();
+        _pairRunSteps.Clear();
         HashSet<Guid>? before = null;
         bool marked = false;
 
@@ -547,13 +591,18 @@ internal sealed partial class TrayContext
             RadioCheckResult? radio = await session.CheckRadioAsync(cancel.Token);
             if (radio is not { BlocksRepair: true })
             {
-                var question = new FixPrompt(PairAirPodsText.Title, PairAirPodsText.Title, PairAirPodsText.FirstQuestionBody, [], [], PairAirPodsText.LookButton);
-                FixPromptAnswer answer = services.Prompter.Ask(question);
+                FixPromptAnswer answer = services.Prompter.Ask(PairAirPodsText.FirstQuestion, _lifetime.Token);
                 if (answer.Answer != FixAnswer.Ok)
                 {
                     _log.Info("Pair AirPods: the person did not press Look for AirPods, so nothing was scanned.");
                     return EndedEarly(new StepOutcome("look", false, NativeCodes.NotAttempted, answer.Answer.ToString(), null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds);
                 }
+
+                _pairRunSteps.Add(new StepOutcome("look", true, 0, answer.Answer.ToString(), null));
+                _pairRunSteps.Add(Milliseconds("look-ms", watch.ElapsedMilliseconds));
+
+                // Earshot may have begun closing as the button was pressed: nothing is written or scanned then.
+                _lifetime.Token.ThrowIfCancellationRequested();
             }
 
             // Written before anything can be paired, so the time between the pairing and the adoption is always covered.
@@ -571,6 +620,7 @@ internal sealed partial class TrayContext
                 }
 
                 marked = true;
+                _pairRunSteps.Add(written);
             }
 
             PairingSessionResult result = await session.RunAsync(excludeAlreadyListed: false, cancel.Token, radio);
@@ -597,19 +647,33 @@ internal sealed partial class TrayContext
                     return new PairRunEnd(result, null, false);
                 }
 
-                ClearOwnMarker(marked, earlierMarker, "the pairing left no AirPods to adopt");
+                // Earshot stopped waiting (its own time limit) or the call threw: Windows may still finish the pairing after this
+                // look, with nodes that arrive later, so the marker stays and the next start looks again (and clears it when
+                // nothing was left).
+                if (result.Reason == PairFailureReason.TimedOut || result.PairStatus is { Threw: true })
+                {
+                    _log.Info("Pair AirPods: the pairing was not answered by Windows (" + result.Reason + "), so the recovery marker is kept for the next start.");
+                }
+                else
+                {
+                    ClearOwnMarker(marked, earlierMarker, "the pairing left no AirPods to adopt");
+                }
+
                 ShowPairResult(result, radio, place);
                 return new PairRunEnd(result, null, false);
             }
 
             // Earshot always asks before it takes on a different pair: the pick and the Pair press chose what to pair, not that it
             // takes the place of the pair Earshot is set to use.
-            FixAnswer? replace = AskToReplace(services, found, _registry.Settings.Current.PinnedContainerId);
+            var replaceWatch = System.Diagnostics.Stopwatch.StartNew();
+            FixAnswer? replace = AskToReplace(services, found, _registry.Settings.Current, _lifetime.Token);
+            long replaceMs = replaceWatch.ElapsedMilliseconds;
             if (replace is { } kept && kept != FixAnswer.Ok)
             {
                 if (kept == FixAnswer.Cancel && !_closing)
                 {
                     _log.Info("Pair AirPods: the person kept the AirPods Earshot uses, so the new pair is left paired and not used.");
+                    _keptPinnedPairAt = _time.GetUtcNow();
                     ClearOwnMarker(marked, earlierMarker, "the person kept the AirPods Earshot uses");
                     ShowCard(TrayStatus.AppName, PairAirPodsText.KeptOtherPair, place);
                 }
@@ -624,6 +688,7 @@ internal sealed partial class TrayContext
                 return new PairRunEnd(result, false, false)
                 {
                     Replace = new StepOutcome("replace", false, NativeCodes.NotAttempted, kept.ToString(), null),
+                    ReplaceMs = replaceMs,
                     Adoption = DeviceChoiceResult.NotApplied,
                 };
             }
@@ -641,6 +706,7 @@ internal sealed partial class TrayContext
                     AdoptMs = adoptMs,
                     Adoption = adoption,
                     Replace = replace is null ? null : new StepOutcome("replace", true, 0, FixAnswer.Ok.ToString(), null),
+                    ReplaceMs = replaceMs,
                 };
             }
 
@@ -648,6 +714,13 @@ internal sealed partial class TrayContext
             if (!adopted)
             {
                 _log.Warn("Pair AirPods: the recovery marker is kept, so the next start offers these AirPods again.");
+            }
+            else if (earlierMarker)
+            {
+                // The adoption cleared the marker, but an earlier run's was there before this one wrote its own: that run may have
+                // left a pair this one did not look at, so the marker is written again for the next start to look.
+                StepOutcome rewritten = services.Marker.Write();
+                _log.Write(rewritten.Ok ? LogLevel.Info : LogLevel.Warn, "Pair AirPods: an earlier pairing's marker is written again after the adoption: " + rewritten.CodeName + ".");
             }
 
             bool setUp = false;
@@ -663,6 +736,7 @@ internal sealed partial class TrayContext
                 AdoptMs = adoptMs,
                 Adoption = adoption,
                 Replace = replace is null ? null : new StepOutcome("replace", true, 0, FixAnswer.Ok.ToString(), null),
+                ReplaceMs = replaceMs,
             };
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
@@ -737,15 +811,18 @@ internal sealed partial class TrayContext
     // Whether the new pair may take the place of the pinned one: null when there is nothing to replace (nothing valid pinned, or
     // the same pair again), otherwise the person's answer. Asked whether or not the pinned pair is still paired: Earshot always
     // asks before it takes on a different pair.
-    private static FixAnswer? AskToReplace(PairAirPodsServices services, AirPodsCandidate found, Guid pinned)
+    // The same AirPods paired again may come back as a new device group, so the address counts as the same pair too.
+    private static FixAnswer? AskToReplace(PairAirPodsServices services, AirPodsCandidate found, EarshotSettings settings, CancellationToken closeOn)
     {
-        if (!NodeMatch.IsValidTargetContainer(pinned) || pinned == found.ContainerId)
+        Guid pinned = settings.PinnedContainerId;
+        if (!NodeMatch.IsValidTargetContainer(pinned) || pinned == found.ContainerId ||
+            (settings.PinnedAddress.Length > 0 && string.Equals(settings.PinnedAddress, found.Address, StringComparison.OrdinalIgnoreCase)))
         {
             return null;
         }
 
         var question = new FixPrompt(PairAirPodsText.Title, PairAirPodsText.ReplaceHeading, PairAirPodsText.ReplaceBody, [], [], PairAirPodsText.ReplaceButton);
-        return services.Prompter.Ask(question).Answer;
+        return services.Prompter.Ask(question, closeOn).Answer;
     }
 
     // The pair the person has just paired, and agreed to use, is adopted at once: pinned, given to the gate when

@@ -90,6 +90,26 @@ public sealed class FixStartTests
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
     }
 
+    // The tray's own Pair AirPods holds the automatic block the same way: its adoption may take longer than the idle wait, and
+    // the block must not act on the pair being adopted.
+    [TestMethod]
+    public void NothingIsBlockedWhileTheTrayPairsAndTheIdleRuleStartsAgainAfter()
+    {
+        using CoordinatorHarness h = Idle();
+        h.TrayPairing.Active = true;
+        h.Start();
+
+        h.Advance(BlockCoordinator.IdleGrace + BlockCoordinator.IdleGrace);
+
+        Assert.IsEmpty(h.Block.Calls, "A block ran while the tray paired.");
+        Assert.IsTrue(h.Coordinator.RecheckRunning);
+
+        h.TrayPairing.Active = false;
+        h.Advance(BlockCoordinator.IdleRetryLimit + BlockCoordinator.IdleGrace + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
+    }
+
     [TestMethod]
     public void AWindowThatOpensDuringTheIdleCountdownStopsTheBlock()
     {

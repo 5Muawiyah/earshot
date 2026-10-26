@@ -169,6 +169,22 @@ public sealed class PairingSessionTests
         Expect.Same(rig.Ui.PinsShown, "ConfirmPinMatch:123456");
     }
 
+    // The number question is asked with the pairing attempt's token, so it closes when the attempt ends (Earshot's own time
+    // limit, Cancel, Exit) instead of staying up for an answer that would go to a pairing that has stopped.
+    [TestMethod]
+    public async Task TheNumberQuestionEndsWithThePairingAttempt()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig);
+        rig.Pairing.Requests.Add((FixPairKind.ConfirmPinMatch, "123456"));
+
+        await RunAsync(rig);
+
+        CancellationToken asked = rig.Ui.PinTokens.Single();
+        Assert.IsTrue(asked.CanBeCanceled, "The question was given the attempt's token, not none.");
+    }
+
     // ---- the pairing and what it says ----
 
     [TestMethod]
@@ -204,6 +220,32 @@ public sealed class PairingSessionTests
         Assert.AreEqual("This PC found the headphones but couldn't reach them.", result.CardLine);
         Assert.AreEqual(FailureClass.PcSide.ToString(), result.ToHistoryEntry(DateTimeOffset.UnixEpoch).FailureClass);
         Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "name-unread" && s.Code == 1));
+    }
+
+    // Nodes a removed pairing left behind, not present, are not the new pair: matching them read "AirPods" before the new nodes
+    // were there. With only those, the pair could not be looked at, which is what it says.
+    [TestMethod]
+    public async Task NodesThatAreNotPresentDoNotPassTheModelCheck()
+    {
+        using var rig = new FixRig();
+        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("unpaired", "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
+        rig.Pairing.OnPaired = _ =>
+        {
+            FakeNode[] leftBehind = FixRig.NewAirPodsNodes();
+            foreach (FakeNode node in leftBehind)
+            {
+                node.Present = false;
+            }
+
+            rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(leftBehind));
+            rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+        };
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.AreNotEqual(PairOutcome.Paired, result.Outcome, "Nodes that are not present were taken for the new pair.");
+        Assert.IsNull(result.Adoptable);
+        Assert.AreEqual(PairOutcome.Unverified, result.Outcome);
     }
 
     // NotReadyToPair is the device not in pairing mode: with no name read it is still not the PC that could not reach it.

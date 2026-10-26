@@ -54,6 +54,9 @@
        Used only from src\Earshot\Trace\TraceProfile.cs. -->
   <ItemGroup>
     <EmbeddedResource Include="Trace\BluetoothStack.wprp" LogicalName="Earshot.Trace.BluetoothStack.wprp" />
+    <!-- The pairing-mode pictures of the Pair AirPods question: the test window's own drawn schematics, one copy for both. -->
+    <EmbeddedResource Include="..\Earshot.TestWindow\Data\pictures\airpods-case-front-tap.png" LogicalName="Earshot.Pictures.airpods-case-front-tap.png" />
+    <EmbeddedResource Include="..\Earshot.TestWindow\Data\pictures\airpods-case-back-button.png" LogicalName="Earshot.Pictures.airpods-case-back-button.png" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />

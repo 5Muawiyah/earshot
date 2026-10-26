@@ -127,6 +127,39 @@ public sealed class StalePinWiringTests
         });
     }
 
+    // A Pair AirPods pressed while the stale-pin check read the paired list: the check says nothing once it has read it, so the
+    // device picker card does not show over the pairing's own, and nothing chosen on it races the pairing's adoption.
+    [TestMethod]
+    public void AStalePinCheckThatFindsAPairingStartedSaysNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            AddASecondPairedPair(rig);
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig), settings: PinTheRigsPair);
+            tray.Cards.Shown.Clear();
+            rig.Prompter.SayOk();
+            bool armed = true;
+            rig.Pairing.OnListPaired = () =>
+            {
+                if (armed)
+                {
+                    armed = false;
+                    tray.Context.Menu.Refresh();
+                    tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+                }
+            };
+
+            tray.Context.StartPinnedPairCheck("new device");
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(armed, "The pairing started while the paired list was read.");
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.StaleChosen), string.Join(" | ", tray.Cards.Statuses));
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("a pairing started while it looked", StringComparison.Ordinal)));
+        });
+    }
+
     [TestMethod]
     public void AStalePinWithAnotherPairAsksWhichOneAndAdoptsNothing()
     {

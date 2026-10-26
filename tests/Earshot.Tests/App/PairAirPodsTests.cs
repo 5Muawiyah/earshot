@@ -29,6 +29,8 @@ public sealed class PairAirPodsTests
 
     private static readonly string[] LookSteps = ["look", "look-ms"];
 
+    private static readonly string[] StepsBeforeTheSession = ["look", "look-ms", "pair-marker-write"];
+
     private static void ArrangePairs(FixRig rig, bool airPods = true)
     {
         rig.Pairing.OnPaired = _ =>
@@ -108,8 +110,11 @@ public sealed class PairAirPodsTests
             Assert.AreEqual(ConnectHistoryOutcomes.Paired, entry.Outcome);
             var stepNames = entry.Steps.Select(s => s.Name).ToList();
             CollectionAssert.Contains(stepNames, "replace");
+            CollectionAssert.Contains(stepNames, "replace-ms");
             CollectionAssert.Contains(stepNames, "adopt");
             CollectionAssert.Contains(stepNames, "setup");
+            // The steps before the session (the question and the marker) lead the entry, so a run that went on has them too.
+            CollectionAssert.AreEqual(StepsBeforeTheSession, stepNames.Take(3).ToArray());
             Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)), "No automatic unpair.");
             Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("previous pair's last readings and link are dropped", StringComparison.Ordinal)), "A different pair took the place of the pinned one.");
         });
@@ -162,6 +167,9 @@ public sealed class PairAirPodsTests
             Assert.AreEqual(PairAirPodsText.KeptOtherPair, tray.Cards.Shown[^1].Content.Status);
             Assert.IsFalse(marker.Exists());
             ConnectHistoryEntry entry = history.Read().Single();
+            // The new pair's device group may settle just after the answer: the tray answers for it, so the coordinator's card
+            // does not replace the one that was just shown.
+            Assert.IsTrue(tray.Coordinator.NewDeviceHook!(CancellationToken.None).GetAwaiter().GetResult(), "The tray answers for the new device it was just told about.");
             HistoryStep replace = entry.Steps.Single(st => st.Name == "replace");
             Assert.AreEqual(NativeCodes.NotAttempted, replace.Code);
             Assert.AreEqual(nameof(FixAnswer.Cancel), replace.CodeName);
@@ -188,6 +196,86 @@ public sealed class PairAirPodsTests
 
             Assert.HasCount(1, rig.Prompter.Asked);
             Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
+        });
+    }
+
+    // The Look for AirPods question shows the two kinds of case with their pictures, each with its line under it, so the
+    // pairing-mode steps are pictures in Earshot itself and not only in the test window.
+    [TestMethod]
+    public void TheFirstQuestionShowsEachKindOfCaseWithItsPicture()
+    {
+        FixPrompt question = PairAirPodsText.FirstQuestion;
+
+        Assert.IsNotNull(question.Pictures);
+        CollectionAssert.AreEqual(new[] { PromptPictures.CaseFront, PromptPictures.CaseBack }, question.Pictures.Select(p => p.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { PairingText.CaseFront, PairingText.CaseBack }, question.Pictures.Select(p => p.Caption).ToArray());
+        Assert.AreEqual(PairAirPodsText.LookButton, question.OkText);
+        foreach (PromptPicture picture in question.Pictures)
+        {
+            using System.Drawing.Image? image = PromptPictures.Load(picture.Name);
+            Assert.IsNotNull(image, picture.Name + " is carried in Earshot.");
+            Assert.IsGreaterThan(0, image.Width);
+        }
+    }
+
+    // The window that shows it: the iPhone line on its own, each picture over its caption, Look for AirPods and Cancel, with
+    // Cancel the default as in the other questions. Built, not shown.
+    [TestMethod]
+    public void ThePictureQuestionHoldsTheIntroEachPictureItsCaptionAndBothButtons()
+    {
+        StaThread.Run(() =>
+        {
+            using System.Windows.Forms.Form form = PicturePromptWindow.Build(PairAirPodsText.FirstQuestion, out Button ok);
+
+            List<Control> all = Flatten(form).ToList();
+            Assert.HasCount(2, all.OfType<PictureBox>().Where(p => p.Image is not null).ToList());
+            List<string> texts = all.OfType<Label>().Select(l => l.Text).ToList();
+            CollectionAssert.Contains(texts, PairingText.TurnOffIPhoneBluetooth);
+            CollectionAssert.Contains(texts, PairingText.CaseFront);
+            CollectionAssert.Contains(texts, PairingText.CaseBack);
+            Assert.IsFalse(texts.Any(t => t.Contains(PairingText.CaseFront, StringComparison.Ordinal) && t != PairingText.CaseFront), "Each case line is said once, under its picture.");
+            Assert.AreEqual(PairAirPodsText.LookButton, ok.Text);
+            Assert.AreEqual("Cancel", ((Button)form.CancelButton!).Text);
+            Assert.AreSame<object?>(form.CancelButton, form.AcceptButton, "Enter presses Cancel, as in the other questions.");
+        });
+    }
+
+    private static IEnumerable<Control> Flatten(Control parent)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            yield return child;
+            foreach (Control below in Flatten(child))
+            {
+                yield return below;
+            }
+        }
+    }
+
+    // Exit while a question is up: the questions are asked with the tray's lifetime, so Exit closes them instead of waiting
+    // out a question nobody will answer.
+    [TestMethod]
+    public void ThePairingQuestionsCloseWhenEarshotCloses()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Prompter.SayCancel();
+            var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            CancellationToken asked;
+            try
+            {
+                Click(tray);
+                asked = rig.Prompter.Tokens.Single();
+                Assert.IsTrue(asked.CanBeCanceled);
+                Assert.IsFalse(asked.IsCancellationRequested);
+            }
+            finally
+            {
+                tray.Dispose();
+            }
+
+            Assert.IsTrue(asked.IsCancellationRequested, "Closing Earshot closes the question.");
         });
     }
 
@@ -312,8 +400,14 @@ public sealed class PairAirPodsTests
                 snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker),
                 arrange: h => h.Block.OnSetDevice = async _ =>
                 {
-                    // The adoption takes a moment, so the recovery's own look ends while the pairing still runs.
-                    await Task.Delay(500, CancellationToken.None);
+                    // The adoption lasts until the recovery's own look has ended (or ten seconds, on code that never says so), so
+                    // the look always ends while the pairing still runs, however slow the runner.
+                    var waited = System.Diagnostics.Stopwatch.StartNew();
+                    while (waited.Elapsed < TimeSpan.FromSeconds(10) && running?.Log.Has(LogLevel.Info, "stops, because a pairing has started") != true)
+                    {
+                        await Task.Delay(10, CancellationToken.None);
+                    }
+
                     return ControllerResult.Ok("Done");
                 });
             running = tray;
@@ -378,6 +472,49 @@ public sealed class PairAirPodsTests
             CollectionAssert.Contains(marker.Calls, "write");
             Assert.IsFalse(marker.Calls.Contains("clear"), "The earlier run's marker was cleared: " + string.Join(", ", marker.Calls));
             Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    // Earshot's own time limit ended the pairing: Windows may still finish it, with nodes that arrive after the look, so the
+    // marker stays for the next start. Before, a look that came too early cleared it.
+    [TestMethod]
+    public void APairingEarshotStoppedWaitingForKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
+            rig.Pairing.PairResult = new PairingCallResult(PairingSession.CancelledTimeout, 1460, false, null);
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+
+            Click(tray);
+
+            CollectionAssert.Contains(marker.Calls, "write");
+            Assert.IsTrue(marker.Exists(), string.Join(", ", marker.Calls));
+        });
+    }
+
+    // A marker an earlier run left is still there after this run adopts its own pair: that run may have left a pair this one did
+    // not look at. Before, the adoption cleared it with this run's own.
+    [TestMethod]
+    public void AnAdoptionKeepsAMarkerAnEarlierRunLeft()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+            marker.Present = true;
+
+            Click(tray);
+
+            Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId, "The new pair was adopted.");
+            Assert.IsTrue(marker.Exists(), "The earlier run's marker is there for the next start: " + string.Join(", ", marker.Calls));
         });
     }
 

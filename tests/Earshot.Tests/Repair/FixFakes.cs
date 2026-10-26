@@ -40,7 +40,22 @@ internal sealed class FakePrompter : IFixPrompter
     // Runs as a question is asked, before it is answered.
     public Action<FixPrompt>? OnAsk { get; set; }
 
+    // The token each question was asked with (CancellationToken.None for the plain Ask), in order.
+    public List<CancellationToken> Tokens { get; } = new();
+
+    public FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn)
+    {
+        Tokens.Add(closeOn);
+        return Answer(prompt);
+    }
+
     public FixPromptAnswer Ask(FixPrompt prompt)
+    {
+        Tokens.Add(CancellationToken.None);
+        return Answer(prompt);
+    }
+
+    private FixPromptAnswer Answer(FixPrompt prompt)
     {
         Asked.Add(prompt);
         OnAsk?.Invoke(prompt);
@@ -117,9 +132,13 @@ internal sealed class FakeRePairUi : IFixRePairUi
         return Task.FromResult(Pick >= 0 && Pick < candidates.Count ? candidates[Pick] : null);
     }
 
-    public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin)
+    // The token each number question was given, so a test can see it ends with the pairing attempt.
+    public List<CancellationToken> PinTokens { get; } = new();
+
+    public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin, CancellationToken ct)
     {
         PinsShown.Add(kind + ":" + pin);
+        PinTokens.Add(ct);
         return Task.FromResult(ConfirmPin);
     }
 

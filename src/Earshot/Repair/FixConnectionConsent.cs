@@ -41,7 +41,11 @@ internal enum FixAnswer
 }
 
 // What one dialog shows. Choices are radio buttons; none is chosen for the person. Lines are the list of changes.
-internal sealed record FixPrompt(string Title, string Heading, string Body, IReadOnlyList<string> Lines, IReadOnlyList<string> Choices, string OkText);
+// Pictures, when there are any, are shown with their captions beside the body's other lines (the pairing-mode steps).
+internal sealed record FixPrompt(string Title, string Heading, string Body, IReadOnlyList<string> Lines, IReadOnlyList<string> Choices, string OkText, IReadOnlyList<PromptPicture>? Pictures = null);
+
+// A picture embedded in Earshot by name (PromptPictures), and the line that goes under it.
+internal sealed record PromptPicture(string Name, string Caption);
 
 // Chosen is the index of the chosen radio button, or -1.
 internal sealed record FixPromptAnswer(FixAnswer Answer, int Chosen);
@@ -51,6 +55,10 @@ internal sealed record FixPromptAnswer(FixAnswer Answer, int Chosen);
 internal interface IFixPrompter
 {
     FixPromptAnswer Ask(FixPrompt prompt);
+
+    // The same, closed as a cancel when closeOn is cancelled (Earshot is closing), so Exit does not wait out a question nobody
+    // will answer. A prompter that cannot be closed asks as Ask does.
+    FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn) => Ask(prompt);
 }
 
 // What the process can see of the desktop it runs on, and the desktop that receives input.
@@ -184,10 +192,34 @@ internal static class FixPromptText
 // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.taskdialog
 internal sealed class TaskDialogPrompter : IFixPrompter
 {
-    public FixPromptAnswer Ask(FixPrompt prompt)
+    public FixPromptAnswer Ask(FixPrompt prompt) => Ask(prompt, CancellationToken.None);
+
+    // A prompt with pictures is a window of its own (a TaskDialog shows no pictures). closeOn closes either, on the thread that
+    // shows it.
+    public FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn)
     {
         ArgumentNullException.ThrowIfNull(prompt);
+        if (closeOn.IsCancellationRequested)
+        {
+            return new FixPromptAnswer(FixAnswer.Cancel, -1);
+        }
+
+        if (prompt.Pictures is { Count: > 0 })
+        {
+            return PicturePromptWindow.Ask(prompt, closeOn);
+        }
+
         TaskDialogPage page = FixDialogPages.Build(prompt, out TimeSpan timeout);
+        SynchronizationContext? ui = SynchronizationContext.Current;
+        using CancellationTokenRegistration closing = closeOn.Register(() =>
+        {
+            if (ui is null)
+            {
+                return;
+            }
+
+            ui.Post(_ => page.BoundDialog?.Close(), null);
+        });
         // The first button is the OK button, as Build adds it.
         TaskDialogButton ok = page.Buttons[0];
         using var timer = new System.Windows.Forms.Timer { Interval = (int)timeout.TotalMilliseconds };
