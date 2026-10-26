@@ -887,8 +887,8 @@ public sealed class PairAirPodsTests
         });
     }
 
-    // Exit while the gate is given the new pair: the entry says Earshot closed, not that the adoption failed, and the marker is
-    // kept for the next start.
+    // Exit while the gate is given the new pair, and the gate run is cut off: the entry says Earshot closed, not that the
+    // adoption failed, and the marker is kept for the next start.
     [TestMethod]
     public void ExitDuringTheAdoptionIsRecordedAsClosing()
     {
@@ -905,11 +905,11 @@ public sealed class PairAirPodsTests
             using var tray = new TrayHarness(
                 snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig, marker: marker),
                 coordinatorServices: new CoordinatorServices { History = history },
-                arrange: h => h.Block.OnSetDevice = async ct =>
+                arrange: h => h.Block.OnSetDevice = async _ =>
                 {
                     running!.Ui.Post(_ => running.ClickMenu(MenuModel.Exit), null);
-                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
-                    return ControllerResult.Ok("Device set");
+                    await Task.Delay(500, CancellationToken.None);
+                    throw new OperationCanceledException("The gate run was cut off by Exit.");
                 });
             running = tray;
 
@@ -925,6 +925,44 @@ public sealed class PairAirPodsTests
             CollectionAssert.DoesNotContain(names, "adopt", string.Join(", ", names));
             CollectionAssert.Contains(names, "adopt-ms", string.Join(", ", names));
             Assert.IsTrue(marker.Exists(), "The marker is kept for the next start.");
+        });
+    }
+
+    // Exit while the gate is given the new pair, and the gate takes it: the tray saves the same pin, so the tray and the gate
+    // never name different pairs, and the adoption is recorded as done. Before, the pin was not saved because Earshot was closing.
+    [TestMethod]
+    public void ExitAfterTheGateTookTheNewPairStillSavesItsPin()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            TrayHarness? running = null;
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history },
+                arrange: h => h.Block.OnSetDevice = async _ =>
+                {
+                    running!.Ui.Post(_ => running.ClickMenu(MenuModel.Exit), null);
+                    await Task.Delay(500, CancellationToken.None);
+                    return ControllerResult.Ok("Device set");
+                });
+            running = tray;
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            RunUntilClosed(tray);
+
+            Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId, "The tray names the pair the gate took.");
+            HistoryStep[] steps = history.Read().Single().Steps.ToArray();
+            Assert.AreEqual(0, steps.Single(s => s.Name == "adopt").Code, string.Join(", ", steps.Select(s => s.Name)));
         });
     }
 

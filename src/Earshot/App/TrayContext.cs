@@ -2870,7 +2870,9 @@ internal sealed partial class TrayContext : ApplicationContext
             gateRepinned = true;
         }
 
-        if (_closing || !TryUpdateSettings(
+        // Once the gate has the new pair, the tray's pin is saved even while Earshot closes: it is a local write, and without it
+        // the tray and the gate would name different pairs until a choice is made again.
+        if ((_closing && !gateRepinned) || !TryUpdateSettings(
                 "device",
                 s =>
                 {
