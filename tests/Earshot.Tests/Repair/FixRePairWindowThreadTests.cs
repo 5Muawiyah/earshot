@@ -112,4 +112,13 @@ public sealed class FixRePairWindowThreadTests
             Assert.AreEqual(Environment.CurrentManagedThreadId, window.OnUi(() => Environment.CurrentManagedThreadId));
         });
     }
+
+    // The result window closes itself after the same five minutes as Fix's questions: the run holds the Fix lock, and tells the
+    // tray it ended, only once it closes. Before, it stayed up until someone pressed OK.
+    [TestMethod]
+    public void TheResultWindowClosesItselfAfterTheQuestionsTimeLimit()
+    {
+        Assert.AreEqual(FixDialogPages.Timeout, FixRePairWindow.ResultTimeout);
+        Assert.AreEqual(TimeSpan.FromMinutes(5), FixRePairWindow.ResultTimeout);
+    }
 }

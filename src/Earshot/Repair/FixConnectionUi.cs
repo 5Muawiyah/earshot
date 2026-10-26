@@ -149,6 +149,10 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         ? new FixPrompt(title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")
         : new FixPrompt(title, "Enter " + pin + " on your device", "Enter this number on your device to pair.", [], [], "Continue");
 
+    // How long the result stays up unread. The Fix lock is held, and the tray is told the run ended, only once it closes, so it
+    // closes itself after the same time as Fix's questions, with no trace asked for.
+    internal static readonly TimeSpan ResultTimeout = FixDialogPages.Timeout;
+
     // With offerTrace, a second button asks the tray for Record a Bluetooth trace, which shows its note before anything is
     // recorded.
     public bool ShowResult(string text, bool offerTrace)
@@ -174,6 +178,14 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         }
 
         page.Buttons.Add(TaskDialogButton.OK);
+        using var timer = new System.Windows.Forms.Timer { Interval = (int)ResultTimeout.TotalMilliseconds };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            page.BoundDialog?.Close();
+        };
+        page.Created += (_, _) => timer.Start();
+        page.Destroyed += (_, _) => timer.Stop();
         return TaskDialog.ShowDialog(page) == trace;
     }
 
