@@ -18,6 +18,44 @@ public sealed class StartupRegistrationTests
     private static StartupRegistration Create(FakeStartupRegistry registry, CapturingLog log, bool safeMode = false, string? exePath = ExePath, bool redirected = false) =>
         new(registry, log, safeMode, exePath, redirected);
 
+    // 25 October: the value read the per-user path just after the tray logged writing the installed one. No second writer was
+    // found in the code, so each write and delete is read back and the value read is logged; one that differs is a warning.
+    [TestMethod]
+    public void AWriteIsReadBackAndTheValueReadIsLogged()
+    {
+        var registry = new FakeStartupRegistry();
+        var log = new CapturingLog();
+
+        Assert.IsTrue(Create(registry, log).Apply(true).IsSuccess);
+
+        Assert.IsTrue(log.Has(LogLevel.Info, "read back after the write: " + Command), string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
+    [TestMethod]
+    public void AValueThatReadsBackDifferentlyIsAWarningThatSaysWhatWasRead()
+    {
+        const string PerUser = "\"C:\\Users\\p\\AppData\\Local\\Programs\\Earshot\\Earshot.exe\" --startup";
+        var registry = new FakeStartupRegistry();
+        registry.AfterChange = () => registry.Run["Earshot"] = PerUser;
+        var log = new CapturingLog();
+
+        Create(registry, log).Apply(true);
+
+        Assert.IsTrue(log.Has(LogLevel.Warn, "read back after the write: " + PerUser + ", not what was written"));
+    }
+
+    [TestMethod]
+    public void ADeleteIsReadBackToo()
+    {
+        var registry = new FakeStartupRegistry();
+        registry.Run["Earshot"] = Command;
+        var log = new CapturingLog();
+
+        Assert.IsTrue(Create(registry, log).Apply(false).IsSuccess);
+
+        Assert.IsTrue(log.Has(LogLevel.Info, "read back after the delete: (none)"));
+    }
+
     [TestMethod]
     public void TheCommandQuotesThePathAndAddsTheStartupArgument()
     {

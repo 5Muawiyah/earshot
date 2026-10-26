@@ -294,6 +294,7 @@ internal sealed class StartupRegistration
                 _registry.WriteRunValue(ValueName, command);
                 _log.Warn("Open on startup: HKCU\\" + CurrentUserStartupRegistry.RunKey + "\\" + ValueName + " = " + command +
                     " written, but the entry is turned off in Windows, so Windows will not start it.");
+                LogReadBack("the write", command);
                 return new ControllerResult(OpStatus.Partial, TurnedOffInWindowsMessage, [turnedOff]);
             }
 
@@ -304,6 +305,7 @@ internal sealed class StartupRegistration
 
             _registry.WriteRunValue(ValueName, command);
             _log.Info("Open on startup turned on: HKCU\\" + CurrentUserStartupRegistry.RunKey + "\\" + ValueName + " = " + command);
+            LogReadBack("the write", command);
             return ControllerResult.Ok(OnMessage);
         }
         catch (Exception ex) when (IsRegistryError(ex))
@@ -323,12 +325,24 @@ internal sealed class StartupRegistration
 
             _registry.DeleteRunValue(ValueName);
             _log.Info("Open on startup turned off: HKCU\\" + CurrentUserStartupRegistry.RunKey + "\\" + ValueName + " removed.");
+            LogReadBack("the delete", null);
             return ControllerResult.Ok(OffMessage);
         }
         catch (Exception ex) when (IsRegistryError(ex))
         {
             return Failed(action, ex);
         }
+    }
+
+    // The value as it reads straight after a write or a delete, in the log. On 25 October the value read the per-user path just
+    // after the tray logged writing the installed one, and no second writer or ordering in Earshot explains it, so every change
+    // is read back: a value that differs from what was written is a warning naming what was read.
+    private void LogReadBack(string change, string? written)
+    {
+        string? back = _registry.ReadRunValue(ValueName);
+        bool same = string.Equals(back, written, StringComparison.Ordinal);
+        _log.Write(same ? LogLevel.Info : LogLevel.Warn,
+            "Open on startup: read back after " + change + ": " + (back ?? "(none)") + (same ? "." : ", not what was written (" + (written ?? "(none)") + ")."));
     }
 
     private ControllerResult Failed(string action, Exception ex)

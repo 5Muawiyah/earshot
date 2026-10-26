@@ -92,6 +92,9 @@ internal sealed class FakeStartupRegistry : IStartupRegistry
 
     public Exception? WriteFailure { get; set; }
 
+    // Runs straight after each write or delete, as another writer of the value would.
+    public Action? AfterChange { get; set; }
+
     public string? ReadRunValue(string name)
     {
         if (ReadFailure is not null)
@@ -121,6 +124,7 @@ internal sealed class FakeStartupRegistry : IStartupRegistry
 
         Writes++;
         Run[name] = command;
+        AfterChange?.Invoke();
     }
 
     public void DeleteRunValue(string name)
@@ -132,6 +136,7 @@ internal sealed class FakeStartupRegistry : IStartupRegistry
 
         Deletes++;
         Run.Remove(name);
+        AfterChange?.Invoke();
     }
 }
 
