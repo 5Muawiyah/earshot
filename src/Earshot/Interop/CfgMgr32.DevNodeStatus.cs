@@ -53,6 +53,16 @@ internal static unsafe partial class CfgMgr32
         return true;
     }
 
+    // A property read that succeeded with a type or size this build does not decode: a failed step whose code is the property
+    // type, so a version or date reported unknown has its reason. Null when the read failed (its CONFIGRET is its own step) or
+    // the value decoded.
+    // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/property-data-type-identifiers
+    internal static StepOutcome? UndecodedProperty(string step, uint cr, uint propertyType, bool decoded) =>
+        cr == CR_SUCCESS && !decoded
+            ? new StepOutcome(step + "-type", false, unchecked((int)propertyType),
+                "DEVPROP_TYPE 0x" + propertyType.ToString("X8", System.Globalization.CultureInfo.InvariantCulture), "The value's type or size is not one this build reads.")
+            : null;
+
     // Reads the status and the driver of the present node with this instance id. Locate, status and each property are separate
     // calls; a failed one is recorded with its CONFIGRET and does not stop the others.
     // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_get_devnode_status
@@ -75,9 +85,11 @@ internal static unsafe partial class CfgMgr32
         string? version = null;
         cr = GetDevNodeProperty(devInst, DEVPKEY_Device_DriverVersion, out uint type, out byte[] data);
         steps.Add(StepOutcomes.FromConfigRet("cm-driver-version", cr));
-        if (cr == CR_SUCCESS && TryDecodeString(type, data, out string? text))
+        bool decoded = cr == CR_SUCCESS && TryDecodeString(type, data, out version);
+        if (UndecodedProperty("cm-driver-version", cr, type, decoded) is { } versionType)
         {
-            version = text;
+            version = null;
+            steps.Add(versionType);
         }
 
         DateOnly? date = null;
@@ -86,6 +98,10 @@ internal static unsafe partial class CfgMgr32
         if (cr == CR_SUCCESS && TryDecodeFileTimeDate(type, data, out DateOnly day))
         {
             date = day;
+        }
+        else if (UndecodedProperty("cm-driver-date", cr, type, decoded: false) is { } dateType)
+        {
+            steps.Add(dateType);
         }
 
         return new DevNodeStatusInfo(located, status, problem, version, date, steps);

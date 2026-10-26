@@ -186,6 +186,21 @@ public sealed class InteropHelpersTests
         CollectionAssert.AreEqual(Unterminated, CfgMgr32.ParseMultiSz("unterminated".AsSpan()));
     }
 
+    // A driver property that was read but not decoded is a failed step with the property's type as its code, so doctor's
+    // "unknown" version or date has its reason. A failed read and a decoded value add nothing.
+    [TestMethod]
+    public void AnUndecodedDriverPropertyIsAFailedStepWithItsType()
+    {
+        Earshot.Contracts.StepOutcome? step = CfgMgr32.UndecodedProperty("cm-driver-version", CfgMgr32.CR_SUCCESS, CfgMgr32.DEVPROP_TYPE_GUID, decoded: false);
+
+        Assert.IsNotNull(step);
+        Assert.AreEqual("cm-driver-version-type", step.Step);
+        Assert.IsFalse(step.Ok);
+        Assert.AreEqual((int)CfgMgr32.DEVPROP_TYPE_GUID, step.Code);
+        Assert.IsNull(CfgMgr32.UndecodedProperty("cm-driver-version", CfgMgr32.CR_SUCCESS, CfgMgr32.DEVPROP_TYPE_STRING, decoded: true));
+        Assert.IsNull(CfgMgr32.UndecodedProperty("cm-driver-version", 0x25, 0, decoded: false));
+    }
+
     [TestMethod]
     public void DecodesDevPropStrings()
     {
