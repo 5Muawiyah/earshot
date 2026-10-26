@@ -983,7 +983,7 @@ Actions of earshot.ps1:
 
 - Help: prints this guide.
 - Doctor: reads the state of the install, the AirPods and Bluetooth, and prints a short summary and a JSON block. It reads only: it writes its own log and a temporary download, nothing else, and does not touch the AirPods. It works with Earshot not installed: it downloads the latest release, checks its SHA-256, and runs that copy's doctor command as the person, not as administrator.
-- Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. Removing the AirPods and pairing them again has not yet been proved on real AirPods. If the latest release has no such command yet, it stops and says so.
+- Fix: the same way, runs that copy's fix command, which repairs the connection to the AirPods. It needs the person to answer two on-screen prompts. It may remove the AirPods from Windows and pair them again. Removing the AirPods and pairing them again has not yet been proved on real AirPods. If it has changes to make and Earshot is not installed, it says to set up Earshot first. If the latest release has no such command yet, it stops and says so.
 - Install: installs the latest release. Windows shows one administrator prompt.
 - Update: installs a newer release if there is one.
 - Repair: puts the installed version's files back.
@@ -1023,10 +1023,13 @@ $LASTEXITCODE
 2. If Earshot is not installed or its version is old, run Install or Update.
 3. If files are missing or damaged, run Repair.
 4. If the AirPods show a problem code, are disabled, are missing, or hang on "Connecting", run Fix.
-5. If Doctor shows a filter driver from another Bluetooth program on the AirPods or on the RFCOMM node, tell the person which program it is and that it can get in the way. Do not remove it yourself.
-6. If the person wants a setting changed, use Earshot.exe settings.
-7. Run Doctor again to confirm the result, and tell the person what changed.
-8. If it is still wrong and looks like a bug in Earshot, draft an issue (see below).
+5. If no AirPods are paired with this PC, tell the person to choose Pair AirPods in the Earshot menu.
+6. If Doctor shows Bluetooth off, a problem code on the radio or no adapter, the fault is this PC's Bluetooth, not the AirPods: tell the person what Doctor shows and to open Bluetooth settings. Do not run Fix for it.
+7. If nothing will pair with this PC although it finds devices, the PC's Bluetooth driver may be the cause: a driver update can stop the PC reaching devices. Tell the person they can roll the driver back in Device Manager (Bluetooth, the adapter, Properties, Driver, Roll Back Driver). Do not do it yourself.
+8. If Doctor shows a filter driver from another Bluetooth program on the AirPods or on the RFCOMM node, tell the person which program it is and that it can get in the way. Do not remove it yourself.
+9. If the person wants a setting changed, use Earshot.exe settings.
+10. Run Doctor again to confirm the result, and tell the person what changed.
+11. If it is still wrong and looks like a bug in Earshot, draft an issue (see below).
 
 ## Four hard limits
 
@@ -1048,6 +1051,7 @@ the download, not a hostile release or a swapped file.
 - Windows administrator prompts. The person clicks Yes. You cannot and must not do it for them.
 - Putting the AirPods in pairing mode: lid open, back button held until the light flashes white.
 - Fix's two on-screen OK prompts. Nothing you pass in can answer them.
+- Pair AirPods and Record a Bluetooth trace, which the person starts in Earshot. A trace holds Bluetooth addresses and may hold pairing keys: do not ask for it, read it or upload it.
 
 Everything else you do without asking first. Say what you did afterwards, in
 plain words.
