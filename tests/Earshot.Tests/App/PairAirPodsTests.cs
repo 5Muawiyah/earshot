@@ -66,6 +66,21 @@ public sealed class PairAirPodsTests
 
     private static MouseEventArgs Press(MouseButtons button) => new(button, clicks: 1, x: 0, y: 0, delta: 0);
 
+    // The message loop until Exit ends it, with a give-up timer, so a regression fails the test instead of hanging the run.
+    private static void RunUntilClosed(TrayHarness tray)
+    {
+        bool timedOut = false;
+        using var giveUp = new System.Windows.Forms.Timer { Interval = 20000 };
+        giveUp.Tick += (_, _) =>
+        {
+            timedOut = true;
+            Application.ExitThread();
+        };
+        giveUp.Start();
+        Application.Run(tray.Context);
+        Assert.IsFalse(timedOut, "Exit did not end the run within 20 seconds.");
+    }
+
     private static void Click(TrayHarness tray)
     {
         tray.Context.Menu.Refresh();
@@ -727,7 +742,7 @@ public sealed class PairAirPodsTests
                 tray.Context.Menu.Refresh();
                 tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
             }, null);
-            Application.Run(tray.Context);
+            RunUntilClosed(tray);
 
             ConnectHistoryEntry entry = history.Read().Single();
             Assert.AreEqual(ConnectHistoryOutcomes.Cancelled, entry.Outcome);
@@ -827,7 +842,7 @@ public sealed class PairAirPodsTests
                 tray.Context.Menu.Refresh();
                 tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
             }, null);
-            Application.Run(tray.Context);
+            RunUntilClosed(tray);
 
             ConnectHistoryEntry entry = history.Read().Single();
             string[] names = entry.Steps.Select(s => s.Name).ToArray();
@@ -864,7 +879,7 @@ public sealed class PairAirPodsTests
                 tray.Context.Menu.Refresh();
                 tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
             }, null);
-            Application.Run(tray.Context);
+            RunUntilClosed(tray);
 
             string[] names = history.Read().Single().Steps.Select(s => s.Name).ToArray();
             CollectionAssert.Contains(names, "closing", string.Join(", ", names));
@@ -899,7 +914,7 @@ public sealed class PairAirPodsTests
                 tray.Context.Menu.Refresh();
                 tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
             }, null);
-            Application.Run(tray.Context);
+            RunUntilClosed(tray);
 
             ConnectHistoryEntry entry = history.Read().Single();
             CollectionAssert.AreEqual(ClosingSteps, entry.Steps.Select(s => s.Name).ToArray());
