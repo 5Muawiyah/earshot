@@ -477,8 +477,9 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            // A process this user may not query, such as another account's or a protected one that reused the id. The helper
-            // that wrote the marker ran as an administrator of this session, so a process that cannot be queried is not it.
+            // A process this user may not query: another account's, a protected one that reused the id, or, under Administrator
+            // protection, the helper itself, which runs as another account. It counts as gone, so at worst the notice says a trace
+            // may still be running when it is ending: the safe side, against missing a recording session left behind.
             _log.Warn("trace: process " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " could not be queried (" + Describe(ex) + "), so it counts as gone.");
             return false;
         }

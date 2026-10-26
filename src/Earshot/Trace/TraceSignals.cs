@@ -69,7 +69,7 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
         }
         catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or IOException or SecurityException or System.ComponentModel.Win32Exception)
         {
-            return ex.GetType().Name + ": " + ex.Message;
+            return ex.GetType().Name + " (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message;
         }
     }
 

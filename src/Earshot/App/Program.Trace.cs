@@ -56,8 +56,9 @@ internal static partial class Program
         return paths.IsRedirected ? "Refused: trace does not run while " + Paths.DataRootVariable + " is set." : null;
     }
 
-    // token: null in a test that is not about elevation.
-    internal static int RunTrace(IReadOnlyList<string> args, ILog log, Func<TraceRequest, TraceOutcome> run, IProcessToken? token = null)
+    // token: null in a test that is not about elevation. environmentNames: as for the gate's elevated modes, the names of this
+    // process's environment variables; null reads them.
+    internal static int RunTrace(IReadOnlyList<string> args, ILog log, Func<TraceRequest, TraceOutcome> run, IProcessToken? token = null, IEnumerable<string>? environmentNames = null)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(log);
@@ -72,6 +73,14 @@ internal static partial class Program
         if (token is not null && !token.IsElevatedAdministrator)
         {
             log.Warn("trace: refused, because this run is not elevated.");
+            return ExitCodes.Refused;
+        }
+
+        // Elevated from the user's own session, like install and fix-apply, so it starts with that user's environment, which any
+        // program the user runs can change: a variable that makes the runtime load other code, use another runtime or write a
+        // file where it says refuses the run, as theirs do.
+        if (EnvironmentRefusal(TraceRequest.Verb, environmentNames, log) is not null)
+        {
             return ExitCodes.Refused;
         }
 

@@ -1,5 +1,6 @@
 using Earshot.Contracts;
 using Earshot.Infra;
+using Earshot.Tests.Phase4;
 using Earshot.Tracing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -74,10 +75,31 @@ public sealed class TraceModeTests
         {
             seen = request;
             return TraceOutcome.WprMissing;
-        });
+        }, environmentNames: []);
 
         Assert.AreEqual(ExitCodes.Unavailable, code);
         Assert.AreEqual(4321, seen!.TrayPid);
+    }
+
+    // Elevated from the user's session, so the user's environment comes with it: one that makes the runtime load other code, or
+    // use another runtime, refuses the run before anything is recorded, as install and fix-apply do.
+    [TestMethod]
+    [DataRow("DOTNET_STARTUP_HOOKS")]
+    [DataRow("COR_PROFILER")]
+    [DataRow("DOTNET_ROOT")]
+    public void AnEnvironmentThatLoadsOtherCodeRefusesTheRunBeforeAnythingIsRecorded(string variable)
+    {
+        bool ran = false;
+        var log = new CapturingLog();
+        int code = Program.RunTrace(["trace", "4321", Nonce], log, _ =>
+        {
+            ran = true;
+            return TraceOutcome.Saved;
+        }, FakeToken.ElevatedUser, [variable, "PATH"]);
+
+        Assert.AreEqual(ExitCodes.Refused, code);
+        Assert.IsFalse(ran);
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains(variable, StringComparison.Ordinal)), string.Join(" | ", log.Entries.Select(e => e.Message)));
     }
 
     [TestMethod]

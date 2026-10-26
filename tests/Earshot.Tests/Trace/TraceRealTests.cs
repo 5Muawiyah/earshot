@@ -122,6 +122,18 @@ public sealed class TraceRealTests
         Assert.IsFalse(helper.TrayRunning());
     }
 
+    // Events the tray never made: the helper's open fails, and what it says carries the raw code, not only the message.
+    [TestMethod]
+    public void AnOpenWithNoTrayEventsSaysWhyWithItsCode()
+    {
+        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, NewNonce()), new CapturingLog());
+
+        string? problem = helper.Open();
+
+        Assert.IsNotNull(problem);
+        StringAssert.Contains(problem, "HRESULT 0x");
+    }
+
     [TestMethod]
     public void DoneReachesTheTrayAndCopiedReachesTheHelper()
     {
@@ -253,7 +265,7 @@ public sealed class TraceRealTests
     public void ATraceRunThatThrowsIsLoggedAndIsASoftwareFailure()
     {
         var log = new CapturingLog();
-        int code = Program.RunTrace(["trace", "4321", "0123456789abcdef0123456789abcdef"], log, _ => throw new InvalidOperationException("boom"), FakeToken.ElevatedUser);
+        int code = Program.RunTrace(["trace", "4321", "0123456789abcdef0123456789abcdef"], log, _ => throw new InvalidOperationException("boom"), FakeToken.ElevatedUser, []);
 
         Assert.AreEqual(ExitCodes.Software, code);
         Assert.IsTrue(log.Has(Earshot.Contracts.LogLevel.Error, "boom"));
