@@ -164,7 +164,9 @@ internal sealed partial class TrayContext
                 }
                 finally
                 {
-                    shown.TrySetResult(!showedNothing);
+                    // A card Windows held back (quiet time, a full-screen app at sign-in) was not seen, so it does not answer for
+                    // the pairs.
+                    shown.TrySetResult(!showedNothing && !_pinLookCardHeld);
                 }
             }, CardPlace.NearTray);
             return;
@@ -356,6 +358,7 @@ internal sealed partial class TrayContext
             return true;
         }
 
+        _pinLookCardHeld = false;
         EarshotSettings settings = _registry.Settings.Current;
         StalePinResult result;
         try
@@ -408,7 +411,7 @@ internal sealed partial class TrayContext
                             return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
                     }
 
-                    OfferPairAirPods(place, force: reason == "setup");
+                    await OfferPairAirPodsAsync(place, force: reason == "setup");
                 }
 
                 return !nonePaired;
@@ -429,14 +432,13 @@ internal sealed partial class TrayContext
                 _widgetStatus?.ForgetPair("the pinned AirPods are no longer paired");
                 if (result.Others.Count == 0)
                 {
-                    OfferPairAirPods(place, force: true);
+                    await OfferPairAirPodsAsync(place, force: true);
                 }
                 else
                 {
                     // Stays up until it is used: it is often shown at sign-in, and until a pair is chosen none is protected.
-                    ShowCardWithButton(
-                        TrayStatus.AppName, PairAirPodsText.StaleChosen, PairAirPodsText.ChooseButton,
-                        () => Launch("choose device", () => ChooseDeviceAsync(place), place), place, staysUp: true);
+                    await ShowStayingCardAsync(
+                        PairAirPodsText.StaleChosen, PairAirPodsText.ChooseButton, () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
                 }
 
                 return false;
@@ -567,8 +569,9 @@ internal sealed partial class TrayContext
         }
     }
 
-    // "No AirPods are paired with this PC." and the button that starts Pair AirPods. Once per run unless forced.
-    private void OfferPairAirPods(CardPlace place, bool force = false)
+    // "No AirPods are paired with this PC." and the button that starts Pair AirPods. Once per run unless forced, counted only once
+    // it was put on screen: a card Windows held back is offered again at the next look.
+    private async Task OfferPairAirPodsAsync(CardPlace place, bool force = false)
     {
         if (_closing || _closed || (_noAirPodsOffered && !force) || _pairServices is null || _registry.SafeMode || _elevatedRun == PairRun)
         {
@@ -578,7 +581,31 @@ internal sealed partial class TrayContext
         _noAirPodsOffered = true;
         _log.Info("No AirPods are paired with this PC, so Pair AirPods is offered.");
         // Stays up until it is used: it is the way forward after an install with nothing paired, often shown at sign-in.
-        ShowCardWithButton(TrayStatus.AppName, PairAirPodsText.NoAirPodsPaired, PairAirPodsText.Title, () => StartPairAirPods(place), place, staysUp: true);
+        if (!await ShowStayingCardAsync(PairAirPodsText.NoAirPodsPaired, PairAirPodsText.Title, () => StartPairAirPods(place), place))
+        {
+            _noAirPodsOffered = false;
+        }
+    }
+
+    // The look's card held back by Windows the last time: then it answered for nothing.
+    private bool _pinLookCardHeld;
+
+    // A card that stays up, completing with whether it was put on screen; one held back is logged and remembered for the look.
+    private async Task<bool> ShowStayingCardAsync(string text, string label, Action onClick, CardPlace place)
+    {
+        if (_closing || _closed)
+        {
+            return true;
+        }
+
+        bool shown = await _registry.Cards.ShowAsync(new CardContent(TrayStatus.AppName, text, new CardAction(label, onClick), StaysUp: true), place.Anchor, place.ClickPoint);
+        if (!shown)
+        {
+            _pinLookCardHeld = true;
+            _log.Info("Pairing check: the card \"" + text + "\" was held back by Windows, so it is offered again at the next look.");
+        }
+
+        return shown;
     }
 
     private async Task PairAirPodsAsync(CardPlace place)

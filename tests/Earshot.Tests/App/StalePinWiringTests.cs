@@ -164,6 +164,44 @@ public sealed class StalePinWiringTests
         });
     }
 
+    // At sign-in Windows may hold the card back (quiet time, a full-screen app). Then it answered for nothing: the coordinator's
+    // own check runs, and "No AirPods are paired" is offered again at the next look. Before, both counted it as seen.
+    [TestMethod]
+    public void AStalePinCardHeldBackLetsTheCoordinatorsCheckRun()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            AddASecondPairedPair(rig);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(), pairAirPods: Services(rig), settings: PinTheRigsPair,
+                arrange: h => h.Cards.HoldBackNearTray = true,
+                coordinatorServices: new CoordinatorServices { Protection = protection });
+            TrayHarness.PumpUntil(() => protection.Reads > 0, "The coordinator's check did not run after the held-back card.");
+
+            Assert.IsTrue(tray.Cards.HeldBack.Any(c => c.Content.Status == PairAirPodsText.StaleChosen));
+        });
+    }
+
+    [TestMethod]
+    public void ANoAirPodsCardHeldBackIsOfferedAgainAtTheNextLook()
+    {
+        StaThread.Run(() =>
+        {
+            using FixRig rig = NothingPairedRig();
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig), settings: Unpin, arrange: h => h.Cards.HoldBackNearTray = true);
+            tray.Cards.HoldBackNearTray = false;
+
+            tray.Context.StartPinnedPairCheck("again");
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(1, tray.Cards.HeldBack.Count(c => c.Content.Status == PairAirPodsText.NoAirPodsPaired));
+            Assert.AreEqual(1, tray.Cards.Shown.Count(c => c.Content.Status == PairAirPodsText.NoAirPodsPaired));
+        });
+    }
+
     [TestMethod]
     public void NothingPairedOnAPcWithBluetoothOffShowsTheRadioLineNotNoAirPods()
     {
