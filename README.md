@@ -123,8 +123,9 @@ Startup on is not covered.
 - **Fix connection**, for AirPods that stick on "Connecting" on this PC. It is
   in the tray menu, on the settings page's Updates page, in Setup.exe, and as
   `earshot.ps1 -Action Fix`. With nothing of Earshot's to undo it works when
-  Earshot is not installed; with changes to make it needs the installed copy and
-  says to set up Earshot first. The
+  Earshot is not installed. With changes to make, run without administrator
+  rights, its one administrator prompt raises only the installed copy, and with
+  none it says to set up or update Earshot first. The
   card offers it as a button after two Connects in a row fail for a reason on
   this PC's side. A failure on the AirPods' side (away, case shut, in use on the
   phone) or one whose side could not be told does not count. Fix connection plans from reads, then asks two questions on the
@@ -156,14 +157,16 @@ Startup on is not covered.
   the radio state and the last pairing attempts.
 - **Record a Bluetooth trace**, new in 1.6.0, on the settings page and on that
   last card. It first says what a trace holds: the Bluetooth addresses of your
-  devices, and maybe pairing keys. Earshot never sends it anywhere, so share it
-  only with someone you trust and delete it when you are done. Then one
-  administrator prompt starts Windows Performance Recorder, which is part of
-  Windows, from the installed copy of Earshot only. It records for at most 10
-  minutes, stops when you press Stop or when Earshot exits, and saves the trace
-  in `%LOCALAPPDATA%\Earshot\traces`, a folder that is not in Documents, so a
-  folder backup does not upload it. Before Earshot is set up the row says to set
-  it up first. It changes no device and no pairing.
+  devices, and maybe pairing keys, and where it will be saved. Earshot never
+  sends it anywhere, so share it only with someone you trust and delete it when
+  you are done. Then one administrator prompt starts Windows Performance
+  Recorder, which is part of Windows, from the installed copy of Earshot only.
+  It records for at most 10 minutes and saves the trace when you press Stop, in
+  `%LOCALAPPDATA%\Earshot\traces`. That folder is not Documents or another
+  folder OneDrive's PC folder backup covers. If Earshot exits while it records,
+  the recording is thrown away. Before Earshot is set up, or with an older
+  installed copy, the row says to set up or update it first. It changes no
+  device and no pairing, and it has not had a live run yet (test 24).
 - **Send to**, a small picker with This PC, the iPhone and Other speakers. This
   PC and the iPhone use the same paths as Connect and Disconnect, and Other
   speakers opens Windows' sound settings. It opens from a Send to row on the
@@ -335,8 +338,9 @@ left it able to find devices but not reach them, and going back to the driver
 the PC maker supplied fixed it at once. Roll the driver back in Device
 Manager: open Bluetooth, right-click the Bluetooth adapter, choose
 Properties, then Driver, then Roll Back Driver. Earshot does not change
-drivers. Record a Bluetooth trace before and after shows where the pairing
-stopped.
+drivers. On that PC a hand-made Bluetooth trace showed where the pairing
+stopped; Earshot's Record a Bluetooth trace makes the same kind of trace, and
+has not had a live run yet.
 
 ## What it does not do
 

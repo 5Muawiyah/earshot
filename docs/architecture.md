@@ -1324,8 +1324,14 @@ user, through the same pairing session Fix connection's re-pair uses
 4. The model check on the new device's nodes. A pair that passes is pinned,
    given to the gate when Earshot is set up, and the previous pair's readings
    and link are dropped; then set-up runs when Earshot is not set up yet. A
-   device that fails is left paired and not adopted: Earshot never unpairs on
-   its own.
+   device whose nodes were read and fail is left paired and not adopted:
+   Earshot never unpairs on its own. A device that could not be looked at (the
+   paired list did not hold it, or its nodes were not there by the end of the
+   wait) is not called "not AirPods": the card says Earshot could not check
+   it and offers the device picker, and the recovery marker stays. When the
+   boot block status cannot be read at the adoption, the pin is kept in the
+   tray only, the card says the boot block may still use the previous device,
+   and the marker stays.
 
 Every step goes in the connect history as one entry, with its
 `DevicePairingResultStatus` or Win32 code and its time, and no device name.
@@ -1343,8 +1349,8 @@ or Pair AirPods is offered; nothing is adopted by itself.
 and the adoption comes after. A crash, a sign-out or a shutdown in between
 would leave new AirPods paired, unpinned and unblocked. The tray writes
 `%LOCALAPPDATA%\Earshot\pair-pending.json` (a time and a process id, no
-device) before the pairing and clears it once a pair is adopted or the pairing
-left no AirPods to adopt. A marker found at the tray's start runs the stale-pin
+device) before the pairing, and starts no pairing when it cannot be written; it
+clears it once a pair is adopted or the pairing left no AirPods to adopt. A marker found at the tray's start runs the stale-pin
 check and then offers the device picker ("Choose AirPods") for a paired set
 that is not the pinned one; choosing it pins it and, once Earshot is set up,
 gives it to the gate, which blocks it through the usual path. The marker stays
@@ -1401,14 +1407,25 @@ prompt. The helper:
    `-instancename EarshotBluetoothTrace`, so the recording in progress stays in
    the run folder and a stop or cancel reaches only Earshot's own session.
    https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options
-4. Stops when the tray asks, when the tray process exits, or after 10 minutes.
+4. Stops and saves when the tray asks or after 10 minutes. When the tray
+   process exits first (Exit, a sign-out, a crash), nobody would collect a
+   file, so it runs `wpr -cancel` instead and saves nothing. A start that timed
+   out is cancelled too.
 5. Gives the tray's user read on the trace and the result, waits for the tray
-   to copy the trace to `%LOCALAPPDATA%\Earshot\traces` (not Documents, which a
-   folder backup can upload), and deletes its own copy. A copy it could not
-   delete is reported, with where it is.
+   to copy the trace to `%LOCALAPPDATA%\Earshot\traces` (not Documents, which
+   OneDrive's PC folder backup can upload), and deletes its own copy; it deletes
+   it too when the tray never says it copied it. A copy it could not delete is
+   reported, with where it is. A copy the tray could not make is not kept.
 
-Its read and delete failures go to the machine log. A trace changes no device,
-service or pairing, and nothing in the trace code touches the network.
+The tray believes a result only from a trace folder that passes the machine
+folder's check, so a standard user cannot plant one. It raises only an installed
+copy of 1.6.0 or later, because an older program would take the verb as a
+request to start its tray. At start it says when run folders of earlier
+recordings are still there. The three events it makes for a run grant the
+signed-in user full control and Administrators wait and set, because the
+helper may be another account. Its read and delete failures go to the machine
+log. A trace changes no device, service or pairing, and nothing in the trace
+code touches the network.
 
 ### Send to
 
