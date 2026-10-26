@@ -118,12 +118,15 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         }
     }
 
-    public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct)
+    public Task<PickAnswer> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         using var ends = CancellationTokenSource.CreateLinkedTokenSource(_cancel.Token, ct);
+        // The dialog closes itself unanswered after FixDialogPages.Timeout, as Fix's other questions do (FixAnswer.TimedOut).
         FixPromptAnswer answer = OnUi(() => new TaskDialogPrompter().Ask(PickPrompt(candidates, _title), ends.Token));
-        return Task.FromResult<UnpairedDevice?>(answer.Answer == FixAnswer.Ok && answer.Chosen >= 0 ? candidates[answer.Chosen] : null);
+        return Task.FromResult(answer.Answer == FixAnswer.Ok && answer.Chosen >= 0
+            ? new PickAnswer(candidates[answer.Chosen], FixAnswer.Ok)
+            : new PickAnswer(null, answer.Answer == FixAnswer.Ok ? FixAnswer.Cancel : answer.Answer));
     }
 
     // One row per candidate, none chosen for the person; pressing the button is the "Pair" press on that one device.

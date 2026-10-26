@@ -125,26 +125,28 @@ internal sealed class FakeRePairUi : IFixRePairUi
 
     public void ShowInstruction(string text) => Shown.Add(text);
 
-    // The pick stays up, as one nobody answers does, until its token ends it.
-    public bool HangOnPick { get; set; }
+    // How long the pick stays up before it closes unanswered, as the real dialog does at its time limit; zero answers at once.
+    public TimeSpan HoldPick { get; set; }
 
-    public async Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct)
+    public async Task<PickAnswer> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct)
     {
         OnPick?.Invoke();
         Shown.Add("pick:" + string.Join("|", candidates.Select(c => c.Name)));
-        if (HangOnPick)
+        if (HoldPick > TimeSpan.Zero)
         {
             try
             {
-                await Task.Delay(Timeout.Infinite, ct);
+                await Task.Delay(HoldPick, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                return null;
+                return new PickAnswer(null, FixAnswer.Cancel);
             }
+
+            return new PickAnswer(null, FixAnswer.TimedOut);
         }
 
-        return Pick >= 0 && Pick < candidates.Count ? candidates[Pick] : null;
+        return Pick >= 0 && Pick < candidates.Count ? new PickAnswer(candidates[Pick], FixAnswer.Ok) : new PickAnswer(null, FixAnswer.Cancel);
     }
 
     // The token each number question was given, so a test can see it ends with the pairing attempt.
@@ -440,7 +442,6 @@ internal sealed class FixRig : IDisposable
             PostPairWait = TimeSpan.Zero,
             PairedListWait = TimeSpan.FromMilliseconds(200),
             UnpairWait = TimeSpan.FromMilliseconds(200),
-            PickWait = TimeSpan.FromSeconds(5),
             Delay = (_, _) => Task.CompletedTask,
         },
     };

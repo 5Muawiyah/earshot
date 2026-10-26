@@ -217,20 +217,16 @@ internal sealed class PairingSession
             }
 
             var pickTime = Stopwatch.StartNew();
-            UnpairedDevice? chosen;
-            bool pickTimedOut;
-            using (var pickLimit = CancellationTokenSource.CreateLinkedTokenSource(ct))
-            {
-                // The run holds the Fix lock and the pairing flag while the pick is up, so it is not left up for ever.
-                pickLimit.CancelAfter(_options.PickWait);
-                chosen = await _ui.PickAsync(candidates, pickLimit.Token).ConfigureAwait(false);
-                pickTimedOut = chosen is null && pickLimit.IsCancellationRequested && !ct.IsCancellationRequested;
-            }
+            PickAnswer picked = await _ui.PickAsync(candidates, ct).ConfigureAwait(false);
+            UnpairedDevice? chosen = picked.Chosen;
 
-            // Earshot's own step: 0 when a device was chosen, 1 when none was, Earshot's timeout when nobody answered in time. Its
+            // The question closed itself unanswered at its time limit (FixDialogPages.Timeout), which is not the person choosing nothing.
+            bool pickTimedOut = chosen is null && picked.Answer == FixAnswer.TimedOut;
+
+            // Earshot's own step: 0 when a device was chosen, 1 when none was, TimedOut (not attempted) when nobody answered. Its
             // time is how long the person took.
             history.Add(pickTimedOut
-                ? StepOutcomes.EarshotTimeout("pick", "Nothing was chosen within " + _options.PickWait.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + " s.")
+                ? new StepOutcome("pick", false, NativeCodes.NotAttempted, nameof(FixAnswer.TimedOut), null)
                 : new StepOutcome("pick", chosen is not null, chosen is null ? 1 : 0, chosen is null ? "none-chosen" : "chosen", null));
             history.Add(Ms("pick-ms", pickTime.ElapsedMilliseconds));
             // A pick closed because the run ended (Exit, or the window's Cancel) is that, not the person choosing nothing.

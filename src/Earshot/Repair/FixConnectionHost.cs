@@ -42,9 +42,10 @@ internal interface IFixRePairUi
 {
     void ShowInstruction(string text);
 
-    // Several or one: always asked, so a device that is not the AirPods is never paired without the person choosing it. ct ends
-    // the question as no choice (the pick's own time limit, Cancel, Exit).
-    Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct);
+    // Several or one: always asked, so a device that is not the AirPods is never paired without the person choosing it. The
+    // answer says whether one was chosen, the person cancelled, or the question closed unanswered at its time limit
+    // (FixDialogPages.Timeout). ct ends the question as a cancel (the window's Cancel, Exit).
+    Task<PickAnswer> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct);
 
     // ct is the pairing attempt's: when it ends (Earshot's own time limit, Cancel, Exit), the question closes as a no.
     Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin, CancellationToken ct);
@@ -54,6 +55,9 @@ internal interface IFixRePairUi
 
     void Close();
 }
+
+// The pick's answer: the device chosen, or null with how the question ended.
+internal readonly record struct PickAnswer(UnpairedDevice? Chosen, FixAnswer Answer);
 
 internal sealed class FixOptions
 {
@@ -79,10 +83,6 @@ internal sealed class FixOptions
     // How long Fix's removal of the old pair is given. A waiting budget, not a measured figure: it runs before the pairing window
     // exists, so the person has no Cancel, and the run holds the Fix lock.
     public TimeSpan UnpairWait { get; init; } = TimeSpan.FromSeconds(30);
-
-    // How long the pick may stay up unanswered. A waiting budget, not a measured figure: while it is up the run holds the Fix
-    // lock and the pairing flag, so other Fix runs are refused and the coordinator's checks wait.
-    public TimeSpan PickWait { get; init; } = TimeSpan.FromMinutes(10);
 
     public Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = static (span, ct) => Task.Delay(span, ct);
 }

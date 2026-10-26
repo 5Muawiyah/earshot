@@ -937,7 +937,7 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
-            rig.Ui.HangOnPick = true;
+            rig.Ui.HoldPick = TimeSpan.FromSeconds(2);
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
             rig.Ui.OnPick = () => tray.Ui.Post(_ => tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0)), null);
 

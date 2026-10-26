@@ -441,22 +441,22 @@ public sealed class PairingSessionTests
         Assert.HasCount(1, rig.Ui.PinsShown);
     }
 
-    // A pick nobody answers ends at its own limit, as no choice, with Earshot's timeout in the history: the run holds the Fix lock
-    // and the pairing flag while it is up. Before, the pick had no limit.
+    // A pick nobody answers closes at the dialog's own time limit (five minutes, as Fix's other questions). The history says it
+    // timed out and the card says nothing was chosen in time. Before, it was recorded as the person choosing nothing.
     [TestMethod]
-    public async Task APickNobodyAnswersEndsAtItsLimitAndPairsNothing()
+    public async Task APickNobodyAnswersIsRecordedAsTimedOutAndPairsNothing()
     {
         using var rig = new FixRig();
         ArrangePairs(rig);
         AirPodsAppear(rig);
-        rig.Ui.HangOnPick = true;
+        rig.Ui.HoldPick = TimeSpan.FromMilliseconds(100);
         var watch = System.Diagnostics.Stopwatch.StartNew();
 
         PairingSessionResult result = await RunAsync(rig);
 
         Assert.AreEqual(PairOutcome.Cancelled, result.Outcome);
         Assert.AreEqual(PairingText.PickTimedOut, result.CardLine);
-        Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "pick" && s.Code == 1460 && s.CodeName == "earshot-timeout"), string.Join(", ", result.HistorySteps.Select(s => s.Step + " " + s.CodeName)));
+        Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "pick" && s.Code == NativeCodes.NotAttempted && s.CodeName == nameof(FixAnswer.TimedOut)), string.Join(", ", result.HistorySteps.Select(s => s.Step + " " + s.CodeName)));
         Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("pair:", StringComparison.Ordinal)), "Nothing was paired.");
         Assert.IsLessThan(30_000L, watch.ElapsedMilliseconds);
     }
