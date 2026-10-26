@@ -66,7 +66,7 @@ internal sealed partial class TrayContext
 
     private async Task ConnectInWindowsAsync(Guid container, string title, CardPlace place)
     {
-        if (_closing)
+        if (_closing || RefusedWhilePairing("Connect in Windows", place))
         {
             return;
         }

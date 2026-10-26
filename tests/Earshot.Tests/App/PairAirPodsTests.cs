@@ -986,6 +986,33 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // Connect in Windows pressed on an earlier card while Pair AirPods runs is refused the same way: it allows the pinned pair's
+    // nodes, which the run's adoption would then meet. Before, it ran.
+    [TestMethod]
+    public void ConnectInWindowsWhilePairAirPodsRunsIsRefused()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Ui.HoldPick = TimeSpan.FromSeconds(2);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+            tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+            tray.PumpUntilIdle();
+            CardAction connectInWindows = tray.Cards.Shown.Last(c => c.Content.Action?.Label == ConnectInWindowsOffer.ButtonLabel).Content.Action!;
+            rig.Ui.OnPick = () => tray.Ui.Post(_ => connectInWindows.OnClick(), null);
+
+            Click(tray);
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Connect in Windows ignored: Pair AirPods is running."), string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "Connect in Windows: started from the card."));
+            Assert.IsTrue(tray.Cards.Shown.Any(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage));
+        });
+    }
+
     // Block at boot and Protect audio quality while Pair AirPods runs are refused the same way: both are gate changes that would
     // race the run's adoption. Before, they ran.
     [TestMethod]
