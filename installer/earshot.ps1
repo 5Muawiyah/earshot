@@ -1049,7 +1049,7 @@ the download, not a hostile release or a swapped file.
 ## What needs the person
 
 - Windows administrator prompts. The person clicks Yes. You cannot and must not do it for them.
-- Putting the AirPods in pairing mode: lid open, back button held until the light flashes white.
+- Putting the AirPods in pairing mode: lid open, then on AirPods Pro 3 or AirPods 4 a double-tap on the front of the case, on other AirPods the button on the back held, until the light flashes white.
 - Fix's two on-screen OK prompts. Nothing you pass in can answer them.
 - Pair AirPods and Record a Bluetooth trace, which the person starts in Earshot. A trace holds Bluetooth addresses and may hold pairing keys: do not ask for it, read it or upload it.
 

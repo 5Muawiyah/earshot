@@ -157,8 +157,8 @@ Startup on is not covered.
   this PC.", each with a Bluetooth settings button, or "Bluetooth on this PC
   can't do Classic Bluetooth, which AirPods need for sound.", with no button,
   and no fix for the AirPods. A read of the Bluetooth adapter that fails says
-  nothing. When headphones with no name read were found and could not be
-  paired, it says "This PC found the headphones but couldn't reach them." with
+  nothing. When headphones with no name read were found and Windows' answer to
+  the pairing does not say they answered, it says "This PC found the headphones but couldn't reach them." with
   a Record a Bluetooth trace button. That reading of the PC as the cause rests
   on one sitting, on 25 October.
   `Earshot.exe doctor` reports the driver's version and date, the problem code,
@@ -170,7 +170,9 @@ Startup on is not covered.
   you are done. Then one administrator prompt starts Windows Performance
   Recorder, which is part of Windows, from the installed copy of Earshot only.
   It records for at most 10 minutes and saves the trace when you press Stop, or
-  when the 10 minutes are up. The card with Stop stays until you use it, and
+  when the 10 minutes are up. A sign-out can end Earshot's part before it stops
+  the recording; Windows may then go on recording until the PC restarts, and
+  Earshot says so when it next starts. The card with Stop stays until you use it, and
   the settings row's button reads Stop while it records. The trace goes in
   `%LOCALAPPDATA%\Earshot\traces`. That folder is not Documents or another
   folder OneDrive's PC folder backup covers. If Earshot exits while it records,

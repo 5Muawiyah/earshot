@@ -42,4 +42,14 @@ public sealed class FixHonestyCopyTests
         StringAssert.Contains(guide, "Removing the AirPods and pairing them again " + Unproved + ".");
         StringAssert.Contains(guide, "That check catches damage in the download, not a hostile release or a swapped file.");
     }
+
+    // The guide gives both ways into pairing mode, as Pair AirPods' own question does: before, it gave only the back button,
+    // which AirPods Pro 3 and AirPods 4 do not use for it.
+    [TestMethod]
+    public void TheGuideGivesBothWaysIntoPairingMode()
+    {
+        string guide = Flat(File.ReadAllText(GuideFile()));
+
+        StringAssert.Contains(guide, "on AirPods Pro 3 or AirPods 4 a double-tap on the front of the case, on other AirPods the button on the back held, until the light flashes white.");
+    }
 }

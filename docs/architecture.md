@@ -1271,6 +1271,9 @@ session. It takes no option that says yes.
    the plan again itself and applies only the part both plans agree on. When
    the process already starts elevated, as Setup.exe's does, it applies in the
    same process with no second prompt, from an administrators-only plan folder.
+   Such a run writes nothing under the person's profile: its log goes to the
+   machine folder's log once it ends, it adds no connect history entry, and its
+   marker (step 5) is in the machine folder, which the tray reads too.
 4. Second question, a separate dialog: remove the AirPods from Windows and pair
    them again, by name. On OK, in the same session: unpair, scan, show the
    instruction for putting the AirPods in pairing mode, pick, pair, check the new
@@ -1420,9 +1423,10 @@ because the fault is this PC's. An Ok or unread radio leaves the failure's own
 offers, and so does a read of the default adapter that threw or that this
 Windows cannot make: it is Unknown, with its code in the history, not "no
 Bluetooth". Unreachable comes from a pairing, never from these reads: the
-headphones picked were found with no name read and the pairing then failed, for
-a reason other than a stop on purpose, Earshot's own time limit or the device
-not being ready to pair. That is what a driver that cannot page devices looked
+headphones picked were found with no name read and the pairing then failed
+with a status whose meaning does not say the device answered (NotPaired,
+HardwareFailure, AuthenticationTimeout or Failed). Any other status, Earshot's
+own time limit or a code that is no status gets its own line. That is what a driver that cannot page devices looked
 like on 25 October, the one sitting the reading rests on (see
 [verification.md](verification.md)).
 
@@ -1462,7 +1466,10 @@ prompt. The helper:
    collect a file, so it runs `wpr -cancel` instead and saves nothing. A
    sign-out may end the helper too before it can cancel; the recording session
    can outlive it, and the next start then says a trace may still be running. A start that timed
-   out is cancelled too.
+   out is cancelled too. The helper's marker for this is one per Windows
+   session and records when the PC last started; the tray uses it only when the
+   trace folder passes its check and the PC has not restarted since, because a
+   restart ends every recording.
 5. Gives the tray's user read on the trace and the result, waits for the tray
    to copy the trace to `%LOCALAPPDATA%\Earshot\traces` (not Documents, which
    OneDrive's PC folder backup can upload), and deletes its own copy; it deletes
