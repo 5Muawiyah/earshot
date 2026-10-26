@@ -175,7 +175,18 @@ internal sealed partial class TrayContext
             TraceResult result = await recorder.RecordAsync(_lifetime.Token);
             _log.Write(result.Outcome is TraceOutcome.Saved or TraceOutcome.SavedInPlace ? LogLevel.Info : LogLevel.Warn,
                 "Bluetooth trace ended: " + result.Outcome + ".");
-            ShowCard(TrayStatus.AppName, result.Message, place);
+            if (_closing || _closed)
+            {
+                return;
+            }
+
+            // A result card Windows held back (a full-screen app when the time limit ended, say) would leave the running card,
+            // with its Stop, on screen after the recording ended, so it is taken down. The result is in the log and the folder.
+            if (!await place.ShowAsync(_registry.Cards, TrayStatus.AppName, result.Message) && !_closing && !_closed)
+            {
+                _log.Info("Bluetooth trace: the result card was held back, so the running card is taken down.");
+                _registry.Cards.Hide();
+            }
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {

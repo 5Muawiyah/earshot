@@ -1345,6 +1345,37 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // At sign-in Windows may hold the card back (quiet time, a full-screen app): the recovery then counts as having shown
+    // nothing, so the coordinator's own check runs, and the marker stays for the next start. Before, the check was skipped for
+    // the session as if the card had been seen.
+    [TestMethod]
+    public void AMarkerLeftAtStartWhoseCardIsHeldBackLetsTheCoordinatorsCheckRunAndKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(FixRig.NewAirPodsNodes()));
+            rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+            var marker = new FakePairRecoveryMarker { Present = true };
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(),
+                pairAirPods: services,
+                coordinatorServices: new CoordinatorServices { Protection = protection, TrayPairing = services.RunFlag },
+                arrange: h => h.Cards.HoldBackNearTray = true,
+                settings: s =>
+                {
+                    s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                    s.PinnedAddress = RecordedNodes.AirPodsAddress;
+                });
+            TrayHarness.PumpUntil(() => protection.Reads > 0, "The coordinator's check did not run after the held-back card.");
+
+            Assert.IsTrue(tray.Cards.HeldBack.Any(c => c.Content.Status == PairAirPodsText.RecoverChoose));
+            Assert.IsTrue(marker.Exists(), "Kept for the next start.");
+        });
+    }
+
     [TestMethod]
     public void AMarkerLeftAtStartWithNoOtherPairIsClearedAndSaysNothing()
     {

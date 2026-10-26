@@ -127,6 +127,29 @@ public sealed class TraceTrayTests
         });
     }
 
+    // The result card held back by Windows (a full-screen app when the recording ended): the running card, whose Stop would do
+    // nothing now, is taken down rather than left up.
+    [TestMethod]
+    public void WhenTheResultCardIsHeldBackTheRunningCardIsTakenDown()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+            tray.Context.RecordTraceFromSettings();
+            PressRecordOnTheNote(tray, recorder);
+            recorder.BeginRecording();
+            WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Running), "the running card");
+            int hides = tray.Cards.Hides;
+            tray.Cards.HoldBackNearTray = true;
+
+            recorder.Finish(Saved);
+            WaitFor(() => tray.Cards.Hides > hides, "the running card taken down");
+
+            Assert.IsTrue(tray.Cards.HeldBack.Any(c => c.Content.Status == TraceCopy.SavedIn(Folder)));
+        });
+    }
+
     // Stop is always within reach: the running card stays up until it is used or replaced, and the settings row's button reads
     // Stop while the trace records. Before, the card closed after twelve seconds and the row still said Record, so a person
     // waiting for the prompt and then pairing found nothing labelled Stop, and the trace ran its full ten minutes. The note,

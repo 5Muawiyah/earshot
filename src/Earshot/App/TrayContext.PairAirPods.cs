@@ -211,8 +211,7 @@ internal sealed partial class TrayContext
         {
             // New AirPods may be paired and unblocked, and nothing can be told now: the person is told, and the marker stays.
             _log.Warn("Pair AirPods: the devices could not be listed, so the person is asked to choose and the marker is kept.");
-            OfferChooseLeftPair(PairAirPodsText.RecoverUnread, place);
-            return true;
+            return await OfferChooseLeftPairAsync(PairAirPodsText.RecoverUnread, place);
         }
 
         Guid pinned = _registry.Settings.Current.PinnedContainerId;
@@ -224,8 +223,28 @@ internal sealed partial class TrayContext
         }
 
         _log.Info("Pair AirPods: " + left.ToString(System.Globalization.CultureInfo.InvariantCulture) + " paired set(s) of AirPods are not the pinned ones, so the device picker is offered.");
-        OfferChooseLeftPair(PairAirPodsText.RecoverChoose, place);
-        return true;
+        return await OfferChooseLeftPairAsync(PairAirPodsText.RecoverChoose, place);
+    }
+
+    // The same card, completing with whether it was put on screen. Windows may hold a card back at sign-in (quiet time, a
+    // full-screen app, the desktop not yet there): the recovery then counts as having shown nothing, so the coordinator's own
+    // check still runs, and the marker stays for the next start.
+    private async Task<bool> OfferChooseLeftPairAsync(string line, CardPlace place)
+    {
+        if (_closing || _closed)
+        {
+            return true;
+        }
+
+        var content = new CardContent(
+            TrayStatus.AppName, line, new CardAction(PairAirPodsText.ChooseButton, () => Launch("choose device", () => ChooseDeviceAsync(place), place)), StaysUp: true);
+        bool shown = await _registry.Cards.ShowAsync(content, place.Anchor, place.ClickPoint);
+        if (!shown)
+        {
+            _log.Info("Pair AirPods: the card offering the device picker was held back by Windows, so the marker is kept for the next start.");
+        }
+
+        return shown;
     }
 
     // The card stays up until it is used or replaced: it is shown at sign-in, while the desktop loads, and while it is missed the
