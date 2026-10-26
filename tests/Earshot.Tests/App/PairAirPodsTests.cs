@@ -1155,6 +1155,43 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // The coordinator's own start answer to a Fix run (a gate run) ends after the tray's look at the marker has shown its card and
+    // dropped the flag: the coordinator's start check still sees that the tray's look answered for the pairs, so its card about
+    // unprotected AirPods does not replace "Choose AirPods". Before, only the flag held it back.
+    [TestMethod]
+    public void AMarkerLeftAtStartKeepsItsCardWhenTheCoordinatorsStartCheckComesAfterIt()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(FixRig.NewAirPodsNodes()));
+            rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+            var marker = new FakePairRecoveryMarker { Present = true };
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            var slowGateRun = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var recovery = new FakeStartRecovery { Hold = slowGateRun.Task };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(),
+                pairAirPods: services,
+                coordinatorServices: new CoordinatorServices { Protection = protection, TrayPairing = services.RunFlag, Recovery = recovery },
+                settings: s =>
+                {
+                    s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                    s.PinnedAddress = RecordedNodes.AirPodsAddress;
+                });
+            TrayHarness.PumpUntil(() => tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.RecoverChoose) && !services.RunFlag.Active, "The tray's look did not show its card.");
+
+            slowGateRun.SetResult();
+            TrayHarness.PumpUntil(
+                () => tray.Log.Entries.Any(e => e.Message.Contains("answers for the pairs, so the check for AirPods that Earshot does not protect did not run", StringComparison.Ordinal)),
+                "The coordinator's start check ran over the tray's card: " + string.Join(" | ", tray.Cards.Statuses));
+
+            Assert.AreEqual(PairAirPodsText.RecoverChoose, tray.Cards.Shown[^1].Content.Status, string.Join(" | ", tray.Cards.Statuses));
+            Assert.AreEqual(0, protection.Reads);
+        });
+    }
+
     [TestMethod]
     public void AMarkerLeftAtStartWithNoOtherPairIsClearedAndSaysNothing()
     {

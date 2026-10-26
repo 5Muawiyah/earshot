@@ -106,9 +106,13 @@ internal sealed partial class TrayContext
 
         if (reason == "start" && services.Marker.Exists())
         {
-            // Set before the coordinator starts its own start checks, which wait while it is.
+            // Set before the coordinator starts its own start checks, which wait while it is. The look's answer is given to them
+            // too (StartLookHook): a start check that comes only after the flag is dropped (its own answer to a Fix run took
+            // longer) must not show its card over this one's.
             _recoveringPair = true;
             services.RunFlag.Active = true;
+            var recovered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _startLookShown = recovered;
             Launch("recover a pairing", async () =>
             {
                 bool answered = true;
@@ -118,6 +122,7 @@ internal sealed partial class TrayContext
                 }
                 finally
                 {
+                    recovered.TrySetResult(answered);
                     _recoveringPair = false;
                     DropPairRunFlag(services, keep: _pairRunFlagRaised);
                 }

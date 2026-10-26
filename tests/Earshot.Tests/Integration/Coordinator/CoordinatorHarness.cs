@@ -943,9 +943,17 @@ internal sealed class FakeStartRecovery : IStartRecovery
 
     public bool Changed { get; set; }
 
+    // When set, the run ends only once this task does, as a slow gate run would.
+    public Task? Hold { get; set; }
+
     public Task<bool> RunAsync(CancellationToken ct)
     {
         Runs++;
+        if (Hold is { } hold)
+        {
+            return hold.ContinueWith(_ => Changed, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+
         return Throw is null ? Task.FromResult(Changed) : Task.FromException<bool>(Throw);
     }
 }
