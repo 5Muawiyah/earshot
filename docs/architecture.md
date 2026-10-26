@@ -1333,8 +1333,17 @@ user, through the same pairing session Fix connection's re-pair uses
    tray only, the card says the boot block may still use the previous device,
    and the marker stays.
 
-Every step goes in the connect history as one entry, with its
-`DevicePairingResultStatus` or Win32 code and its time, and no device name.
+Every run goes in the connect history as one entry, whether it paired, failed,
+was cancelled or stopped before the scan, and no device name. Each step has its
+`DevicePairingResultStatus` or Win32 code, and the `-ms` step after it holds how
+long it took (`radio-check-ms`, `scan-ms`, `pair-ms`, `model-check-ms`,
+`adopt-ms`, `setup-ms`). Cancel in the Pair AirPods window ends the run as a
+cancel; when Windows had already paired the AirPods, or a pairing that timed out
+had, the new pair is offered through the device picker and the recovery marker
+stays. While the run is under way the coordinator's checks for AirPods Earshot
+does not protect, and the tray's own stale-pin check, wait for it, and a Fix
+pressed then says a pairing is running. The pairing window's calls are sent to
+the thread that made it.
 The card's line for a failed pairing comes from a table of the codes seen and
 Microsoft's documented meanings (`PairReasons`).
 https://learn.microsoft.com/en-us/uwp/api/windows.devices.enumeration.devicepairingresultstatus

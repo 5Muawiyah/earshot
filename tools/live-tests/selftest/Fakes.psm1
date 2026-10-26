@@ -122,7 +122,7 @@ $script:LogFixtures = @(
 
     # test 24: the radio check, Pair AirPods and the Bluetooth trace, in the shapes the tray writes (RadioCheck.cs, TrayContext.PairAirPods.cs,
     # PairingSession.cs, TrayContext.Trace.cs). The Pair AirPods pattern is one read of three lines; the script tells them apart.
-    [ordered]@{ Pattern = 'radio check: Off in'; Raw = $true; Text = 'radio check: Off in 21 ms.' }
+    [ordered]@{ Pattern = 'Radio check after a failed connect: Off in'; Raw = $true; Text = 'Radio check after a failed connect: Off in 21 ms.' }
     [ordered]@{ Pattern = 'radio check: Ok in'; Raw = $true; Text = 'radio check: Ok in 18 ms.' }
     [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: started from the menu.' }
     [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: Paired, None.' }

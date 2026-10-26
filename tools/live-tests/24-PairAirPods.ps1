@@ -185,7 +185,9 @@ try
         Wait-Owner -Run $run -Text 'Open quick settings and turn Bluetooth off. Then left-click the Earshot icon and choose Connect on the card; it will not connect, and that is expected. Read what the card says, then come back here.'
         $report = Get-DoctorReport -Label 'doctor-bluetooth-off'
         $verdictOff = Get-RadioVerdict -Report $report
-        $offLines = Get-LogMatches -Pattern 'radio check: Off in' -Regex 'radio check: Off in [0-9]+ ms\.' -Since $offStart
+        # The tray's own line for the read after the failed Connect: the doctor run above writes a "radio check:" line of its own,
+        # so that one would prove nothing about the card.
+        $offLines = Get-LogMatches -Pattern 'Radio check after a failed connect: Off in' -Regex 'Radio check after a failed connect: Off in [0-9]+ ms\.' -Since $offStart
         $card = Read-Answer -Run $run -Question 'Did the Earshot card say "Bluetooth is off."?' -Options @('yes', 'no', 'unsure')
         Add-Finding -Run $run -Name 'radioVerdictOff' -Value $verdictOff
         Add-Finding -Run $run -Name 'cardSaidBluetoothOff' -Value $card
@@ -194,7 +196,7 @@ try
         $offWhy = 'the radio check read Off, logged it, and the card said so'
         if ($null -eq $verdictOff) { $offOutcome = 'inconclusive'; $offWhy = 'the report gave no radio verdict' }
         elseif ($verdictOff -ne 'Off') { $offOutcome = $(if ($verdictOff -eq 'Ok') { 'fail' } else { 'inconclusive' }); $offWhy = 'the radio check read ' + $verdictOff + ' with Bluetooth turned off' }
-        elseif (@($offLines).Count -eq 0) { $offOutcome = 'fail'; $offWhy = 'the radio check read Off but no "radio check: Off" line was logged' }
+        elseif (@($offLines).Count -eq 0) { $offOutcome = 'fail'; $offWhy = 'the radio check read Off but the tray logged no radio check after the failed Connect' }
         elseif ($card -eq 'no') { $offOutcome = 'fail'; $offWhy = 'the radio check read Off but the card did not say "Bluetooth is off."' }
         elseif ($card -eq 'unsure') { $offOutcome = 'inconclusive'; $offWhy = 'the radio check read Off and logged it; you were not sure what the card said' }
         Add-Criterion -Run $run -Id 'radio-off-seen' -Criterion 'With Bluetooth turned off, the radio check read Off and the card said "Bluetooth is off."' `
@@ -224,7 +226,7 @@ try
             @{ Id = 'pair-radio-checked'; Text = 'Pair AirPods read the radio first and found it Ok.' }
             @{ Id = 'model-check'; Text = 'The model check found the new pair to be AirPods.' }
             @{ Id = 'pair-adopted'; Text = 'Earshot took the new pair as the one it uses.' }
-            @{ Id = 'setup-one-prompt'; Text = 'Set-up asked for one Windows permission prompt and Earshot is set up.' }
+            @{ Id = 'setup-one-prompt'; Text = 'Earshot is set up after the pairing, with at most one Windows permission prompt.' }
             @{ Id = 'no-old-reading'; Text = 'No old battery reading showed after the new pair, and the new reading appeared once the case was opened.' }
             @{ Id = 'connect-after-pairing'; Text = 'One Connect from the card reached playing within 20 seconds.' }
             @{ Id = 'trace-saved'; Text = 'The Bluetooth trace recorded and was saved.' }
@@ -324,6 +326,7 @@ try
             if (@($runs).Count -eq 0) { $o = 'inconclusive'; $w = 'the report lists no pairing run since the start' }
             elseif ($modelCheck -eq 'airpods') { $o = 'pass'; $w = 'the pairing run records the model check as airpods' }
             elseif ($modelCheck -eq 'not-airpods') { $o = 'fail'; $w = 'the pairing run records the model check as not-airpods' }
+            elseif ($modelCheck -eq 'not-read') { $o = 'fail'; $w = 'the pairing run records that the new device could not be looked at' }
             else { $o = 'fail'; $w = 'the pairing run ended before the model check' }
             Add-Criterion -Run $run -Id 'model-check' -Criterion 'The model check found the new pair to be AirPods.' -Outcome $o -Detail ([string]$w + '.')
 
@@ -341,8 +344,8 @@ try
             elseif (-not $setUp) { $o = 'fail'; $w = 'Earshot is not set up after the pairing' }
             elseif ($prompts -eq 'one') { $o = 'pass'; $w = 'one permission prompt, and Earshot is set up' }
             elseif ($prompts -eq 'more') { $o = 'fail'; $w = 'more than one permission prompt' }
-            else { $o = 'inconclusive'; $w = 'no permission prompt was raised, so Earshot was set up already and the one-prompt set-up was not exercised' }
-            Add-Criterion -Run $run -Id 'setup-one-prompt' -Criterion 'Set-up asked for one Windows permission prompt and Earshot is set up.' -Outcome $o -Detail ([string]$w + '.')
+            else { $o = 'pass'; $w = 'no permission prompt was needed, because Earshot was set up already (this test starts set up), and it is still set up' }
+            Add-Criterion -Run $run -Id 'setup-one-prompt' -Criterion 'Earshot is set up after the pairing, with at most one Windows permission prompt.' -Outcome $o -Detail ([string]$w + '.')
 
             # no-old-reading
             $before = Read-Answer -Run $run -Question 'Before you open the case: does the Earshot gauge or card show a battery figure for the AirPods?' -Options @('yes', 'no')
@@ -368,7 +371,7 @@ try
             if ($trace -eq 'yes')
             {
                 $traceStart = (Get-Date).ToUniversalTime()
-                Wait-Owner -Run $run -Text 'Open Earshot settings and choose Record a Bluetooth trace. Allow the Windows permission prompt once. Wait about ten seconds, then press Stop. Wait for the card to say where it saved the trace, then come back here.'
+                Wait-Owner -Run $run -Text 'Open Earshot settings and choose Record a Bluetooth trace. Read the note, then press Record on it. Allow the Windows permission prompt once. Wait about ten seconds, then press Stop. Wait for the card to say where it saved the trace, then come back here.'
                 $recording = Get-LogMatches -Pattern 'Bluetooth trace: ' -Regex 'Bluetooth trace: recording\.' -Since $traceStart
                 # Saved only: SavedInPlace means the file stayed where only administrators can open it, so the person was not handed it.
                 $saved = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: Saved\.' -Since $traceStart

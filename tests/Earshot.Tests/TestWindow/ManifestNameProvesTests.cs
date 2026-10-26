@@ -39,7 +39,7 @@ public sealed class ManifestNameProvesTests
         ["21"] = "This PC pauses what it is playing when the AirPods leave it, and never resumes anything.",
         ["22"] = "Even with the Earshot icon closed, the AirPods are handed back before this computer shuts down, and left alone at the next start.",
         ["23"] = "Earshot connects the AirPods within 20 seconds whatever state they were in, and leaves a connection made in Windows alone.",
-        ["24"] = "Earshot says when Bluetooth is off, pairs your AirPods from its menu, sets itself up with one Windows permission box and connects them once.",
+        ["24"] = "Earshot says when Bluetooth is off, pairs your AirPods from its menu, is set up afterwards with at most one Windows permission box and connects them once.",
     };
 
     private static IReadOnlyList<ManifestRow> LoadManifest() =>

@@ -373,8 +373,8 @@
       "halves": 1,
       "name": "Pair AirPods",
       "title": "Pair AirPods",
-      "proves": "Earshot says when Bluetooth is off, pairs your AirPods from its menu, sets itself up with one Windows permission box and connects them once.",
-      "settles": "Whether Pair AirPods pairs and adopts the AirPods from the tray, sets up with one prompt, shows no old reading and connects once, and whether the radio check reads a real radio turned off.",
+      "proves": "Earshot says when Bluetooth is off, pairs your AirPods from its menu, is set up afterwards with at most one Windows permission box and connects them once.",
+      "settles": "Whether Pair AirPods pairs and adopts the AirPods from the tray, is set up afterwards with at most one prompt, shows no old reading and connects once, whether the radio check reads a real radio turned off, and whether a Bluetooth trace is saved to the person's folder.",
       "powerCycleRequirement": "none",
       "maxSilenceSeconds": 900
     }
