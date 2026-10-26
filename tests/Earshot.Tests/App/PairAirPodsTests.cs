@@ -928,6 +928,43 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // A refusal the gate gave just as Exit began is still the adoption's result, with its code, not Earshot closing.
+    [TestMethod]
+    public void AGateRefusalAsExitBeginsKeepsItsCode()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            TrayHarness? running = null;
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history },
+                arrange: h => h.Block.OnSetDevice = async _ =>
+                {
+                    running!.Ui.Post(_ => running.ClickMenu(MenuModel.Exit), null);
+                    await Task.Delay(500, CancellationToken.None);
+                    return ControllerResult.Fail("refused", [StepOutcomes.FromWin32("set-device", 1062, "not started", ok: false)]);
+                });
+            running = tray;
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            RunUntilClosed(tray);
+
+            HistoryStep[] steps = history.Read().Single().Steps.ToArray();
+            HistoryStep adopt = steps.Single(s => s.Name == "adopt");
+            Assert.AreEqual(1062, adopt.Code, string.Join(", ", steps.Select(s => s.Name)));
+        });
+    }
+
     // Exit while the first question is up closes it: the entry says Earshot closed, not that the person said no.
     [TestMethod]
     public void ExitWhileTheFirstQuestionIsUpIsRecordedAsClosing()

@@ -1078,7 +1078,8 @@ internal sealed partial class TrayContext
                 AdoptMs = adoptMs,
                 Adoption = adoption,
                 AdoptRefusal = adopted ? null : _lastGateRefusal,
-                AdoptClosed = !adopted && _closing,
+                // A refusal the gate gave before Exit is the adoption's own result, and keeps its code.
+                AdoptClosed = !adopted && _closing && _lastGateRefusal is null,
                 Replace = replace is null ? null : new StepOutcome("replace", true, 0, FixAnswer.Ok.ToString(), null),
                 ReplaceMs = replaceMs,
             };
