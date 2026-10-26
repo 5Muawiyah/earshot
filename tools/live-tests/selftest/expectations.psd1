@@ -969,7 +969,7 @@
     # The fake world turns the radio off and on with the owner's words and records a tray pairing when the owner presses Pair, so the
     # radio verdict and the pairing run in the report follow the world, while every log criterion follows the case's lines: none
     # has none (so each fails), one has one of each (every line passes; the single click line passes the Connect), two has two of each
-    # (the Connect cannot be told apart, so it is inconclusive). not-reached: the owner cannot reach pairing mode, so the nine
+    # (the Connect cannot be told apart, so it is inconclusive). not-reached: the owner cannot reach pairing mode, so the eight
     # pairing criteria read inconclusive and the radio ones still decide. pair-failed: the report and the log both say the pairing failed.
     '24-pair-airpods|first' = @{
         none = @{ Overall = 'fail'; Criteria = @{

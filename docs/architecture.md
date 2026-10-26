@@ -1317,7 +1317,11 @@ user, through the same pairing session Fix connection's re-pair uses
 
 1. The radio check (below). A radio that cannot pair ends the run with its line.
 2. One question, Look for AirPods, with the pairing-mode steps for both kinds of
-   case.
+   case, each a picture with its line under it (a window of its own, since a
+   TaskDialog shows no pictures; the pictures are the test window's drawn
+   schematics, embedded in Earshot). Cancel is its default, and like every
+   pairing question it closes when Earshot exits; the number question closes
+   when the pairing attempt ends.
 3. A scan for headphones in pairing mode, a pick the person makes (always
    asked, so nothing is paired without a choice), and Windows' pairing with
    the kind of confirmation Windows asks for.
@@ -1343,20 +1347,27 @@ user, through the same pairing session Fix connection's re-pair uses
 Every run goes in the connect history as one entry, whether it paired, failed,
 was cancelled or stopped before the scan, and no device name. Each step has its
 `DevicePairingResultStatus` or Win32 code, and the `-ms` step after it holds how
-long it took (`radio-check-ms`, `scan-ms`, `pair-ms`, `model-check-ms`,
-`adopt-ms`, `setup-ms`); a `replace` step holds the answer when the question was
-asked. Codes that are Earshot's own (the lock, a question not answered, the
+long it took (`look-ms`, `radio-check-ms`, `scan-ms`, `pair-ms`,
+`model-check-ms`, `replace-ms`, `adopt-ms`, `setup-ms`). The question and the
+marker's write lead the entry; a `replace` step holds the answer when that
+question was asked; a throw during set-up keeps the steps already taken. Codes that are Earshot's own (the lock, a question not answered, the
 pairing's own time limit) are named as such. Cancel in the Pair AirPods window ends the run as a
 cancel; when Windows had already paired the AirPods, or a pairing that timed out
 had, the new pair is offered through the device picker and the recovery marker
 stays, and when what is paired cannot be read the card says only that. Exit
 during a run leaves its entry (a `closing` step) and keeps the marker, and an
-unexpected throw leaves one with its type and code. A radio that stops the
-pairing pairs nothing, so no marker is written. A marker an earlier run left is
-cleared only by the start-time look at what that run left, never by a later
-run that paired nothing. While the run is under way the coordinator's checks for AirPods Earshot
-does not protect, and the tray's own stale-pin check, wait for it, and a Fix
-pressed then says a pairing is running. The pairing window's calls are sent to
+unexpected throw leaves one with its type and code. A pairing Earshot stopped
+waiting for, or whose call threw, keeps the marker, since Windows may still
+finish it. A radio that stops the pairing pairs nothing, so no marker is
+written. A marker an earlier run left is cleared only by the start-time look at
+what that run left, never by a later run, which writes it again after its own
+adoption. The model check takes only a device node that is present, not one a
+removed pairing left behind. While the run is under way the coordinator's
+checks for AirPods Earshot does not protect, its automatic blocks, and the
+tray's own stale-pin check (also when a pairing starts while it reads) wait for
+it, and a Fix pressed then says a pairing is running. When the person keeps the
+pinned pair, a new device that settles straight after is answered by the tray,
+so the card that says the new pair is not protected is not replaced. The pairing window's calls are sent to
 the thread that made it.
 The card's line for a failed pairing comes from a table of the codes seen and
 Microsoft's documented meanings (`PairReasons`).
@@ -1421,7 +1432,9 @@ From the settings page and the Unreachable card, and from a Fix connection
 result that could not reach the AirPods. The tray first shows a note: a trace
 holds the Bluetooth addresses of the person's devices and may hold pairing
 keys, Earshot never sends it anywhere, share it only with someone trusted and
-delete it when done. Only the note's Record button goes on. With no installed
+delete it when done. Only the note's Record button goes on. The note, and the
+card with Stop while a trace records, stay up until they are used or replaced,
+and the settings row's button reads Stop while it records. With no installed
 copy, pressing the row's button says to set up Earshot first, the card offers
 no button, and a Fix result's button gets the same answer from the tray.
 

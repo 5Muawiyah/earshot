@@ -137,8 +137,9 @@ Startup on is not covered.
 - **Pair AirPods**, new in 1.6.0, in the tray menu, as a row on the settings
   page, on the card that says no AirPods are paired with this PC, and from
   Connect in Windows when nothing is paired yet. It reads this PC's Bluetooth
-  first, then asks you to put the case in pairing mode and press Look for
-  AirPods, lists the headphones in pairing mode nearby, and pairs the ones you
+  first, then shows how to put the case in pairing mode, with a picture of each
+  kind of case, and asks you to press Look for AirPods, lists the headphones in
+  pairing mode nearby, and pairs the ones you
   pick. A pair that passes Earshot's AirPods check is the one Earshot uses from
   then on, and Earshot sets itself up if it was not set up yet; the previous
   pair's readings are dropped. Earshot always asks before it takes on a
@@ -169,7 +170,8 @@ Startup on is not covered.
   you are done. Then one administrator prompt starts Windows Performance
   Recorder, which is part of Windows, from the installed copy of Earshot only.
   It records for at most 10 minutes and saves the trace when you press Stop, or
-  when the 10 minutes are up, in
+  when the 10 minutes are up. The card with Stop stays until you use it, and
+  the settings row's button reads Stop while it records. The trace goes in
   `%LOCALAPPDATA%\Earshot\traces`. That folder is not Documents or another
   folder OneDrive's PC folder backup covers. If Earshot exits while it records,
   the recording is thrown away. Before Earshot is set up, or with an older

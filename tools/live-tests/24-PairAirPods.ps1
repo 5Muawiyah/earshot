@@ -270,7 +270,7 @@ try
             Add-Finding -Run $run -Name 'listNote' -Value $minor
             Add-Criterion -Run $run -Id 'listed-with-name' -Criterion 'The list showed the AirPods with a name.' `
                 -Outcome $(if ($named -eq 'yes') { 'pass' } else { 'fail' }) `
-                -Detail $(if ($named -eq 'yes') { 'the list showed the AirPods with a name.' } else { 'the list showed the AirPods as "Headphones with no name"; that is the signal the empty-name rule watches for.' })
+                -Detail $(if ($named -eq 'yes') { 'the list showed the AirPods with a name.' } else { 'you said the list did not show the AirPods with a name; a list that shows them as "Headphones with no name" is the signal the empty-name rule watches for.' })
 
             Wait-Owner -Run $run -Text 'Choose your AirPods in the list and press Pair. If Earshot asks "Does your device show ...", answer it. If Earshot asks whether to use these AirPods instead, choose Use these. Allow anything Windows asks. Then come back here when Earshot says Paired, or gives a reason.'
             $askedYesNo = Read-Answer -Run $run -Question 'Did Earshot ask you a yes or no question while pairing?' -Options @('yes', 'no')
@@ -295,7 +295,7 @@ try
             # The log and the report are read before anything else is asked of Earshot.
             $started = Get-LogMatches -Pattern 'Pair AirPods: ' -Regex 'Pair AirPods: started from the menu\.' -Since $pairStart
             $paired = Get-LogMatches -Pattern 'Pair AirPods: ' -Regex 'Pair AirPods: Paired, None\.' -Since $pairStart
-            $failed = Get-LogMatches -Pattern 'Pair AirPods: ' -Regex 'Pair AirPods: (Failed|Cancelled|NotAirPods), [A-Za-z]+\.' -Since $pairStart
+            $failed = Get-LogMatches -Pattern 'Pair AirPods: ' -Regex 'Pair AirPods: (Failed|Cancelled|NotAirPods|Unverified), [A-Za-z]+\.' -Since $pairStart
             $adopted = Get-LogMatches -Pattern 'Pair AirPods: ' -Regex 'Pair AirPods: the new pair is the one Earshot uses\.' -Since $pairStart
             $notAdopted = Get-LogMatches -Pattern 'Pair AirPods: ' -Regex 'Pair AirPods: the new pair was not adopted\.' -Since $pairStart
             $answered = Get-LogMatches -Pattern 'pair: Windows answered ' -Regex 'pair: Windows answered (Paired|AlreadyPaired) \(-?[0-9]+\)\.' -Since $pairStart

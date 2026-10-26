@@ -850,7 +850,7 @@
     { "test": "24", "kind": "check", "scriptText": "radio-cleared", "plain": "With Bluetooth back on, the radio check should read Ok." },
     { "test": "24", "kind": "check", "scriptText": "listed-with-name", "plain": "The list should show your AirPods with a name." },
     { "test": "24", "kind": "check", "scriptText": "pair-paired", "plain": "Pair AirPods should pair your AirPods from the Earshot menu." },
-    { "test": "24", "kind": "check", "scriptText": "pair-radio-checked", "plain": "Before looking for AirPods, Earshot should check that Bluetooth is on." },
+    { "test": "24", "kind": "check", "scriptText": "pair-radio-checked", "plain": "Pair AirPods should find Bluetooth on." },
     { "test": "24", "kind": "check", "scriptText": "model-check", "plain": "Earshot should find that the new pair is AirPods." },
     { "test": "24", "kind": "check", "scriptText": "pair-adopted", "plain": "Earshot should start using the new pair." },
     { "test": "24", "kind": "check", "scriptText": "setup-one-prompt", "plain": "Earshot should still be set up afterwards, with at most one Windows permission box." },
