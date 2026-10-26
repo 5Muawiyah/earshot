@@ -1358,8 +1358,10 @@ pairing's own time limit) are named as such. Cancel in the Pair AirPods window e
 cancel; when Windows had already paired the AirPods, or a pairing that timed out
 had, the new pair is offered through the device picker and the recovery marker
 stays, and when what is paired cannot be read the card says only that. Exit
-during a run leaves its entry (a `closing` step) and keeps the marker, and an
-unexpected throw leaves one with its type and code. A pairing Earshot stopped
+during a run, the first question included, leaves its entry (the steps taken,
+then a `closing` step) and keeps the marker; Cancel leaves the steps taken too;
+and an unexpected throw leaves one with the steps taken, its type, its code and
+how long the run took. A pairing Earshot stopped
 waiting for, or whose call threw, keeps the marker, since Windows may still
 finish it. A radio that stops the pairing pairs nothing, so no marker is
 written. A marker an earlier run left is cleared only by the start-time look at
@@ -1368,7 +1370,9 @@ adoption. The model check takes only a device node that is present, not one a
 removed pairing left behind. While the run is under way the coordinator's
 checks for AirPods Earshot does not protect, its automatic blocks, and the
 tray's own stale-pin check (also when a pairing starts while it reads) wait for
-it, and a Fix pressed then says a pairing is running. When the person keeps the
+it, and a Fix pressed then says a pairing is running. When the run ends, the
+coordinator reads the state again at once rather than after its doubled wait,
+and a check the start-time look gave way for runs then. When the person keeps the
 pinned pair, a new device that settles straight after is answered by the tray,
 so the card that says the new pair is not protected is not replaced. The pairing window's calls are sent to
 the thread that made it.
@@ -1391,7 +1395,8 @@ clears it once a pair is adopted or the pairing left no AirPods to adopt. A mark
 check and then offers the device picker ("Choose AirPods") for a paired set
 that is not the pinned one; choosing it pins it and, once Earshot is set up,
 gives it to the gate, which blocks it through the usual path. When the device
-list cannot be read, the card says so and offers the same picker. The marker
+list cannot be read, the card says so and offers the same picker. Either card
+stays up until it is used or replaced, since it is shown at sign-in. The marker
 stays until a pair is chosen or no such set is left. When the recovery showed
 nothing (no other set was left), the coordinator's check for AirPods Earshot
 does not protect, which waited for it, runs straight after: it compares the
@@ -1461,7 +1466,9 @@ prompt. The helper:
    a stop or cancel reach only the session of that name; neither has been run in a
    real recording yet (see [verification.md](verification.md)).
    https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options
-4. Stops and saves when the tray asks or after 10 minutes. When the tray
+4. Stops and saves when the tray asks or after 10 minutes. A Stop pressed
+   while the administrator prompt was still up starts no recording at all, and
+   the tray says nothing was recorded. When the tray
    process exits first (Exit, a crash) while the helper still runs, nobody would
    collect a file, so it runs `wpr -cancel` instead and saves nothing. A
    sign-out may end the helper too before it can cancel; the recording session
@@ -1472,7 +1479,9 @@ prompt. The helper:
    restart ends every recording.
 5. Gives the tray's user read on the trace and the result, waits for the tray
    to copy the trace to `%LOCALAPPDATA%\Earshot\traces` (not Documents, which
-   OneDrive's PC folder backup can upload), and deletes its own copy; it deletes
+   OneDrive's PC folder backup can upload; the copy is made under a temporary
+   name and renamed once whole, and one an Exit cut off is removed at the next
+   start), and deletes its own copy; it deletes
    it too when the tray never says it copied it. A copy it could not delete is
    reported, with where it is. A copy the tray could not make is not kept.
 
