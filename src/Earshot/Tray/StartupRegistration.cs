@@ -336,7 +336,10 @@ internal sealed class StartupRegistration
 
     // The value as it reads straight after a write or a delete, in the log. On 25 October the value read the per-user path just
     // after the tray logged writing the installed one, and no second writer or ordering in Earshot explains it, so every change
-    // is read back: a value that differs from what was written is a warning naming what was read.
+    // is read back: a value that differs from what was written is a warning naming what was read. The line also says whether
+    // the writer was elevated: an elevated process under Administrator protection is another account, whose HKCU is not the
+    // signed-in person's, and its read-back reads that same other hive, so only this tells such a write apart.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.environment.isprivilegedprocess
     private void LogReadBack(string change, string? written)
     {
         string? back;
@@ -354,8 +357,11 @@ internal sealed class StartupRegistration
 
         bool same = string.Equals(back, written, StringComparison.Ordinal);
         _log.Write(same ? LogLevel.Info : LogLevel.Warn,
-            "Open on startup: read back after " + change + ": " + (back ?? "(none)") + (same ? "." : ", not what was written (" + (written ?? "(none)") + ")."));
+            "Open on startup: read back after " + change + ": " + (back ?? "(none)") + (same ? "" : ", not what was written (" + (written ?? "(none)") + ")") +
+            "; " + WriterLine + ".");
     }
+
+    internal static string WriterLine => Environment.IsPrivilegedProcess ? "written by an elevated process" : "written by a process that is not elevated";
 
     private ControllerResult Failed(string action, Exception ex)
     {
