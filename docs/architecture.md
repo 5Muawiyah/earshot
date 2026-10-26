@@ -1310,8 +1310,8 @@ make asks nothing and says to set up Earshot first: only the installed copy is
 ever raised, and only when its folder passes the same check the update
 hand-over makes (administrators alone can write to it), because a copy run from
 Downloads or a build folder sits where a standard user can change it. A run with nothing to undo needs no administrator
-run and goes on as before. When the re-pair found the AirPods and this PC could
-not reach them, the result has a Record a Bluetooth trace button, which asks the
+run and goes on as before. When the re-pair's pairing is Unreachable (found
+with no name read, then not finished), the result has a Record a Bluetooth trace button, which asks the
 tray (a named event, `Local\Earshot.TraceRequested`) to show the same note and
 Record button as its settings row. The paired-list read and the removal come
 before the pairing window, so the person has no Cancel yet: they are given 5
@@ -1368,7 +1368,10 @@ question was asked; a throw during set-up keeps the steps already taken. An
 `adopt` the gate refused, and a `setup` that did not take (a declined prompt is
 1223, ERROR_CANCELLED), carry the code of their first failing step. A scan that
 Windows stopped (the watcher aborted) has a `scan-aborted` step and its own
-line, not "No AirPods turned up". Codes that are Earshot's own are named as
+line, not "No AirPods turned up". A pick nobody answers ends after 10 minutes
+(a waiting budget: while it is up the run holds the Fix lock and the pairing
+flag) with an earshot-timeout `pick` step and "Nothing was chosen in time, so
+nothing was paired." Codes that are Earshot's own are named as
 such: the lock, a question not answered, the pairing's own time limit
 (`cancelled-timeout`), and every other time limit of Earshot's
 (`earshot-timeout`). Cancel in the

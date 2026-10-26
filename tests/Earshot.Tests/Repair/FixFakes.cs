@@ -125,11 +125,26 @@ internal sealed class FakeRePairUi : IFixRePairUi
 
     public void ShowInstruction(string text) => Shown.Add(text);
 
-    public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
+    // The pick stays up, as one nobody answers does, until its token ends it.
+    public bool HangOnPick { get; set; }
+
+    public async Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct)
     {
         OnPick?.Invoke();
         Shown.Add("pick:" + string.Join("|", candidates.Select(c => c.Name)));
-        return Task.FromResult(Pick >= 0 && Pick < candidates.Count ? candidates[Pick] : null);
+        if (HangOnPick)
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return null;
+            }
+        }
+
+        return Pick >= 0 && Pick < candidates.Count ? candidates[Pick] : null;
     }
 
     // The token each number question was given, so a test can see it ends with the pairing attempt.
@@ -425,6 +440,7 @@ internal sealed class FixRig : IDisposable
             PostPairWait = TimeSpan.Zero,
             PairedListWait = TimeSpan.FromMilliseconds(200),
             UnpairWait = TimeSpan.FromMilliseconds(200),
+            PickWait = TimeSpan.FromSeconds(5),
             Delay = (_, _) => Task.CompletedTask,
         },
     };

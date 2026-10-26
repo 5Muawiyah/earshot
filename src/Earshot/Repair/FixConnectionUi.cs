@@ -118,10 +118,11 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         }
     }
 
-    public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
+    public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        FixPromptAnswer answer = OnUi(() => new TaskDialogPrompter().Ask(PickPrompt(candidates, _title), _cancel.Token));
+        using var ends = CancellationTokenSource.CreateLinkedTokenSource(_cancel.Token, ct);
+        FixPromptAnswer answer = OnUi(() => new TaskDialogPrompter().Ask(PickPrompt(candidates, _title), ends.Token));
         return Task.FromResult<UnpairedDevice?>(answer.Answer == FixAnswer.Ok && answer.Chosen >= 0 ? candidates[answer.Chosen] : null);
     }
 

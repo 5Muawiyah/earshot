@@ -441,6 +441,26 @@ public sealed class PairingSessionTests
         Assert.HasCount(1, rig.Ui.PinsShown);
     }
 
+    // A pick nobody answers ends at its own limit, as no choice, with Earshot's timeout in the history: the run holds the Fix lock
+    // and the pairing flag while it is up. Before, the pick had no limit.
+    [TestMethod]
+    public async Task APickNobodyAnswersEndsAtItsLimitAndPairsNothing()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig);
+        rig.Ui.HangOnPick = true;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.AreEqual(PairOutcome.Cancelled, result.Outcome);
+        Assert.AreEqual(PairingText.PickTimedOut, result.CardLine);
+        Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "pick" && s.Code == 1460 && s.CodeName == "earshot-timeout"), string.Join(", ", result.HistorySteps.Select(s => s.Step + " " + s.CodeName)));
+        Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("pair:", StringComparison.Ordinal)), "Nothing was paired.");
+        Assert.IsLessThan(30_000L, watch.ElapsedMilliseconds);
+    }
+
     // A PairAsync that ignores Cancel still ends at the time limit: the wait is given up, not left to Windows.
     [TestMethod]
     public async Task APairingThatIgnoresCancelStillEndsAtTheTimeout()

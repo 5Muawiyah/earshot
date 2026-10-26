@@ -123,5 +123,7 @@ internal static class PairingText
 
     public const string TimedOut = "Pairing took too long and was stopped.";
 
+    public const string PickTimedOut = "Nothing was chosen in time, so nothing was paired.";
+
     public static string DoesItShow(string? pin) => "Does your device show " + pin + "?";
 }
