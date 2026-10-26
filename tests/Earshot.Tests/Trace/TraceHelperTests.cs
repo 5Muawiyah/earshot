@@ -26,9 +26,17 @@ internal sealed class FakeTraceMachine : ITraceMachine
         return PrepareProblem;
     }
 
+    // The file name whose write fails, and why.
+    public (string Name, string Problem)? WriteFails { get; set; }
+
     public string? WriteFile(string path, byte[] bytes)
     {
         Calls.Add("write " + Path.GetFileName(path));
+        if (WriteFails is { } fails && string.Equals(Path.GetFileName(path), fails.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            return fails.Problem;
+        }
+
         Files[path] = bytes;
         return null;
     }
@@ -403,6 +411,18 @@ public sealed class TraceHelperTests
 
         CollectionAssert.Contains(machine.Calls, "grant bluetooth-20261025T143005Z.etl S-1-5-21-1-2-3-1001");
         CollectionAssert.Contains(machine.Calls, "grant result.txt S-1-5-21-1-2-3-1001");
+    }
+
+    // The marker is what makes the next start say a trace may still be running after a sign-out killed the helper: with no
+    // marker written, no recording is started, as Pair AirPods starts no pairing without its own marker.
+    [TestMethod]
+    public void AMarkerThatCannotBeWrittenStartsNoRecording()
+    {
+        var (outcome, _, _, runner, log) = Run((m, _, _) => m.WriteFails = (TraceHelper.MarkerFileName, "IOException (HRESULT 0x80070070)"));
+
+        Assert.AreEqual(TraceOutcome.SetupFailed, outcome);
+        Assert.IsFalse(runner.Calls.Any(c => c.StartsWith("-start ", StringComparison.Ordinal)), string.Join(" | ", runner.Calls));
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("0x80070070", StringComparison.Ordinal)));
     }
 
     [TestMethod]

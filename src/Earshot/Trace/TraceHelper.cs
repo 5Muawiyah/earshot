@@ -234,7 +234,9 @@ internal static class TraceHelper
         string? marker = machine.WriteFile(markerPath, Encoding.UTF8.GetBytes(TraceMarker.Serialize(new TraceMarker(Environment.ProcessId, request.Nonce, TraceMarker.BootSecondsNow()))));
         if (marker is not null)
         {
-            log.Warn("trace: the marker could not be written: " + marker);
+            // Without the marker a helper killed by a sign-out would leave a recording nobody is told about.
+            log.Warn("trace: the marker could not be written, so no recording was started: " + marker);
+            return TraceOutcome.SetupFailed;
         }
 
         ProcessRun start = runner.Run(machine.WprPath, WprCommand.Start(profilePath, runFolder), StartLimit, runFolder);
