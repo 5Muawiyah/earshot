@@ -1391,7 +1391,9 @@ removed pairing left behind. From the press of Look for AirPods (not while only
 that question is up) until the run ends, the coordinator's
 checks for AirPods Earshot does not protect, its automatic blocks, and the
 tray's own stale-pin check (also when a pairing starts while it reads) wait for
-it, and a Fix or Choose device pressed then says a pairing is running. When the run ends, the
+it, and a Fix or Choose device pressed then says a pairing is running. From the start of the run, its first question
+included, connect, disconnect, Connect in Windows, Block at boot, Protect audio quality and the microphone off switch are
+refused with "Earshot is already pairing the AirPods.", since each is a gate change the run's adoption would meet. When the run ends, the
 coordinator reads the state again at once rather than after its doubled wait,
 and a check the start-time look gave way for runs then. When the person keeps the
 pinned pair, a new device that settles straight after is answered by the tray,
