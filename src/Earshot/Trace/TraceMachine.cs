@@ -178,6 +178,12 @@ internal sealed class TraceMachine : ITraceMachine
 
         try
         {
+            // A missing folder reads as every attribute set, so it is told apart first: there is nothing to delete.
+            if (!Directory.Exists(full))
+            {
+                return null;
+            }
+
             if ((new DirectoryInfo(full).Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 string linked = full + " is a reparse point and was not deleted.";

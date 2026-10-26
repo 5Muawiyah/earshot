@@ -1363,8 +1363,10 @@ question was asked; a throw during set-up keeps the steps already taken. An
 `adopt` the gate refused, and a `setup` that did not take (a declined prompt is
 1223, ERROR_CANCELLED), carry the code of their first failing step. A scan that
 Windows stopped (the watcher aborted) has a `scan-aborted` step and its own
-line, not "No AirPods turned up". Codes that are Earshot's own (the lock, a question not answered, the
-pairing's own time limit, and the radio read's as `earshot-timeout`) are named as such. Cancel in the
+line, not "No AirPods turned up". Codes that are Earshot's own are named as
+such: the lock, a question not answered, the pairing's own time limit
+(`cancelled-timeout`), and every other time limit of Earshot's
+(`earshot-timeout`). Cancel in the
 Pair AirPods window, or closing that window, ends the run as a
 cancel; when Windows had already paired the AirPods, or a pairing that timed out
 had, the new pair is offered through the device picker and the recovery marker

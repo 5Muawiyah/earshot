@@ -67,6 +67,20 @@ public sealed class TraceRealTests
         Assert.IsTrue(Directory.Exists(outside));
     }
 
+    // A run folder that is not there is nothing to delete, not a reparse point: a missing path reads as every attribute set.
+    [TestMethod]
+    public void AMissingRunFolderIsNotReportedAsAReparsePoint()
+    {
+        using var folder = new TempFolder();
+        var log = new CapturingLog();
+        var machine = new TraceMachine(Paths.FromEnvironment(n => n == Paths.DataRootVariable ? folder.Path : null), new Boot.Gate.NtfsFolderSecurity(), log);
+
+        string? problem = machine.DeleteRunFolder(Path.Combine(machine.TraceFolder, NewNonce()));
+
+        Assert.IsNull(problem);
+        Assert.IsFalse(log.Entries.Any(e => e.Message.Contains("reparse point", StringComparison.Ordinal)));
+    }
+
     [TestMethod]
     public void TheEventNamesAreInTheSessionNamespaceAndNeedAGoodNonce()
     {
