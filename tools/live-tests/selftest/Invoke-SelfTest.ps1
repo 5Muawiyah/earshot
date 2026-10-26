@@ -72,7 +72,7 @@ param(
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
         'exit-cut-short', 'pause-declined', 'chosen-rising',
         'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-        'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached')][string]$Case = '',
+        'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -194,6 +194,10 @@ $tests = @(
     # none, so every state's criterion reads "not reached" and the run can only be inconclusive.
     [ordered]@{ Number = '23'; Id = '23-connect-every-state'; Script = '23-ConnectEveryState.ps1'; Halves = @('first', 'resume'); Extra = @()
         Cases = @('none', 'one', 'two', 'not-reached') }
+    # not-reached: the owner cannot put the case into pairing mode, so every pairing criterion reads "not reached" while the radio
+    # criteria still run. pair-failed: Pair AirPods found no device and logged its one failed line.
+    [ordered]@{ Number = '24'; Id = '24-pair-airpods'; Script = '24-PairAirPods.ps1'; Halves = @('first'); Extra = @()
+        Cases = @('none', 'one', 'two', 'not-reached', 'pair-failed') }
 )
 
 $defaultCases = @('none', 'one', 'two')
@@ -409,6 +413,7 @@ function Invoke-Half
 #   22-service-handback|resume            yes, 0, 0   stays Blocked; nothing to offer
 #   23-connect-every-state|first          yes, 0, 0   every leg ends with Earshot's Disconnect; nothing to offer
 #   23-connect-every-state|resume         yes, 0, 0   the same
+#   24-pair-airpods|first                 yes, 0, 0   the owner's Disconnect ends the run at rest; nothing to offer
 $script:AtRestDefaults = @{
     '00-restore|first'                   = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 0 }
     '01-a2dp-oneshot|first'              = @{ LeftAtRest = 'yes'; BlockCount = 1; DisconnectCount = 1 }
@@ -443,6 +448,7 @@ $script:AtRestDefaults = @{
     '22-service-handback|resume'         = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '23-connect-every-state|first'       = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
     '23-connect-every-state|resume'      = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
+    '24-pair-airpods|first'              = @{ LeftAtRest = 'yes'; BlockCount = 0; DisconnectCount = 0 }
 }
 
 # What the expectations for one case say should have been recorded, against what was. The
