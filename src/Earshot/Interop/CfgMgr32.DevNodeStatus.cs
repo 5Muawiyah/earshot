@@ -27,7 +27,7 @@ internal static unsafe partial class CfgMgr32
 
     // The property category (A8B865DD...) and the pids 2 (date) and 3 (version) are the devpkey.h values; the pages below give the
     // names and types but not the numbers. A read of this PC's radio through Get-PnpDeviceProperty on 25 October 2026 returned
-    // the same version and date as this class read through them in RadioCheckTests' real run (1.1044.0.556, 2025-09-17); the test itself does not compare.
+    // the same version and date as this class read through them in RadioCheckTests' real run; the test itself does not compare.
     // https://learn.microsoft.com/en-us/windows-hardware/drivers/install/devpkey-device-driverdate
     internal static readonly DEVPROPKEY DEVPKEY_Device_DriverDate = new(new Guid("A8B865DD-2E3D-4094-AD97-E593A70C75D6"), 2);
 

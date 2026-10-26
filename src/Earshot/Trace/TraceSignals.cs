@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Security;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Earshot.Contracts;
 using Microsoft.Win32.SafeHandles;
 
@@ -7,8 +9,11 @@ namespace Earshot.Tracing;
 
 // The three named events the tray creates before it asks for the administrator prompt, and the helper opens. The tray makes
 // them because an event made by the elevated helper would carry a descriptor the tray's unelevated token cannot open.
-// "Local\" is the logon session's own namespace, which the tray and its elevated helper share.
+// "Local\" is the namespace of the terminal services session, which the tray and its elevated helper share. The helper may run
+// as another account than the tray (an administrator's credentials typed on a standard user's desktop, or Administrator
+// protection), so each event grants the signed-in user full control and Administrators wait and set.
 // https://learn.microsoft.com/en-us/windows/win32/termserv/kernel-object-namespaces
+// https://learn.microsoft.com/en-us/dotnet/api/system.threading.eventwaithandleacl.create
 internal static class TraceEventNames
 {
     public static string Stop(string nonce) => @"Local\Earshot.Trace.Stop." + Checked(nonce);
@@ -35,13 +40,16 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
     private EventWaitHandle? _stop;
     private EventWaitHandle? _done;
     private EventWaitHandle? _copied;
+    private readonly ILog _log;
     private Process? _tray;
     private ManualResetEvent? _trayExit;
 
-    public TraceSignals(TraceRequest request)
+    public TraceSignals(TraceRequest request, ILog log)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(log);
         _request = request;
+        _log = log;
     }
 
     public string? Open()
@@ -73,7 +81,8 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            Trace.WriteLine("Earshot trace: the tray process could not be queried: " + ex.Message);
+            _log.Warn("trace: the tray process could not be queried (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "), so it counts as gone.");
             return false;
         }
     }
@@ -170,10 +179,20 @@ internal sealed class TrayTraceSignals : ITrayTraceSignals
         }
     }
 
-    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.eventwaithandle.-ctor
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.eventwaithandleacl.create
     private static EventWaitHandle Make(string name)
     {
-        var handle = new EventWaitHandle(false, EventResetMode.ManualReset, name, out bool created);
+        using WindowsIdentity self = WindowsIdentity.GetCurrent();
+        var security = new EventWaitHandleSecurity();
+        if (self.User is { } user)
+        {
+            security.AddAccessRule(new EventWaitHandleAccessRule(user, EventWaitHandleRights.FullControl, AccessControlType.Allow));
+        }
+
+        security.AddAccessRule(new EventWaitHandleAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            EventWaitHandleRights.Synchronize | EventWaitHandleRights.Modify, AccessControlType.Allow));
+        EventWaitHandle handle = EventWaitHandleAcl.Create(false, EventResetMode.ManualReset, name, out bool created, security);
         if (!created)
         {
             handle.Dispose();

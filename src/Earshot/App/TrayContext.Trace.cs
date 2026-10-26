@@ -34,6 +34,14 @@ internal sealed partial class TrayContext
             _log.Warn("Bluetooth trace: " + notice);
             ShowCard(TrayStatus.AppName, notice, CardPlace.NearTray);
         }
+
+        // Run folders an earlier recording left (a helper that could not delete its copy, or stopped part way): said once, at start.
+        string? leftover = _traceRecorder.LeftoverNotice();
+        if (leftover is not null)
+        {
+            _log.Warn("Bluetooth trace: " + leftover);
+            ShowCard(TrayStatus.AppName, leftover, CardPlace.NearTray);
+        }
     }
 
     private void UnwireTrace()
@@ -115,7 +123,7 @@ internal sealed partial class TrayContext
             return;
         }
 
-        ShowCardWithButton(TrayStatus.AppName, TraceCopy.Note, TraceCopy.NoteButton, () => BeginTrace(place), place);
+        ShowCardWithButton(TrayStatus.AppName, TraceCopy.NoteFor(recorder.DestinationFolder), TraceCopy.NoteButton, () => BeginTrace(place), place);
     }
 
     // The note's Record button. Everything is asked again, because the card may have stayed up while things changed.

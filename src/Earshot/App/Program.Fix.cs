@@ -118,7 +118,7 @@ internal static partial class Program
     {
         var ordinaryFiles = new FixPlanFiles(Path.Combine(paths.LocalFolder, "fix"));
         // Only the installed copy is raised; with none, a run with changes to make says to set up Earshot first.
-        IFixElevator prompting = FixElevationChoice.Prompting(new ShellRunasLauncher(), InstalledCopy(paths, File.Exists)());
+        IFixElevator prompting = FixElevationChoice.Prompting(new ShellRunasLauncher(), InstalledCopy(paths, File.Exists, FixApplyVerbSince, SetupValues.ProgramVersion)());
         if (paths.IsSafeMode || paths.IsRedirected)
         {
             return new FixElevation(ordinaryFiles, prompting, false, null, null);

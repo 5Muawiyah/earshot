@@ -30,6 +30,12 @@ internal sealed class FakeTraceRecorder : ITraceRecorder
 
     public bool NeedsSetUp { get; set; }
 
+    public string DestinationFolder { get; set; } = @"C:\Users\Someone\AppData\Local\Earshot\traces";
+
+    public string? Leftover { get; set; }
+
+    public string? LeftoverNotice() => Leftover;
+
     public Task<TraceResult> RecordAsync(CancellationToken ct)
     {
         Recorded++;
@@ -87,8 +93,9 @@ public sealed class TraceTrayTests
     // The note every way in shows first. Nothing is asked of the recorder until its Record button is pressed.
     private static void PressRecordOnTheNote(TrayHarness tray, FakeTraceRecorder recorder)
     {
-        WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Note), "the note");
-        CardContent note = tray.Cards.Shown.Last(c => c.Content.Status == TraceCopy.Note).Content;
+        string text = TraceCopy.NoteFor(recorder.DestinationFolder);
+        WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == text), "the note");
+        CardContent note = tray.Cards.Shown.Last(c => c.Content.Status == text).Content;
         Assert.AreEqual(TraceCopy.NoteButton, note.Action?.Label);
         Assert.AreEqual(0, recorder.Recorded, "Nothing is recorded before the note's button is pressed.");
         note.Action!.OnClick();
@@ -168,6 +175,18 @@ public sealed class TraceTrayTests
     }
 
     [TestMethod]
+    public void RunFoldersLeftByAnEarlierRecordingAreSaidOnceAtStart()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder { Leftover = TraceCopy.Leftover(1) };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+
+            Assert.AreEqual(1, tray.Cards.Shown.Count(c => c.Content.Status == TraceCopy.Leftover(1)));
+        });
+    }
+
+    [TestMethod]
     public void WithoutARecorderTheRowSaysSoAndNothingStarts()
     {
         StaThread.Run(() =>
@@ -234,7 +253,8 @@ public sealed class TraceTrayTests
             tray.PumpUntilIdle();
 
             CardContent note = tray.Cards.Shown[^1].Content;
-            Assert.AreEqual(TraceCopy.Note, note.Status);
+            Assert.AreEqual(TraceCopy.NoteFor(recorder.DestinationFolder), note.Status);
+            StringAssert.Contains(note.Status, recorder.DestinationFolder, "The note says where the trace will be saved.");
             StringAssert.Contains(note.Status, "Bluetooth addresses");
             StringAssert.Contains(note.Status, "pairing keys");
             StringAssert.Contains(note.Status, "never sends it");
@@ -255,7 +275,7 @@ public sealed class TraceTrayTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(TraceCopy.SetUpFirst, tray.Cards.Shown[^1].Content.Status);
-            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Note));
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.NoteFor(recorder.DestinationFolder)));
             Assert.AreEqual(0, recorder.Recorded);
         });
     }

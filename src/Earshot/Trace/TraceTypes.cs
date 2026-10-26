@@ -11,6 +11,9 @@ internal enum TraceOutcome
     // The trace is saved but stays in the administrators-only folder: the tray was gone, or the file could not be made readable.
     SavedInPlace,
 
+    // The tray exited while the recording ran, so nobody would collect a file: the session was cancelled and nothing was saved.
+    Discarded,
+
     // Helper side only, after the tray copied the trace: the helper's own copy in the administrators-only folder could not be
     // deleted. The helper exits with ExitCodes.IoError and the tray says where that copy is.
     CopyKept,
@@ -193,10 +196,21 @@ internal static class TraceCopy
     public const string StartButton = "Record a Bluetooth trace";
     public const string StopButton = "Stop";
     public const string Running = "Recording a Bluetooth trace. Try pairing now.";
-    // Shown before anything is asked or recorded, with the button that starts the recording.
-    public const string Note = "A Bluetooth trace holds the Bluetooth addresses of your devices and may hold pairing keys. Earshot never sends it anywhere. Share it only with someone you trust, and delete it when you're done.";
+    // Shown before anything is asked or recorded, with the button that starts the recording, and the folder it will be saved in.
+    public static string NoteFor(string folder) =>
+        "A Bluetooth trace holds the Bluetooth addresses of your devices and may hold pairing keys. It is saved in " + folder +
+        ". Earshot never sends it anywhere. Share it only with someone you trust, and delete it when you're done.";
+
     public const string NoteButton = "Record";
-    public const string SetUpFirst = "Set up Earshot first, then record a Bluetooth trace.";
+    public const string SetUpFirst = "Set up or update Earshot first, then record a Bluetooth trace.";
+    public const string Untrusted = "Earshot's trace folder under ProgramData can be changed by more than administrators, so nothing was copied from it.";
+
+    public static string NotKept(string folder, string problem) =>
+        "The trace was recorded but could not be copied to " + folder + " (" + problem + "), so it was not kept. Try again.";
+
+    public static string Leftover(int count) =>
+        "The Earshot\\trace folder under ProgramData still holds " + count.ToString(CultureInfo.InvariantCulture) +
+        " earlier Bluetooth trace folder(s), which only administrators can open. They may hold pairing keys; an administrator can delete them.";
     public const string AdminCopyKept = "Earshot's own copy could not be deleted. It is in the Earshot\\trace folder under ProgramData, which only administrators can open.";
 
     public static string SavedIn(string folder) => "Trace saved in " + folder + ". Delete it when you're done.";

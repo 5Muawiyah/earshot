@@ -364,18 +364,32 @@ internal static partial class Program
         }
 
         return new Tracing.TraceRecorder(
-            new Tracing.TraceRecorderOptions(false, InstalledCopy(paths, File.Exists), paths.UserTraceFolder, Environment.ProcessId, NewTraceNonce),
-            new ShellRunasLauncher(), new Tracing.TrayTraceSignalsFactory(), new Tracing.TraceUserFiles(Path.Combine(paths.MachineFolder, "trace")), log);
+            new Tracing.TraceRecorderOptions(false, InstalledCopy(paths, File.Exists, TraceVerbSince, SetupValues.ProgramVersion), paths.UserTraceFolder, Environment.ProcessId, NewTraceNonce),
+            new ShellRunasLauncher(), new Tracing.TrayTraceSignalsFactory(), new Tracing.TraceUserFiles(Path.Combine(paths.MachineFolder, "trace"), new NtfsFolderSecurity(), log), log);
     }
 
+    // The first releases whose program has the trace verb and the fix-apply verb. An older program would take an unknown verb as
+    // a request to start its tray, elevated, so nothing older is raised for them.
+    internal const string TraceVerbSince = "1.6.0";
+    internal const string FixApplyVerbSince = "1.5.0";
+
     // The one copy of Earshot an administrator prompt may raise: %ProgramFiles%\Earshot\Earshot.exe, read each time it is asked
-    // for, or null when it is not there. Never the running copy, which may sit in a folder a standard user can change.
-    internal static Func<string?> InstalledCopy(Paths paths, Func<string, bool> fileExists)
+    // for, or null when it is not there or reports a release older than minVersion (versionOf gives major.minor.patch, or empty
+    // when it cannot be read). Never the running copy, which may sit in a folder a standard user can change.
+    internal static Func<string?> InstalledCopy(Paths paths, Func<string, bool> fileExists, string minVersion, Func<string, string> versionOf)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(versionOf);
+        if (!Update.ReleaseVersion.TryParse(minVersion, out Update.ReleaseVersion least))
+        {
+            throw new ArgumentException("Not a release version: " + minVersion, nameof(minVersion));
+        }
+
         string installed = paths.InstalledExe;
-        return () => fileExists(installed) ? installed : null;
+        return () => fileExists(installed) && Update.ReleaseVersion.TryParse(versionOf(installed), out Update.ReleaseVersion has) && !(has < least)
+            ? installed
+            : null;
     }
 
     // 32 lower-case hex characters, from a random source: the name the tray's signals and the helper's folder share.

@@ -242,25 +242,40 @@ public sealed class TraceHelperTests
 
     [TestMethod]
     [DataRow(0)]
-    [DataRow(1)]
     [DataRow(2)]
-    public void EveryReasonToStopStopsTheSessionAndSavesTheFile(int reasonNumber)
+    public void AStopFromTheTrayOrTheTimeLimitStopsTheSessionAndSavesTheFile(int reasonNumber)
     {
-        var reason = (TraceStopReason)reasonNumber;
-        var (outcome, _, _, runner, _) = Run((_, s, _) => s.Reason = reason);
+        var (outcome, _, _, runner, _) = Run((_, s, _) => s.Reason = (TraceStopReason)reasonNumber);
 
-        Assert.AreEqual(reason == TraceStopReason.TrayExited ? TraceOutcome.SavedInPlace : TraceOutcome.Saved, outcome);
+        Assert.AreEqual(TraceOutcome.Saved, outcome);
         Assert.IsTrue(runner.Calls.Any(c => c.StartsWith("-stop ", StringComparison.Ordinal)));
     }
 
+    // Exit, a sign-out or a crash of the tray during a recording: nobody would collect a file, which holds addresses and maybe
+    // pairing keys. Before, the trace was saved and left in the administrators-only folder with nobody told.
     [TestMethod]
-    public void WhenTheTrayExitedTheFileStaysForThePersonAndNobodyIsWaitedFor()
+    public void WhenTheTrayExitsTheSessionIsCancelledNothingIsSavedAndTheFolderIsGone()
     {
-        var (_, machine, signals, _, log) = Run((_, s, _) => s.Reason = TraceStopReason.TrayExited);
+        var (outcome, machine, signals, runner, log) = Run((_, s, _) => s.Reason = TraceStopReason.TrayExited);
 
+        Assert.AreEqual(TraceOutcome.Discarded, outcome);
+        Assert.IsFalse(runner.Calls.Any(c => c.StartsWith("-stop ", StringComparison.Ordinal)), "Nothing is saved.");
+        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[^1]);
         CollectionAssert.DoesNotContain(signals.Calls, "wait copied");
-        Assert.IsFalse(machine.FolderDeleted, "The only copy is in the private folder.");
-        Assert.IsTrue(log.Has(LogLevel.Info, @"C:\ProgramData\Earshot\trace\" + Nonce));
+        Assert.IsTrue(machine.FolderDeleted);
+        Assert.IsTrue(log.Has(LogLevel.Info, "the tray exited, so the recording was cancelled"));
+        Assert.AreEqual(ExitCodes.Ok, TraceHelper.ExitCodeFor(outcome));
+    }
+
+    [TestMethod]
+    public void AStartThatTimesOutIsCancelledSoNothingIsLeftRecording()
+    {
+        var (outcome, _, _, runner, _) = Run((_, _, r) => r.Respond = a => a[0] == "-start"
+            ? new ProcessRun(true, -1, true, "", null)
+            : new ProcessRun(true, 0, false, "", null));
+
+        Assert.AreEqual(TraceOutcome.StartFailed, outcome);
+        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[^1]);
     }
 
     [TestMethod]
@@ -314,13 +329,14 @@ public sealed class TraceHelperTests
     }
 
     [TestMethod]
-    public void ATrayThatNeverSaysItCopiedTheFileLeavesTheFileWhereItIs()
+    public void ATrayThatNeverSaysItCopiedTheFileHasItsCopyDeletedAfterTheWait()
     {
-        var (outcome, machine, _, _, log) = Run((_, s, _) => s.CopiedSet = false);
+        var (outcome, machine, signals, _, log) = Run((_, s, _) => s.CopiedSet = false);
 
         Assert.AreEqual(TraceOutcome.Saved, outcome);
-        Assert.IsFalse(machine.FolderDeleted, "The only copy must not be deleted.");
-        Assert.IsTrue(log.Has(LogLevel.Warn, "not copied"));
+        CollectionAssert.Contains(signals.Calls, "wait copied");
+        Assert.IsTrue(machine.FolderDeleted, "Nobody will collect it, so it is not left holding addresses.");
+        Assert.IsTrue(log.Has(LogLevel.Warn, "nobody took the file"));
     }
 
     [TestMethod]

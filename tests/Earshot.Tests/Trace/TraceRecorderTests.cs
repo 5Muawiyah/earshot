@@ -55,9 +55,18 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     public string? ResultText { get; set; }
     public string? CopyProblem { get; set; }
     public string? Marker { get; set; }
+    public string? Untrusted { get; set; }
+    public int Leftovers { get; set; }
     public HashSet<int> Alive { get; } = [];
     public List<string> Calls { get; } = [];
-    public string? ReadResult(string nonce) => ResultText;
+    public string? TrustProblem() => Untrusted;
+    public int LeftoverRunFolders() => Leftovers;
+
+    public string? ReadResult(string nonce)
+    {
+        Calls.Add("read result");
+        return ResultText;
+    }
 
     public string? Copy(string nonce, string fileName, string destinationFolder, out string copiedTo)
     {
@@ -209,7 +218,7 @@ public sealed class TraceRecorderTests
     }
 
     [TestMethod]
-    public async Task ACopyThatFailsLeavesTheFileWithTheHelperAndSaysWhere()
+    public async Task ACopyThatFailsSaysSoAndLetsTheHelperDeleteItsCopyAtOnce()
     {
         var rig = new Rig();
         rig.Files.CopyProblem = "disk full";
@@ -222,8 +231,8 @@ public sealed class TraceRecorderTests
         TraceResult result = await run;
 
         Assert.AreEqual(TraceOutcome.SetupFailed, result.Outcome);
-        Assert.IsFalse(rig.Factory.Signals.CopiedSet, "The helper must not delete the only copy.");
-        StringAssert.Contains(result.Message, "disk full");
+        Assert.IsTrue(rig.Factory.Signals.CopiedSet, "Nobody can read the helper's copy where it is, so the helper is told to delete it now.");
+        Assert.AreEqual(TraceCopy.NotKept(Destination, "disk full"), result.Message);
     }
 
     [TestMethod]
@@ -238,8 +247,40 @@ public sealed class TraceRecorderTests
 
         Assert.AreEqual(TraceOutcome.Declined, result.Outcome);
         Assert.AreEqual(TraceCopy.Declined, result.Message);
-        Assert.AreEqual(0, rig.Files.Calls.Count);
+        Assert.IsFalse(rig.Files.Calls.Any(c => c.StartsWith("copy ", StringComparison.Ordinal)));
         Assert.AreEqual(TraceState.Idle, rig.Recorder.State);
+    }
+
+    // A result in a folder a standard user could have written is not believed: it could name a file of their choosing.
+    [TestMethod]
+    public async Task AResultInAnUntrustedFolderIsNotReadAndNothingIsCopied()
+    {
+        var rig = new Rig();
+        rig.Files.Untrusted = "the trace folder is owned by a user";
+        Task<TraceResult> run = rig.Recorder.RecordAsync(CancellationToken.None);
+        await Rig.Until(() => rig.Calls.Count >= 2);
+        rig.Files.ResultText = Saved;
+        rig.Factory.Signals.Finish();
+        rig.Launcher.Completion.SetResult(new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0)));
+
+        TraceResult result = await run;
+
+        Assert.AreEqual(TraceOutcome.HelperFailed, result.Outcome);
+        Assert.AreEqual(TraceCopy.Untrusted, result.Message);
+        CollectionAssert.DoesNotContain(rig.Files.Calls, "read result");
+        Assert.IsFalse(rig.Files.Calls.Any(c => c.StartsWith("copy ", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void RunFoldersLeftByEarlierRecordingsAreSaidAtStart()
+    {
+        var rig = new Rig();
+        Assert.IsNull(rig.Recorder.LeftoverNotice());
+
+        rig.Files.Leftovers = 2;
+
+        Assert.AreEqual(TraceCopy.Leftover(2), rig.Recorder.LeftoverNotice());
+        StringAssert.Contains(TraceCopy.Leftover(2), "2 earlier Bluetooth trace folder");
     }
 
     [TestMethod]
@@ -363,7 +404,7 @@ public sealed class TraceRecorderTests
     [TestMethod]
     public void TheWordsAreBritishPlainAndHaveNoEmDashes()
     {
-        foreach (string text in new[] { TraceCopy.SavedIn(Destination), TraceCopy.Note, TraceCopy.NoteButton, TraceCopy.SetUpFirst, TraceCopy.AdminCopyKept, TraceCopy.Running, TraceCopy.Declined, TraceCopy.StillRunning, TraceCopy.WprMissing, TraceCopy.SafeMode, TraceCopy.StopButton, TraceCopy.StartButton })
+        foreach (string text in new[] { TraceCopy.SavedIn(Destination), TraceCopy.NoteFor(Destination), TraceCopy.NoteButton, TraceCopy.SetUpFirst, TraceCopy.AdminCopyKept, TraceCopy.Untrusted, TraceCopy.NotKept(Destination, "x"), TraceCopy.Leftover(1), TraceCopy.Running, TraceCopy.Declined, TraceCopy.StillRunning, TraceCopy.WprMissing, TraceCopy.SafeMode, TraceCopy.StopButton, TraceCopy.StartButton })
         {
             Assert.IsFalse(text.Contains((char)0x2014), text);
         }
@@ -372,10 +413,11 @@ public sealed class TraceRecorderTests
         Same("Stop", TraceCopy.StopButton);
         Same("Record a Bluetooth trace", TraceCopy.StartButton);
         Same(
-            "A Bluetooth trace holds the Bluetooth addresses of your devices and may hold pairing keys. Earshot never sends it anywhere. Share it only with someone you trust, and delete it when you're done.",
-            TraceCopy.Note);
+            "A Bluetooth trace holds the Bluetooth addresses of your devices and may hold pairing keys. It is saved in " + Destination +
+            ". Earshot never sends it anywhere. Share it only with someone you trust, and delete it when you're done.",
+            TraceCopy.NoteFor(Destination));
         Same("Record", TraceCopy.NoteButton);
-        Same("Set up Earshot first, then record a Bluetooth trace.", TraceCopy.SetUpFirst);
+        Same("Set up or update Earshot first, then record a Bluetooth trace.", TraceCopy.SetUpFirst);
     }
 
     // The words are pinned on purpose; this keeps the analyser from reading a pin as a mistake.

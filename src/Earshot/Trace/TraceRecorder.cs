@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Earshot.Boot;
+using Earshot.Boot.Gate;
 using Earshot.Contracts;
 
 namespace Earshot.Tracing;
@@ -16,6 +17,9 @@ internal interface ITraceRecorder : IDisposable
     // up Earshot first.
     bool NeedsSetUp { get; }
 
+    // Where a saved trace is copied, for the note shown before recording.
+    string DestinationFolder { get; }
+
     // Asks for the prompt, records until Stop (or ten minutes, or the tray exiting), copies the trace to
     // %LOCALAPPDATA%\Earshot\traces and opens the folder. Never throws for an outcome; the result says what happened.
     Task<TraceResult> RecordAsync(CancellationToken ct);
@@ -24,6 +28,9 @@ internal interface ITraceRecorder : IDisposable
 
     // The notice to show when an earlier helper died with a session open, or null.
     string? StillRunningNotice();
+
+    // The notice to show when run folders of earlier recordings are still under ProgramData, or null.
+    string? LeftoverNotice();
 }
 
 // InstalledExecutable: %ProgramFiles%\Earshot\Earshot.exe when it is there, otherwise null. Only that copy is ever raised: a copy
@@ -34,6 +41,13 @@ internal sealed record TraceRecorderOptions(bool SafeMode, Func<string?> Install
 // The tray's side of the user-visible files.
 internal interface ITraceUserFiles
 {
+    // Null when %ProgramData%\Earshot and its trace folder pass the machine folder's check and no folder on the way is a reparse
+    // point, so only an administrator can have made what is in them; otherwise why not. Checked before a result is read.
+    string? TrustProblem();
+
+    // How many run folders of earlier recordings the trace folder holds.
+    int LeftoverRunFolders();
+
     string? ReadResult(string nonce);
 
     // Copies the saved trace to destinationFolder (made if missing). Null when copied; otherwise why not.
@@ -82,6 +96,8 @@ internal sealed class TraceRecorder : ITraceRecorder
     }
 
     public bool NeedsSetUp => _options.InstalledExecutable() is null;
+
+    public string DestinationFolder => _options.DestinationFolder;
 
     public async Task<TraceResult> RecordAsync(CancellationToken ct)
     {
@@ -158,6 +174,16 @@ internal sealed class TraceRecorder : ITraceRecorder
             }
         }
 
+        // A result is only believed from a folder nobody but an administrator can have written into.
+        if (_files.TrustProblem() is { } untrusted)
+        {
+            _log.Warn("trace: the trace folder is not trusted, so no result was read from it: " + untrusted);
+            signals.SetCopied();
+            ElevatedRun refused = await helper.ConfigureAwait(false);
+            _log.Info("trace: the helper ended" + ExitText(refused) + ".");
+            return Fail(TraceOutcome.HelperFailed, TraceCopy.Untrusted);
+        }
+
         string? text = _files.ReadResult(nonce);
         if (!TraceResultFile.TryParse(text, out TraceResultFile? result) || result is null)
         {
@@ -196,10 +222,11 @@ internal sealed class TraceRecorder : ITraceRecorder
                 string? problem = _files.Copy(nonce, result.FileName, destination, out string copiedTo);
                 if (problem is not null)
                 {
-                    // The helper keeps its copy: it is only deleted once the tray says it is finished with it.
+                    // Nobody could read the helper's copy where it is (only administrators can open that folder), so the helper is
+                    // told at once to delete it, rather than wait and leave a file holding addresses and maybe pairing keys.
                     _log.Warn("trace: the saved trace could not be copied: " + problem);
-                    return Task.FromResult(Fail(TraceOutcome.SetupFailed,
-                        "The trace was recorded but could not be copied to " + destination + " (" + problem + "). It is still in the Earshot folder under ProgramData, which only administrators can open."));
+                    signals.SetCopied();
+                    return Task.FromResult(Fail(TraceOutcome.SetupFailed, TraceCopy.NotKept(destination, problem)));
                 }
 
                 signals.SetCopied();
@@ -272,6 +299,12 @@ internal sealed class TraceRecorder : ITraceRecorder
         return _files.ProcessAlive(marker.HelperPid) ? null : TraceCopy.StillRunning;
     }
 
+    public string? LeftoverNotice()
+    {
+        int count = _files.LeftoverRunFolders();
+        return count > 0 ? TraceCopy.Leftover(count) : null;
+    }
+
     public void Dispose()
     {
         lock (_gate)
@@ -289,11 +322,61 @@ internal sealed class TraceRecorder : ITraceRecorder
 internal sealed class TraceUserFiles : ITraceUserFiles
 {
     private readonly string _traceFolder;
+    private readonly IFolderSecurity _folders;
+    private readonly ILog _log;
 
-    public TraceUserFiles(string traceFolder)
+    public TraceUserFiles(string traceFolder, IFolderSecurity folders, ILog log)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(traceFolder);
+        ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(log);
         _traceFolder = traceFolder;
+        _folders = folders;
+        _log = log;
+    }
+
+    private static string Describe(Exception ex) =>
+        ex.GetType().Name + " (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message;
+
+    public string? TrustProblem()
+    {
+        string machine = Path.GetDirectoryName(Path.GetFullPath(_traceFolder)) ?? _traceFolder;
+        if (TraceMachine.FirstReparsePoint(_traceFolder) is { } linked)
+        {
+            return linked + " is a reparse point.";
+        }
+
+        foreach (string folder in new[] { machine, _traceFolder })
+        {
+            StepOutcome read = _folders.ReadSddl(folder, out string? sddl);
+            if (!read.Ok)
+            {
+                return read.Step + " " + read.CodeName + ": " + read.Detail;
+            }
+
+            IReadOnlyList<string> problems = AclCheck.CheckMachineFolder(sddl);
+            if (problems.Count > 0)
+            {
+                return folder + ": " + string.Join(" ", problems);
+            }
+        }
+
+        return null;
+    }
+
+    public int LeftoverRunFolders()
+    {
+        try
+        {
+            return Directory.Exists(_traceFolder)
+                ? Directory.EnumerateDirectories(_traceFolder).Count(d => BoundaryValidation.IsNonce(Path.GetFileName(d)))
+                : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            _log.Warn("trace: the trace folder could not be listed: " + Describe(ex));
+            return 0;
+        }
     }
 
     private string RunFolder(string nonce)
@@ -314,7 +397,7 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Trace.WriteLine("Earshot trace: the result could not be read: " + ex.Message);
+            _log.Warn("trace: the result could not be read: " + Describe(ex));
             return null;
         }
     }
@@ -336,15 +419,23 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            return ex.Message;
+            return Describe(ex);
         }
     }
 
+    // The trace is already saved when this runs, so a folder window that does not open is logged and nothing more.
     public void OpenFolder(string folder)
     {
         var info = new ProcessStartInfo("explorer.exe") { UseShellExecute = false };
         info.ArgumentList.Add(folder);
-        using Process? started = Process.Start(info);
+        try
+        {
+            using Process? started = Process.Start(info);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            _log.Warn("trace: the folder window could not be opened: " + Describe(ex));
+        }
     }
 
     public string? ReadMarker()
@@ -363,7 +454,7 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Trace.WriteLine("Earshot trace: the marker could not be read: " + ex.Message);
+            _log.Warn("trace: the marker could not be read: " + Describe(ex));
             return null;
         }
     }
@@ -381,6 +472,13 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         }
         catch (InvalidOperationException)
         {
+            return false;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            // A process this user may not query, such as another account's or a protected one that reused the id. The helper
+            // that wrote the marker ran as an administrator of this session, so a process that cannot be queried is not it.
+            _log.Warn("trace: process " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " could not be queried (" + Describe(ex) + "), so it counts as gone.");
             return false;
         }
     }

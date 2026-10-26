@@ -90,7 +90,7 @@ public sealed class TraceRealTests
         using Process sleeper = StartSleeper();
         try
         {
-            using var helper = new TraceSignals(new TraceRequest(sleeper.Id, nonce));
+            using var helper = new TraceSignals(new TraceRequest(sleeper.Id, nonce), new CapturingLog());
             Assert.IsNull(helper.Open());
             Assert.IsTrue(helper.TrayRunning());
 
@@ -112,7 +112,7 @@ public sealed class TraceRealTests
         string nonce = NewNonce();
         using var tray = TrayTraceSignals.Create(nonce);
         using Process sleeper = StartSleeper();
-        using var helper = new TraceSignals(new TraceRequest(sleeper.Id, nonce));
+        using var helper = new TraceSignals(new TraceRequest(sleeper.Id, nonce), new CapturingLog());
         Assert.IsNull(helper.Open());
 
         sleeper.Kill(entireProcessTree: true);
@@ -127,7 +127,7 @@ public sealed class TraceRealTests
     {
         string nonce = NewNonce();
         using var tray = TrayTraceSignals.Create(nonce);
-        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, nonce));
+        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, nonce), new CapturingLog());
         Assert.IsNull(helper.Open());
 
         helper.SignalDone();
@@ -150,7 +150,7 @@ public sealed class TraceRealTests
     [TestMethod]
     public void AHelperWithNoEventsFromTheTrayOpensNothing()
     {
-        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, NewNonce()));
+        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, NewNonce()), new CapturingLog());
 
         Assert.IsNotNull(helper.Open());
     }
@@ -173,7 +173,7 @@ public sealed class TraceRealTests
         Directory.CreateDirectory(run);
         File.WriteAllText(Path.Combine(run, "result.txt"), "outcome=Saved\nfile=bluetooth-20261025T143005Z.etl\nwpr=0\n");
         File.WriteAllText(Path.Combine(run, "bluetooth-20261025T143005Z.etl"), "trace");
-        var files = new TraceUserFiles(root.Path);
+        var files = new TraceUserFiles(root.Path, new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
         Assert.IsTrue(TraceResultFile.TryParse(files.ReadResult(nonce), out _));
         string destination = Path.Combine(root.Path, "Local", "Earshot", "traces");
@@ -188,7 +188,7 @@ public sealed class TraceRealTests
     public void AMissingResultOrMarkerReadsAsNothing()
     {
         using var root = new TempFolder();
-        var files = new TraceUserFiles(Path.Combine(root.Path, "no-such-folder"));
+        var files = new TraceUserFiles(Path.Combine(root.Path, "no-such-folder"), new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
         Assert.IsNull(files.ReadResult(NewNonce()));
         Assert.IsNull(files.ReadMarker());
@@ -197,10 +197,42 @@ public sealed class TraceRealTests
     [TestMethod]
     public void AProcessThatIsRunningIsAliveAndOneThatIsNotIsNot()
     {
-        var files = new TraceUserFiles(Path.GetTempPath());
+        var files = new TraceUserFiles(Path.GetTempPath(), new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
         Assert.IsTrue(files.ProcessAlive(Environment.ProcessId));
         Assert.IsFalse(files.ProcessAlive(int.MaxValue - 7));
+    }
+
+    // The helper may be another account than the tray, so the events grant Administrators wait and set, not only the token's
+    // default owner.
+    [TestMethod]
+    public void TheTraysEventsLetAdministratorsWaitAndSet()
+    {
+        string nonce = NewNonce();
+        using var tray = TrayTraceSignals.Create(nonce);
+        using EventWaitHandle stop = EventWaitHandleAcl.OpenExisting(TraceEventNames.Stop(nonce), EventWaitHandleRights.ReadPermissions);
+
+        AuthorizationRuleCollection rules = stop.GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier));
+        var administrators = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        EventWaitHandleRights granted = rules.OfType<EventWaitHandleAccessRule>()
+            .Where(r => r.IdentityReference.Equals(administrators) && r.AccessControlType == AccessControlType.Allow)
+            .Aggregate((EventWaitHandleRights)0, (all, r) => all | r.EventWaitHandleRights);
+        Assert.IsTrue(granted.HasFlag(EventWaitHandleRights.Synchronize | EventWaitHandleRights.Modify), granted.ToString());
+    }
+
+    // A trace folder made the ordinary way inherits from its parent, so the tray does not believe a result read from it.
+    [TestMethod]
+    public void AnOrdinaryTraceFolderIsNotTrustedAndNonceFoldersInItAreCountedAsLeftovers()
+    {
+        using var root = new TempFolder();
+        string trace = Path.Combine(root.Path, "Earshot", "trace");
+        Directory.CreateDirectory(Path.Combine(trace, NewNonce()));
+        Directory.CreateDirectory(Path.Combine(trace, "not-a-run"));
+        var log = new CapturingLog();
+        var files = new TraceUserFiles(trace, new Boot.Gate.NtfsFolderSecurity(), log);
+
+        Assert.IsNotNull(files.TrustProblem());
+        Assert.AreEqual(1, files.LeftoverRunFolders());
     }
 
     [TestMethod]

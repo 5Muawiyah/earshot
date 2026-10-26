@@ -56,9 +56,10 @@ internal interface ITraceSignals
 //
 //   trace <tray pid> <nonce>
 //
-// It starts the Bluetooth stack's verbose Windows Performance Recorder profile, waits for the tray to say stop (or for the
-// tray to exit, or for ten minutes), saves the trace into a folder only administrators can open, lets the tray's user read
-// the file, and waits for the tray to copy it before it deletes its own copy. It never writes into a folder the user can
+// It starts the Bluetooth stack's verbose Windows Performance Recorder profile, waits for the tray to say stop (or for ten
+// minutes), saves the trace into a folder only administrators can open, lets the tray's user read the file, and deletes its own
+// copy once the tray has copied it, or after a wait when the tray never says so. A tray that exits while recording ends the
+// session with nothing saved. It never writes into a folder the user can
 // change, and it changes no device, service or pairing.
 internal static class TraceHelper
 {
@@ -125,24 +126,24 @@ internal static class TraceHelper
 
         if (leaveFolder)
         {
-            log.Info("trace: the file is in " + runFolder + " (administrators only). The tray did not take it.");
+            log.Info("trace: the file is in " + runFolder + " (administrators only), because it could not be made readable. The tray says so.");
             return outcome;
         }
 
-        // The tray reads the result, copies the file if there is one, and says so. Only then is the run folder deleted. A folder
-        // that stays holds a copy of the trace, so the run ends with its own exit code and the tray tells the person.
-        if (signals.WaitCopied(CopyWait))
+        // The tray reads the result, copies the file if there is one, and says so; the run folder is deleted then. A tray that
+        // never says so is gone, and nobody will collect the file, so it is deleted too rather than left holding addresses and
+        // maybe pairing keys. A discarded run has nothing for the tray to take. A folder that cannot be deleted holds a copy of
+        // the trace, so the run ends with its own exit code and the tray tells the person.
+        if (outcome != TraceOutcome.Discarded && !signals.WaitCopied(CopyWait))
         {
-            string? deleteProblem = machine.DeleteRunFolder(runFolder);
-            if (deleteProblem is not null)
-            {
-                log.Warn("trace: the run folder was not deleted: " + deleteProblem);
-                return fileName.Length > 0 ? TraceOutcome.CopyKept : outcome;
-            }
+            log.Warn("trace: the tray did not say it was finished within " + CopyWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s, so nobody took the file and it is deleted.");
         }
-        else
+
+        string? deleteProblem = machine.DeleteRunFolder(runFolder);
+        if (deleteProblem is not null)
         {
-            log.Warn("trace: the tray did not say it was finished within " + CopyWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s, so the folder was left in place (the file was not copied): " + runFolder);
+            log.Warn("trace: the run folder was not deleted: " + deleteProblem);
+            return fileName.Length > 0 ? TraceOutcome.CopyKept : outcome;
         }
 
         return outcome;
@@ -203,6 +204,14 @@ internal static class TraceHelper
         {
             wprCode = start.ExitCode;
             log.Warn("trace: wpr -start failed: " + Describe(start));
+
+            // A start that was killed at its limit may still have started the session, which must not be left recording.
+            if (start.TimedOut || !start.Started)
+            {
+                ProcessRun cancelAfterStart = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
+                log.Info("trace: wpr -cancel after the failed start " + Describe(cancelAfterStart));
+            }
+
             _ = machine.DeleteFile(markerPath);
             return TraceOutcome.StartFailed;
         }
@@ -210,6 +219,15 @@ internal static class TraceHelper
         log.Info("trace: recording. wpr -start " + Describe(start));
         TraceStopReason reason = signals.WaitForStop(MaxRecording);
         log.Info("trace: stopping because " + reason + ".");
+
+        // The tray is gone, so nobody would collect a file: the session is cancelled and nothing is written.
+        if (reason == TraceStopReason.TrayExited)
+        {
+            ProcessRun discard = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
+            log.Info("trace: the tray exited, so the recording was cancelled. wpr -cancel " + Describe(discard));
+            _ = machine.DeleteFile(markerPath);
+            return TraceOutcome.Discarded;
+        }
 
         fileName = "bluetooth-" + utcNow().ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + ".etl";
         string etlPath = Path.Combine(runFolder, fileName);
@@ -239,18 +257,12 @@ internal static class TraceHelper
             return TraceOutcome.SavedInPlace;
         }
 
-        if (reason == TraceStopReason.TrayExited)
-        {
-            leaveFolder = true;
-            return TraceOutcome.SavedInPlace;
-        }
-
         return TraceOutcome.Saved;
     }
 
     public static int ExitCodeFor(TraceOutcome outcome) => outcome switch
     {
-        TraceOutcome.Saved or TraceOutcome.SavedInPlace => ExitCodes.Ok,
+        TraceOutcome.Saved or TraceOutcome.SavedInPlace or TraceOutcome.Discarded => ExitCodes.Ok,
         TraceOutcome.CopyKept => ExitCodes.IoError,
         TraceOutcome.Refused => ExitCodes.Refused,
         TraceOutcome.WprMissing => ExitCodes.Unavailable,

@@ -218,7 +218,7 @@ internal sealed class TraceMachine : ITraceMachine
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException or ArgumentException or SecurityException)
         {
-            return path + ": " + ex.Message;
+            return path + ": " + Describe(ex);
         }
     }
 }

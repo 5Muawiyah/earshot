@@ -370,9 +370,16 @@ try
                 $traceStart = (Get-Date).ToUniversalTime()
                 Wait-Owner -Run $run -Text 'Open Earshot settings and choose Record a Bluetooth trace. Allow the Windows permission prompt once. Wait about ten seconds, then press Stop. Wait for the card to say where it saved the trace, then come back here.'
                 $recording = Get-LogMatches -Pattern 'Bluetooth trace: ' -Regex 'Bluetooth trace: recording\.' -Since $traceStart
-                $saved = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: (Saved|SavedInPlace)\.' -Since $traceStart
+                # Saved only: SavedInPlace means the file stayed where only administrators can open it, so the person was not handed it.
+                $saved = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: Saved\.' -Since $traceStart
                 $ended = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: [A-Za-z]+\.' -Since $traceStart
-                if (@($recording).Count -gt 0 -and @($saved).Count -gt 0) { $o = 'pass'; $w = 'the trace recorded and ended saved' }
+                # The file itself, in the folder the person is shown: a non-empty .etl written since the recording started.
+                $traceFolder = Join-Path (Join-Path $env:LOCALAPPDATA 'Earshot') 'traces'
+                $traceFiles = @()
+                if (Test-Path -LiteralPath $traceFolder) { $traceFiles = @(Get-ChildItem -LiteralPath $traceFolder -Filter '*.etl' -File | Where-Object { $_.Length -gt 0 -and $_.LastWriteTimeUtc -ge $traceStart }) }
+                Add-Finding -Run $run -Name 'traceFilesSaved' -Value $traceFiles.Count
+                if (@($recording).Count -gt 0 -and @($saved).Count -gt 0 -and $traceFiles.Count -gt 0) { $o = 'pass'; $w = 'the trace recorded, ended saved, and its file is in ' + $traceFolder }
+                elseif (@($recording).Count -gt 0 -and @($saved).Count -gt 0) { $o = 'fail'; $w = 'the log says saved, but no new non-empty trace file is in ' + $traceFolder }
                 elseif (@($ended).Count -gt 0) { $o = 'fail'; $w = 'the trace ended without being saved: ' + ([string]@($ended)[0] -replace '^.*?(Bluetooth trace ended: )', '$1') }
                 else { $o = 'fail'; $w = 'no line says the trace ended' }
                 Add-Criterion -Run $run -Id 'trace-saved' -Criterion 'The Bluetooth trace recorded and was saved.' -Outcome $o -Detail ([string]$w + '.')

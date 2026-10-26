@@ -448,6 +448,17 @@ function New-FakeSandbox
 
     foreach ($folder in $folders) { New-Item -ItemType Directory -Force -Path $folder | Out-Null }
 
+    # Test 24's saved trace, in the folder the tray copies it to, stamped ahead of now like the log lines, for every case whose
+    # log says the trace was saved.
+    if ($items -gt 0)
+    {
+        $traces = Join-Path (Join-Path $local 'Earshot') 'traces'
+        New-Item -ItemType Directory -Force -Path $traces | Out-Null
+        $etl = Join-Path $traces 'bluetooth-20261026T020000Z.etl'
+        [System.IO.File]::WriteAllText($etl, 'trace')
+        (Get-Item -LiteralPath $etl).LastWriteTimeUtc = (Get-Date).ToUniversalTime().AddHours(1)
+    }
+
     # The log lines are stamped an hour ahead of now. Several scripts read the log with
     # -SinceUtc set from a time they take part way through the run, and a line stamped when the
     # sandbox was built would be dropped by that filter, which would hide the very counts this

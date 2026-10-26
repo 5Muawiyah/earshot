@@ -60,7 +60,7 @@ internal static class FixConnection
 
     public const string PlanOnlyNote = "Nothing was changed. Earshot asks on the screen before it changes anything, so run Fix connection where a person can answer.";
 
-    public const string SetUpFirstNote = "Set up Earshot first. Fix connection makes its changes through the installed copy, so nothing was changed.";
+    public const string SetUpFirstNote = "Set up or update Earshot first. Fix connection makes its changes through the installed copy, so nothing was changed.";
 
     public const string RecordTraceButton = "Record a Bluetooth trace";
 
