@@ -80,6 +80,14 @@ internal sealed partial class TrayContext
     internal void RecordTraceFromFixResult()
     {
         _log.Info("Bluetooth trace: asked for from a Fix connection result.");
+
+        // The result's button asks for a trace; it is not the row's switch, so it never stops one that is running.
+        if (_traceRecorder is { State: TraceState.Recording })
+        {
+            ShowCard(TrayStatus.AppName, TraceCopy.AlreadyRecording, CardPlace.NearTray);
+            return;
+        }
+
         StartTrace(CardPlace.NearTray);
     }
 

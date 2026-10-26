@@ -137,10 +137,10 @@ public sealed class TraceHelperTests
 
         Assert.AreEqual(TraceOutcome.Saved, outcome);
         Assert.AreEqual(3, runner.Calls.Count);
-        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[0]);
+        Assert.AreEqual("-cancel -instancename " + WprCommand.InstanceName, runner.Calls[0]);
         StringAssert.StartsWith(runner.Calls[1], "-start ");
-        StringAssert.EndsWith(runner.Calls[1], @"BluetoothStack.wprp!BluetoothStack.Verbose -filemode -recordtempto C:\ProgramData\Earshot\trace\" + Nonce + " -instancename EarshotBluetoothTrace");
-        Assert.AreEqual(@"-stop C:\ProgramData\Earshot\trace\" + Nonce + @"\bluetooth-20261025T143005Z.etl -instancename EarshotBluetoothTrace", runner.Calls[2]);
+        StringAssert.EndsWith(runner.Calls[1], @"BluetoothStack.wprp!BluetoothStack.Verbose -filemode -recordtempto C:\ProgramData\Earshot\trace\" + Nonce + " -instancename " + WprCommand.InstanceName);
+        Assert.AreEqual(@"-stop C:\ProgramData\Earshot\trace\" + Nonce + @"\bluetooth-20261025T143005Z.etl -instancename " + WprCommand.InstanceName, runner.Calls[2]);
         CollectionAssert.AreEqual(ExpectedSignalOrder, signals.Calls);
         Assert.IsTrue(machine.FolderDeleted);
     }
@@ -260,7 +260,7 @@ public sealed class TraceHelperTests
 
         Assert.AreEqual(TraceOutcome.Discarded, outcome);
         Assert.IsFalse(runner.Calls.Any(c => c.StartsWith("-stop ", StringComparison.Ordinal)), "Nothing is saved.");
-        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[^1]);
+        Assert.AreEqual("-cancel -instancename " + WprCommand.InstanceName, runner.Calls[^1]);
         CollectionAssert.DoesNotContain(signals.Calls, "wait copied");
         Assert.IsTrue(machine.FolderDeleted);
         Assert.IsTrue(log.Has(LogLevel.Info, "the tray exited, so the recording was cancelled"));
@@ -275,7 +275,7 @@ public sealed class TraceHelperTests
             : new ProcessRun(true, 0, false, "", null));
 
         Assert.AreEqual(TraceOutcome.StartFailed, outcome);
-        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[^1]);
+        Assert.AreEqual("-cancel -instancename " + WprCommand.InstanceName, runner.Calls[^1]);
     }
 
     [TestMethod]
@@ -306,7 +306,7 @@ public sealed class TraceHelperTests
             : new ProcessRun(true, 0, false, "", null));
 
         Assert.AreEqual(TraceOutcome.StopFailed, outcome);
-        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[^1]);
+        Assert.AreEqual("-cancel -instancename " + WprCommand.InstanceName, runner.Calls[^1]);
         CollectionAssert.Contains(signals.Calls, "done");
     }
 

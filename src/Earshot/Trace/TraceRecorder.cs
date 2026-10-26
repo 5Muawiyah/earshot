@@ -134,8 +134,8 @@ internal sealed class TraceRecorder : ITraceRecorder
         }
         catch (OperationCanceledException)
         {
-            // The caller gave up. The helper is asked to stop and save, so nothing is left recording.
-            signals.RequestStop();
+            // Earshot is closing. The helper is not asked to stop and save: it watches the tray process, and when that ends it
+            // cancels the session with nothing saved, which is what Exit does to a recording.
             return Fail(TraceOutcome.Refused, "The recording was cancelled.");
         }
         finally
@@ -144,9 +144,9 @@ internal sealed class TraceRecorder : ITraceRecorder
             {
                 _signals = null;
                 _state = TraceState.Idle;
+                signals.Dispose();
             }
 
-            signals.Dispose();
             StateChanged?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -155,7 +155,10 @@ internal sealed class TraceRecorder : ITraceRecorder
     {
         string arguments = TraceRequest.Verb + " " + _options.TrayPid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " + nonce;
         _log.Info("trace: asking for the administrator prompt.");
-        Task<ElevatedRun> helper = _launcher.RunAsync(executable, arguments, ct);
+
+        // ShellExecute with the runas verb returns once the prompt is answered, so it is started away from the caller's thread
+        // (the tray's UI thread), which stays free while the prompt is up.
+        Task<ElevatedRun> helper = Task.Run(() => _launcher.RunAsync(executable, arguments, ct), CancellationToken.None);
         using var waitCancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
         Task<bool> done = Task.Run(() => signals.WaitDone(waitCancel.Token), CancellationToken.None);
 
@@ -278,15 +281,14 @@ internal sealed class TraceRecorder : ITraceRecorder
         return new TraceResult(outcome, message, null, null);
     }
 
+    // Under the lock, because the run's own end disposes the signals under it after it has let go of them: a press of Stop as
+    // the run ends either reaches signals that are still there or finds none.
     public void Stop()
     {
-        ITrayTraceSignals? signals;
         lock (_gate)
         {
-            signals = _signals;
+            _signals?.RequestStop();
         }
-
-        signals?.RequestStop();
     }
 
     public string? StillRunningNotice()
@@ -307,13 +309,12 @@ internal sealed class TraceRecorder : ITraceRecorder
 
     public void Dispose()
     {
+        // A recording does not outlive the tray that asked for it: the helper watches the tray process and, when it ends, cancels
+        // the session with nothing saved. It is not asked to stop here, which would save a file nobody collects.
         lock (_gate)
         {
             _disposed = true;
         }
-
-        // A recording must not outlive the tray that asked for it.
-        Stop();
     }
 }
 

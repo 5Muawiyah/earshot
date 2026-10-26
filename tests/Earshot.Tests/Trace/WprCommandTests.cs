@@ -13,11 +13,11 @@ public sealed class WprCommandTests
     private static readonly string[] ExpectedStart =
     [
         "-start", @"C:\ProgramData\Earshot\trace\x\BluetoothStack.wprp!BluetoothStack.Verbose", "-filemode",
-        "-recordtempto", @"C:\ProgramData\Earshot\trace\x", "-instancename", "EarshotBluetoothTrace",
+        "-recordtempto", @"C:\ProgramData\Earshot\trace\x", "-instancename", WprCommand.InstanceName,
     ];
 
-    private static readonly string[] ExpectedStop = ["-stop", @"C:\t\a.etl", "-instancename", "EarshotBluetoothTrace"];
-    private static readonly string[] ExpectedCancel = ["-cancel", "-instancename", "EarshotBluetoothTrace"];
+    private static readonly string[] ExpectedStop = ["-stop", @"C:\t\a.etl", "-instancename", WprCommand.InstanceName];
+    private static readonly string[] ExpectedCancel = ["-cancel", "-instancename", WprCommand.InstanceName];
     private static readonly string[] ExpectedHelp = ["-help"];
 
     [TestMethod]
@@ -50,6 +50,13 @@ public sealed class WprCommandTests
             Assert.AreEqual("-instancename", line[^2], string.Join(' ', line));
             Assert.AreEqual(WprCommand.InstanceName, line[^1]);
         }
+    }
+
+    // Another signed-in user's Earshot records under its own session's name, so this session's cancel cannot end it.
+    [TestMethod]
+    public void TheInstanceNameCarriesThisSession()
+    {
+        Assert.AreEqual("EarshotBluetoothTraceS" + System.Diagnostics.Process.GetCurrentProcess().SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture), WprCommand.InstanceName);
     }
 
     [TestMethod]

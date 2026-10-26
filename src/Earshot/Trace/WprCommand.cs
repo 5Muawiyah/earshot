@@ -12,7 +12,9 @@ namespace Earshot.Tracing;
 // session must give the same name, so -stop and -cancel can only reach the session Earshot started, never another program's.
 internal static class WprCommand
 {
-    internal const string InstanceName = "EarshotBluetoothTrace";
+    // With the terminal services session in it, so a cancel before a start reaches only this session's Earshot recording, not
+    // one another signed-in user's Earshot is making.
+    internal static string InstanceName { get; } = "EarshotBluetoothTraceS" + System.Diagnostics.Process.GetCurrentProcess().SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public static string ExePath(string systemRoot)
     {

@@ -329,8 +329,9 @@ public sealed class TraceRecorderTests
         await run;
     }
 
+    // Exit: the helper is not asked to stop and save a file nobody will collect. It sees the tray process end and cancels.
     [TestMethod]
-    public async Task DisposingTheRecorderWhileItRecordsStopsTheTrace()
+    public async Task DisposingTheRecorderWhileItRecordsDoesNotAskTheHelperToSave()
     {
         var rig = new Rig();
         Task<TraceResult> run = rig.Recorder.RecordAsync(CancellationToken.None);
@@ -338,11 +339,42 @@ public sealed class TraceRecorderTests
 
         rig.Recorder.Dispose();
 
-        Assert.IsTrue(rig.Factory.Signals.StopRequested);
+        Assert.IsFalse(rig.Factory.Signals.StopRequested);
         rig.Factory.Signals.Finish();
         rig.Launcher.Completion.SetResult(new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0)));
         rig.Files.ResultText = Saved;
         await run;
+    }
+
+    // ShellExecute's runas returns once the prompt is answered. Raised on the caller's thread, it would hold the tray's UI
+    // thread for as long as the prompt is up.
+    [TestMethod]
+    public async Task ThePromptIsRaisedAwayFromTheCallersThread()
+    {
+        var calls = new List<string>();
+        using var answered = new ManualResetEventSlim();
+        var launcher = new BlockingLauncher(answered);
+        var factory = new FakeTraySignalFactory(calls);
+        var files = new FakeTraceFiles();
+        using var recorder = new TraceRecorder(new TraceRecorderOptions(false, () => Installed, Destination, 777, () => Nonce), launcher, factory, files, new CapturingLog());
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Task<TraceResult> run = recorder.RecordAsync(CancellationToken.None);
+        long returnedAfter = watch.ElapsedMilliseconds;
+        answered.Set();
+        await run;
+
+        Assert.IsLessThan(2000L, returnedAfter, "RecordAsync waited for the prompt on the caller's thread.");
+    }
+
+    private sealed class BlockingLauncher(ManualResetEventSlim answered) : IElevatedLauncher
+    {
+        // Like ShellExecute: returns only once the prompt is answered (or after five seconds here), then reports a declined prompt.
+        public Task<ElevatedRun> RunAsync(string executable, string arguments, CancellationToken ct)
+        {
+            answered.Wait(TimeSpan.FromSeconds(5), ct);
+            return Task.FromResult(new ElevatedRun(null, StepOutcomes.FromWin32("runas", 1223)));
+        }
     }
 
     [TestMethod]
