@@ -948,6 +948,33 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // Block at boot and Protect audio quality while Pair AirPods runs are refused the same way: both are gate changes that would
+    // race the run's adoption. Before, they ran.
+    [TestMethod]
+    public void GateChangesWhilePairAirPodsRunsAreRefused()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Ui.HoldPick = TimeSpan.FromSeconds(2);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            bool protectBefore = tray.Settings.Current.ProtectAudioQuality;
+            rig.Ui.OnPick = () => tray.Ui.Post(_ =>
+            {
+                tray.ClickMenu(MenuModel.BlockAtBoot);
+                tray.ClickMenu(MenuModel.ProtectAudioQuality);
+            }, null);
+
+            Click(tray);
+
+            Assert.IsFalse(tray.Block.Calls.Any(c => c.StartsWith("setboot", StringComparison.Ordinal) || c.StartsWith("protect", StringComparison.Ordinal)), string.Join(", ", tray.Block.Calls));
+            Assert.AreEqual(protectBefore, tray.Settings.Current.ProtectAudioQuality, "The setting was not flipped.");
+            Assert.AreEqual(2, tray.Cards.Shown.Count(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage), string.Join(" | ", tray.Cards.Statuses));
+        });
+    }
+
     // A refusal the gate gave just as Exit began is still the adoption's result, with its code, not Earshot closing.
     [TestMethod]
     public void AGateRefusalAsExitBeginsKeepsItsCode()

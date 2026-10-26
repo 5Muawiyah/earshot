@@ -820,6 +820,20 @@ internal sealed partial class TrayContext : ApplicationContext
         }
     }
 
+    // A Pair AirPods that runs owns the pairs and the gate until it has adopted: a switch, a Block at boot change or a protection
+    // change now would race its adoption through the gate, which could then refuse it. The person is told why nothing happened.
+    private bool RefusedWhilePairing(string action, CardPlace place)
+    {
+        if (_elevatedRun != PairRun)
+        {
+            return false;
+        }
+
+        _log.Info(action + " ignored: Pair AirPods is running.");
+        ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, place);
+        return true;
+    }
+
     // A click waits for the looks after a failed switch to end before its own request runs.
     private bool _requestAfterLooks;
 
@@ -952,12 +966,8 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        // A Pair AirPods that runs owns the pairs and the gate until it has adopted: a switch now would race its adoption, which
-        // the gate could then refuse.
-        if (_elevatedRun == PairRun)
+        if (RefusedWhilePairing("Click", place))
         {
-            _log.Info("Click ignored: Pair AirPods is running.");
-            ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, place);
             return;
         }
 
@@ -2253,7 +2263,7 @@ internal sealed partial class TrayContext : ApplicationContext
         // first raises the busy guard and starts a status read on the system worker, and a read that fails ends in
         // BlockStatusUnreadableMessage without ever reaching RunOperationAsync. While the session ends none of that
         // happens, and the owner is told why nothing was changed.
-        if (RefusedAtSessionEnd("block at boot", TrayStatus.AppName, place))
+        if (RefusedAtSessionEnd("block at boot", TrayStatus.AppName, place) || RefusedWhilePairing("Block at boot", place))
         {
             return;
         }
@@ -2339,7 +2349,7 @@ internal sealed partial class TrayContext : ApplicationContext
 
         // Before the setting is saved: a refused change must not leave the saved setting flipped with nothing
         // applied. Nothing between this check and the coordinator's own awaits, so the two cannot disagree.
-        if (RefusedAtSessionEnd("protect audio quality", TrayStatus.AppName, place))
+        if (RefusedAtSessionEnd("protect audio quality", TrayStatus.AppName, place) || RefusedWhilePairing("Protect audio quality", place))
         {
             return;
         }
