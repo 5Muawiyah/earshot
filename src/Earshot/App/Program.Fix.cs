@@ -46,6 +46,30 @@ internal static partial class Program
         }
     }
 
+    // The marker a Fix run started as administrator keeps in the machine folder, read only when that folder passes the machine
+    // folder's check, so only an administrator can have written it. Null when there is no machine folder yet (before set-up) or
+    // it did not pass, which is logged.
+    internal static FixRecovery? AdministratorsFixWindow(Paths paths, IFolderSecurity folders, TimeProvider time, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(folders);
+        ArgumentNullException.ThrowIfNull(log);
+        if (!Directory.Exists(paths.MachineFolder))
+        {
+            return null;
+        }
+
+        StepOutcome read = folders.ReadSddl(paths.MachineFolder, out string? sddl);
+        IReadOnlyList<string> problems = read.Ok ? AclCheck.CheckMachineFolder(sddl) : [read.Step + " " + read.CodeName];
+        if (problems.Count > 0)
+        {
+            log.Warn("fix: the machine folder did not pass its check, so a Fix connection marker in it is not read: " + string.Join(" ", problems));
+            return null;
+        }
+
+        return new FixRecovery(Path.Combine(paths.MachineFolder, FixWindowFileName), time, ProcessIsAlive);
+    }
+
     // The tray's own Fix run has ended. A run the lock refused changed nothing, and the run that holds the lock is still going (it
     // says when it ends), so the start checks are not run again for it: they would put the card about unprotected AirPods over
     // that run's window. The card says why it did not start instead.

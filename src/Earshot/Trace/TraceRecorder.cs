@@ -353,6 +353,14 @@ internal sealed class TraceRecorder : ITraceRecorder
         }
 
         int count = _files.LeftoverRunFolders();
+
+        // The helper refuses a trace folder that fails the machine folder's check, so none of Earshot's recordings can be in one;
+        // folders in it are not called administrators' own, or said to hold keys.
+        if (count > 0 && _files.TrustProblem() is { } untrusted)
+        {
+            _log.Warn("trace: the trace folder did not pass its check, so its " + count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " folder(s) are not reported as earlier recordings: " + untrusted);
+            return null;
+        }
         return count > 0 ? TraceCopy.Leftover(count) : null;
     }
 

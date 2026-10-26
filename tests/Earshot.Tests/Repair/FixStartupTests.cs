@@ -1,6 +1,7 @@
 using Earshot.App;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
+using Earshot.Infra;
 using Earshot.Repair;
 using Earshot.Tests.Phase4;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -96,6 +97,26 @@ public sealed class FixStartupTests
         Assert.IsFalse(window.IsOpen);
         administrators.Begin("repairing");
         Assert.IsTrue(window.IsOpen);
+    }
+
+    // The machine folder's marker is read only from a machine folder that passes its check, so a folder a standard user made
+    // cannot hold the automatic blocks back with a marker of their own. A missing folder (before set-up) is said nothing about.
+    [TestMethod]
+    public void TheAdministratorsMarkerIsReadOnlyFromATrustedMachineFolder()
+    {
+        using var temp = new TempFolder();
+        Paths paths = Paths.FromEnvironment(n => n == Paths.DataRootVariable ? temp.Path : null);
+        var log = new CapturingLog();
+
+        Assert.IsNull(Program.AdministratorsFixWindow(paths, new FakeFolderSecurity(), TimeProvider.System, log), "No machine folder yet.");
+        Assert.IsEmpty(log.Entries);
+
+        Directory.CreateDirectory(paths.MachineFolder);
+        Assert.IsNotNull(Program.AdministratorsFixWindow(paths, new FakeFolderSecurity(), TimeProvider.System, log));
+
+        var users = new FakeFolderSecurity { SddlFor = _ => "O:BUG:SYD:(A;;FA;;;BU)" };
+        Assert.IsNull(Program.AdministratorsFixWindow(paths, users, TimeProvider.System, log));
+        Assert.IsTrue(log.Entries.Any(e => e.Level == Earshot.Contracts.LogLevel.Warn), "An untrusted machine folder is logged.");
     }
 
     // The tray cannot remove a marker in the machine folder; it answers it with the block and says the next administrator run

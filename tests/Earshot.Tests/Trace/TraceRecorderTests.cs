@@ -356,6 +356,18 @@ public sealed class TraceRecorderTests
         Assert.IsFalse(TraceCopy.Leftover(2).Contains("2 earlier", StringComparison.Ordinal));
     }
 
+    // Folders in a trace folder that fails its check are not reported as administrators' own recordings: the helper never writes
+    // into such a folder, so whatever is there is not Earshot's.
+    [TestMethod]
+    public void FoldersInAnUntrustedTraceFolderAreNotReportedAsEarlierRecordings()
+    {
+        var rig = new Rig();
+        rig.Files.Leftovers = 2;
+        rig.Files.Untrusted = "the trace folder can be changed by Users";
+
+        Assert.IsNull(rig.Recorder.LeftoverNotice());
+    }
+
     // A copy cut off by Exit is left under a temporary name, never as a trace that looks whole; the start removes it.
     [TestMethod]
     public void TheStartRemovesCopiesThatWereCutOff()
