@@ -1424,21 +1424,25 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // Up while a pairing may form (here, at the pick after the scan) and down once the run has ended. While only the first
+    // question is up it is down (ThePairingFlagIsRaisedOnlyAfterLookForAirPods).
     [TestMethod]
     public void TheRunFlagTheCoordinatorReadsIsUpOnlyWhileAPairingRuns()
     {
         StaThread.Run(() =>
         {
             using var rig = new FixRig();
-            bool upDuringTheQuestion = false;
+            ArrangePairs(rig);
+            bool upDuringThePick = false;
             PairAirPodsServices services = Services(rig);
-            rig.Prompter.OnAsk = _ => upDuringTheQuestion = services.RunFlag.Active;
-            rig.Prompter.SayCancel();
+            rig.Ui.OnPick = () => upDuringThePick = services.RunFlag.Active;
+            rig.Ui.Pick = -1;
+            rig.Prompter.SayOk();
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: services);
 
             Click(tray);
 
-            Assert.IsTrue(upDuringTheQuestion);
+            Assert.IsTrue(upDuringThePick);
             Assert.IsFalse(services.RunFlag.Active);
         });
     }
