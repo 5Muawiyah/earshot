@@ -376,7 +376,7 @@ internal static partial class Program
         }
 
         return new Tracing.TraceRecorder(
-            new Tracing.TraceRecorderOptions(false, InstalledCopy(paths, File.Exists, TraceVerbSince, SetupValues.ProgramVersion), paths.UserTraceFolder, Environment.ProcessId, NewTraceNonce),
+            new Tracing.TraceRecorderOptions(false, InstalledCopy(paths, File.Exists, InstallFolderTrusted(log), TraceVerbSince, SetupValues.ProgramVersion), paths.UserTraceFolder, Environment.ProcessId, NewTraceNonce),
             new ShellRunasLauncher(), new Tracing.TrayTraceSignalsFactory(), new Tracing.TraceUserFiles(Path.Combine(paths.MachineFolder, "trace"), new NtfsFolderSecurity(), log), log);
     }
 
@@ -386,12 +386,14 @@ internal static partial class Program
     internal const string FixApplyVerbSince = "1.5.0";
 
     // The one copy of Earshot an administrator prompt may raise: %ProgramFiles%\Earshot\Earshot.exe, read each time it is asked
-    // for, or null when it is not there or reports a release older than minVersion (versionOf gives major.minor.patch, or empty
-    // when it cannot be read). Never the running copy, which may sit in a folder a standard user can change.
-    internal static Func<string?> InstalledCopy(Paths paths, Func<string, bool> fileExists, string minVersion, Func<string, string> versionOf)
+    // for, or null when it is not there, its folder fails the install folder's check (folderTrusted), or it reports a release
+    // older than minVersion (versionOf gives major.minor.patch, or empty when it cannot be read). Never the running copy, which
+    // may sit in a folder a standard user can change.
+    internal static Func<string?> InstalledCopy(Paths paths, Func<string, bool> fileExists, Func<string, bool> folderTrusted, string minVersion, Func<string, string> versionOf)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(fileExists);
+        ArgumentNullException.ThrowIfNull(folderTrusted);
         ArgumentNullException.ThrowIfNull(versionOf);
         if (!Update.ReleaseVersion.TryParse(minVersion, out Update.ReleaseVersion least))
         {
@@ -399,9 +401,26 @@ internal static partial class Program
         }
 
         string installed = paths.InstalledExe;
-        return () => fileExists(installed) && Update.ReleaseVersion.TryParse(versionOf(installed), out Update.ReleaseVersion has) && !(has < least)
+        return () => fileExists(installed) && Update.ReleaseVersion.TryParse(versionOf(installed), out Update.ReleaseVersion has) && !(has < least) && folderTrusted(installed)
             ? installed
             : null;
+    }
+
+    // The update hand-over's own check (InstalledCopy.Assess): the program is there and its folder grants write to administrators
+    // only. An installed copy in a folder a standard user can change is not raised, and why is logged.
+    internal static Func<string, bool> InstallFolderTrusted(ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        return exe =>
+        {
+            Update.InstallAssessment found = Update.InstalledCopy.Assess(exe, File.Exists, Directory.Exists, new NtfsFolderSecurity());
+            if (found.State != Update.InstallState.Usable)
+            {
+                log.Warn("The installed copy is not raised: " + found.Detail);
+            }
+
+            return found.State == Update.InstallState.Usable;
+        };
     }
 
     // 32 lower-case hex characters, from a random source: the name the tray's signals and the helper's folder share.

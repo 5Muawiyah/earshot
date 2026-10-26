@@ -1304,8 +1304,9 @@ proved on real AirPods, and both dialogs and the AI guide say so. The tests
 
 With no copy of Earshot in `%ProgramFiles%\Earshot`, a run with changes to
 make asks nothing and says to set up Earshot first: only the installed copy is
-ever raised, because a copy run from Downloads or a build folder sits where a
-standard user can change it. A run with nothing to undo needs no administrator
+ever raised, and only when its folder passes the same check the update
+hand-over makes (administrators alone can write to it), because a copy run from
+Downloads or a build folder sits where a standard user can change it. A run with nothing to undo needs no administrator
 run and goes on as before. When the re-pair found the AirPods and this PC could
 not reach them, the result has a Record a Bluetooth trace button, which asks the
 tray (a named event, `Local\Earshot.TraceRequested`) to show the same note and

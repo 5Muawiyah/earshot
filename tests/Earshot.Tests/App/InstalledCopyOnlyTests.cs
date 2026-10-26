@@ -17,7 +17,7 @@ public sealed class InstalledCopyOnlyTests
     {
         Paths paths = Real();
         bool present = false;
-        Func<string?> installed = Program.InstalledCopy(paths, path => present && path == paths.InstalledExe, "1.6.0", _ => "1.6.0");
+        Func<string?> installed = Program.InstalledCopy(paths, path => present && path == paths.InstalledExe, _ => true, "1.6.0", _ => "1.6.0");
 
         Assert.IsNull(installed(), "No installed copy: nothing to raise, and never the running copy.");
         present = true;
@@ -34,9 +34,34 @@ public sealed class InstalledCopyOnlyTests
     {
         Paths paths = Real();
 
-        string? chosen = Program.InstalledCopy(paths, _ => true, Program.TraceVerbSince, _ => version)();
+        string? chosen = Program.InstalledCopy(paths, _ => true, _ => true, Program.TraceVerbSince, _ => version)();
 
         Assert.AreEqual(raised, chosen is not null);
+    }
+
+    // An installed copy whose folder a standard user can change is not raised: the same folder check the update hand-over
+    // makes. Before, the program being there and new enough was all that was asked.
+    [TestMethod]
+    public void AnInstalledCopyInAFolderThatFailsItsCheckIsNotRaised()
+    {
+        Paths paths = Real();
+
+        string? chosen = Program.InstalledCopy(paths, _ => true, _ => false, Program.TraceVerbSince, _ => "1.6.0")();
+
+        Assert.IsNull(chosen);
+    }
+
+    // The real check, against a folder Users can write to.
+    [TestMethod]
+    public void TheRealFolderCheckRefusesAFolderUsersCanWrite()
+    {
+        using var folder = new TempFolder();
+        string exe = folder.File("Earshot.exe");
+        File.WriteAllText(exe, "x");
+        var log = new CapturingLog();
+
+        Assert.IsFalse(Program.InstallFolderTrusted(log)(exe));
+        Assert.IsTrue(log.Entries.Any(e => e.Message.StartsWith("The installed copy is not raised: ", StringComparison.Ordinal)));
     }
 
     [TestMethod]
@@ -46,7 +71,7 @@ public sealed class InstalledCopyOnlyTests
         using Earshot.Tracing.ITraceRecorder? recorder = Program.CreateTraceRecorder(paths, new CapturingLog());
 
         Assert.IsNotNull(recorder);
-        Assert.AreEqual(Program.InstalledCopy(paths, File.Exists, Program.TraceVerbSince, SetupValues.ProgramVersion)() is null, recorder.NeedsSetUp);
+        Assert.AreEqual(Program.InstalledCopy(paths, File.Exists, Program.InstallFolderTrusted(new CapturingLog()), Program.TraceVerbSince, SetupValues.ProgramVersion)() is null, recorder.NeedsSetUp);
         Assert.AreEqual(paths.UserTraceFolder, recorder.DestinationFolder);
     }
 }
