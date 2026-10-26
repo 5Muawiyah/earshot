@@ -534,7 +534,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         if (!await _cards.ShowAsync(new CardContent(TrayStatus.AppName, NotProtectedMessage, action), CardAnchor.NearTray, null))
         {
             _notProtectedShown = false;
-            _log.Info("The card about AirPods that Earshot does not protect was held back by Windows, so it is offered again at the next check.");
+            _log.Info("The card about AirPods that Earshot does not protect was not put on screen (held back by Windows, or not shown), so it is offered again at the next check.");
         }
     }
 

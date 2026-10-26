@@ -286,7 +286,7 @@ internal sealed partial class TrayContext
         bool shown = await _registry.Cards.ShowAsync(content, place.Anchor, place.ClickPoint);
         if (!shown)
         {
-            _log.Info("Pair AirPods: the card offering the device picker was held back by Windows, so the marker is kept for the next start.");
+            _log.Info("Pair AirPods: the card offering the device picker was not put on screen (held back by Windows, or not shown), so the marker is kept for the next start.");
         }
 
         return shown;
@@ -573,7 +573,7 @@ internal sealed partial class TrayContext
         if (!await ShowRadioCardAsync(result, place))
         {
             cards.Held = true;
-            _log.Info("Pairing check (" + reason + "): the radio's card was held back by Windows.");
+            _log.Info("Pairing check (" + reason + "): the radio's card was not put on screen (held back by Windows, or not shown).");
         }
 
         return RadioSays.Shown;
@@ -691,7 +691,7 @@ internal sealed partial class TrayContext
         if (!shown)
         {
             cards.Held = true;
-            _log.Info("Pairing check: the card \"" + text + "\" was held back by Windows, so it is offered again at the next look.");
+            _log.Info("Pairing check: the card \"" + text + "\" was not put on screen (held back by Windows, or not shown), so it is offered again at the next look.");
         }
 
         return shown;
