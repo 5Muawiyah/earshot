@@ -20,14 +20,14 @@ namespace Earshot.Tests.App;
 [TestClass]
 public sealed class StalePinWiringTests
 {
-    private static PairAirPodsServices Services(FixRig rig, TimeSpan? stalePinBudget = null) => new()
+    private static PairAirPodsServices Services(FixRig rig, TimeSpan? stalePinBudget = null, RadioCheckState radio = RadioCheckState.Ok) => new()
     {
         StalePinBudget = stalePinBudget ?? StalePin.DefaultBudget,
         Api = rig.Pairing,
         Nodes = rig.Nodes,
         Prompter = rig.Prompter,
         UiFactory = _ => rig.Ui,
-        Radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok)),
+        Radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(radio)),
         Options = rig.Host().Options,
         LockName = @"Local\Earshot.Tests.Stale." + Guid.NewGuid().ToString("N"),
     };
@@ -127,6 +127,37 @@ public sealed class StalePinWiringTests
             Assert.AreEqual("Pair AirPods", Last(tray).Action?.Label);
             Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("pinned AirPods: Stale", StringComparison.Ordinal)));
             Assert.AreEqual(RecordedNodes.AirPodsContainer, tray.Settings.Current.PinnedContainerId, "Nothing is adopted or dropped behind the person's back.");
+        });
+    }
+
+    // A PC whose Bluetooth adapter is gone or disabled lists no paired devices, which is not the pair being removed: the radio's
+    // line is shown, and the readings kept for the pinned pair are not dropped.
+    [TestMethod]
+    public void AStalePinOnAPcWithNoBluetoothShowsTheRadioLineAndForgetsNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig, radio: RadioCheckState.NoAdapter), settings: PinTheRigsPair);
+
+            Assert.AreEqual(RadioLines.NoAdapter, Last(tray).Status, string.Join(" | ", tray.Cards.Statuses));
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.NoAirPodsPaired));
+            Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.Contains("last readings and link are dropped", StringComparison.Ordinal)));
+            Assert.AreEqual(RecordedNodes.AirPodsContainer, tray.Settings.Current.PinnedContainerId);
+        });
+    }
+
+    [TestMethod]
+    public void NothingPairedOnAPcWithBluetoothOffShowsTheRadioLineNotNoAirPods()
+    {
+        StaThread.Run(() =>
+        {
+            using FixRig rig = NothingPairedRig();
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig, radio: RadioCheckState.Off), settings: Unpin);
+
+            Assert.AreEqual(RadioLines.Off, Last(tray).Status, string.Join(" | ", tray.Cards.Statuses));
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.NoAirPodsPaired));
         });
     }
 

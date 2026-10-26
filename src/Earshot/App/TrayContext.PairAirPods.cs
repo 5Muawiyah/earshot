@@ -343,16 +343,7 @@ internal sealed partial class TrayContext
         // its own, and a choice made on it would race its adoption.
         if (_elevatedRun == PairRun)
         {
-            _log.Info("Pairing check (" + reason + "): a pairing started while it looked, so it says nothing.");
-            if (reason == "start")
-            {
-                // The coordinator's start check waits for this look; the pairing answers for the pairs now, and the check runs
-                // once it ends (DropPairRunFlag).
-                _protectionCheckOwed = true;
-                return false;
-            }
-
-            return true;
+            return PairingStartedWhileLooking();
         }
 
         switch (result.State)
@@ -372,6 +363,14 @@ internal sealed partial class TrayContext
                 bool nonePaired = found.Listed && !found.Candidates.Any(c => c.DevicePresent);
                 if (nonePaired)
                 {
+                    switch (await RadioExplainsAsync(reason, place, ct))
+                    {
+                        case RadioSays.Shown:
+                            return false;
+                        case RadioSays.Stop:
+                            return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
+                    }
+
                     OfferPairAirPods(place, force: reason == "setup");
                 }
 
@@ -379,6 +378,14 @@ internal sealed partial class TrayContext
             }
 
             case StalePinState.Stale:
+                switch (await RadioExplainsAsync(reason, place, ct))
+                {
+                    case RadioSays.Shown:
+                        return false;
+                    case RadioSays.Stop:
+                        return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
+                }
+
                 _log.Info("The pinned AirPods are no longer paired, so their last readings and link are dropped.");
                 _widgetStatus?.ForgetPair("the pinned AirPods are no longer paired");
                 if (result.Others.Count == 0)
@@ -398,6 +405,66 @@ internal sealed partial class TrayContext
             default:
                 return true;
         }
+
+        // A Pair AirPods pressed while the look read answers for the pairs itself, so the look says nothing.
+        bool PairingStartedWhileLooking()
+        {
+            _log.Info("Pairing check (" + reason + "): a pairing started while it looked, so it says nothing.");
+            if (reason == "start")
+            {
+                // The coordinator's start check waits for this look; the pairing answers for the pairs now, and the check runs
+                // once it ends (DropPairRunFlag).
+                _protectionCheckOwed = true;
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    private enum RadioSays
+    {
+        Nothing,
+        Shown,
+
+        // Closing, the look's token cancelled, or a pairing started during the read: nothing more is shown.
+        Stop,
+    }
+
+    // No pinned pair in the paired list, or no AirPods in the tree, is also what a PC whose Bluetooth is off, disabled or missing
+    // shows. The radio is read first (its own budget is a second): a state of the PC's own Bluetooth shows the radio's line and
+    // button instead, and nothing kept for the pinned pair is dropped.
+    private async Task<RadioSays> RadioExplainsAsync(string reason, CardPlace place, CancellationToken ct)
+    {
+        if (_pairServices?.Radio is not { } radio)
+        {
+            return RadioSays.Nothing;
+        }
+
+        RadioCheckResult result;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            result = await radio.CheckAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return RadioSays.Stop;
+        }
+
+        _log.Info("Pairing check (" + reason + "): radio " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms.");
+        if (_closing || _elevatedRun == PairRun)
+        {
+            return RadioSays.Stop;
+        }
+
+        if (!result.BlocksRepair || result.State == RadioCheckState.Unreachable)
+        {
+            return RadioSays.Nothing;
+        }
+
+        ShowRadioCard(result, place);
+        return RadioSays.Shown;
     }
 
     // A card with one button, in the same place as the other cards of the tray.

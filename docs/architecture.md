@@ -1395,7 +1395,11 @@ or Pair AirPods is offered; nothing is adopted by itself. Either card stays up
 until it is used. The paired list is given 5 seconds (a waiting budget), after
 which the look says nothing and logs earshot-timeout. At start, a card from this
 look answers for the pairs, so the coordinator's card about unprotected AirPods
-is not shown over it.
+is not shown over it. The pin is matched by its container alone: the same
+AirPods paired again keep their address under a new container. Before it says
+a pair is gone or none is paired, the look reads the radio (one second): a PC
+whose Bluetooth is off, switched off, broken or missing gets the radio's line
+and button instead, and the pinned pair's readings are kept.
 
 **The recovery marker.** Pairing makes the AirPods a Windows device at once,
 and the adoption comes after. A crash, a sign-out or a shutdown in between
