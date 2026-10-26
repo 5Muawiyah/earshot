@@ -69,8 +69,14 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     public int Leftovers { get; set; }
     public HashSet<int> Alive { get; } = [];
     public List<string> Calls { get; } = [];
+    public bool FolderThere { get; set; } = true;
+    public bool TraceFolderThere() => FolderThere;
     public string? TrustProblem() => Untrusted;
-    public int LeftoverRunFolders() => Leftovers;
+    public int LeftoverRunFolders()
+    {
+        Calls.Add("count run folders");
+        return Leftovers;
+    }
     public int PartialCopies { get; set; }
 
     public int RemovePartialCopies(string destinationFolder)
@@ -93,7 +99,11 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     }
 
     public void OpenFolder(string folder) => Calls.Add("open " + folder);
-    public string? ReadMarker() => Marker;
+    public string? ReadMarker()
+    {
+        Calls.Add("read marker");
+        return Marker;
+    }
     public bool ProcessAlive(int pid) => Alive.Contains(pid);
     public long BootSeconds() => Boot;
 }
@@ -366,6 +376,23 @@ public sealed class TraceRecorderTests
         rig.Files.Untrusted = "the trace folder can be changed by Users";
 
         Assert.IsNull(rig.Recorder.LeftoverNotice());
+    }
+
+    // Nothing in a trace folder that fails its check is read or listed at start: the check comes first. Before, the marker was
+    // read and the folders counted first.
+    [TestMethod]
+    public void AnUntrustedTraceFolderIsNeitherReadNorListedAtStart()
+    {
+        var rig = new Rig();
+        rig.Files.Marker = "x";
+        rig.Files.Leftovers = 2;
+        rig.Files.Untrusted = "the trace folder can be changed by Users";
+
+        Assert.IsNull(rig.Recorder.StillRunningNotice());
+        Assert.IsNull(rig.Recorder.LeftoverNotice());
+
+        CollectionAssert.DoesNotContain(rig.Files.Calls, "read marker");
+        CollectionAssert.DoesNotContain(rig.Files.Calls, "count run folders");
     }
 
     // A copy cut off by Exit is left under a temporary name, never as a trace that looks whole; the start removes it.

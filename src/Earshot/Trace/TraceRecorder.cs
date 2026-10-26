@@ -41,6 +41,9 @@ internal sealed record TraceRecorderOptions(bool SafeMode, Func<string?> Install
 // The tray's side of the user-visible files.
 internal interface ITraceUserFiles
 {
+    // Whether the trace folder is there at all; a missing one holds nothing to read or check.
+    bool TraceFolderThere();
+
     // Null when %ProgramData%\Earshot and its trace folder pass the machine folder's check and no folder on the way is a reparse
     // point, so only an administrator can have made what is in them; otherwise why not. Checked before a result is read.
     string? TrustProblem();
@@ -317,15 +320,21 @@ internal sealed class TraceRecorder : ITraceRecorder
     // can be reused by another process within the same start, which only keeps the notice back.
     public string? StillRunningNotice()
     {
-        string? text = _files.ReadMarker();
-        if (text is null)
+        // The check comes before anything in the folder is read.
+        if (!_files.TraceFolderThere())
         {
             return null;
         }
 
         if (_files.TrustProblem() is { } untrusted)
         {
-            _log.Info("trace: a marker is there, and it is not used, because the trace folder did not pass its check: " + untrusted);
+            _log.Info("trace: the trace folder did not pass its check, so no marker in it is read: " + untrusted);
+            return null;
+        }
+
+        string? text = _files.ReadMarker();
+        if (text is null)
+        {
             return null;
         }
 
@@ -352,15 +361,20 @@ internal sealed class TraceRecorder : ITraceRecorder
             _log.Info("trace: " + partial.ToString(System.Globalization.CultureInfo.InvariantCulture) + " copy(ies) cut off by an earlier exit were removed.");
         }
 
-        int count = _files.LeftoverRunFolders();
-
         // The helper refuses a trace folder that fails the machine folder's check, so none of Earshot's recordings can be in one;
-        // folders in it are not called administrators' own, or said to hold keys.
-        if (count > 0 && _files.TrustProblem() is { } untrusted)
+        // nothing in it is listed or called administrators' own. The check comes before the listing.
+        if (!_files.TraceFolderThere())
         {
-            _log.Warn("trace: the trace folder did not pass its check, so its " + count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " folder(s) are not reported as earlier recordings: " + untrusted);
             return null;
         }
+
+        if (_files.TrustProblem() is { } untrusted)
+        {
+            _log.Warn("trace: the trace folder did not pass its check, so its folders are not listed or reported as earlier recordings: " + untrusted);
+            return null;
+        }
+
+        int count = _files.LeftoverRunFolders();
         return count > 0 ? TraceCopy.Leftover(count) : null;
     }
 
@@ -395,6 +409,8 @@ internal sealed class TraceUserFiles : ITraceUserFiles
 
     private static string Describe(Exception ex) =>
         ex.GetType().Name + " (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message;
+
+    public bool TraceFolderThere() => Directory.Exists(_traceFolder);
 
     public string? TrustProblem()
     {
