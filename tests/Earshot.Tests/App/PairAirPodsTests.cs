@@ -1409,14 +1409,16 @@ public sealed class PairAirPodsTests
         });
     }
 
-    // A start-time recovery that throws showed nothing about the pairs, so the coordinator's own start check still runs.
+    // A start-time recovery that throws showed nothing about the pairs, so the check for unprotected AirPods still runs. The throw
+    // comes after an await, as a real paired-list read's does, so the coordinator has already found the flag up and left the
+    // check to the look; before, the rethrow skipped the look's own call for it.
     [TestMethod]
     public void ARecoveryThatThrowsDoesNotHoldBackTheCoordinatorsStartCheck()
     {
         StaThread.Run(() =>
         {
             using var rig = new FixRig();
-            rig.Pairing.OnListPaired = () => throw new IOException("the paired list failed");
+            rig.Pairing.ThrowOnListLater = new IOException("the paired list failed");
             var marker = new FakePairRecoveryMarker { Present = true };
             PairAirPodsServices services = Services(rig, marker: marker);
             var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };

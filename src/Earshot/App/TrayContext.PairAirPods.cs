@@ -124,12 +124,12 @@ internal sealed partial class TrayContext
                 {
                     answered = await RecoverPairingAsync(services, CardPlace.NearTray);
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    // A look that threw showed nothing about the pairs (the error card says what failed), so the coordinator's
-                    // start check is not held back by it.
+                    // A look that threw showed nothing about the pairs: the error is reported with its code, and the check for
+                    // unprotected AirPods below still runs.
                     answered = false;
-                    throw;
+                    ReportUnexpected("recover a pairing", ex, CardPlace.NearTray);
                 }
                 finally
                 {

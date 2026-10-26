@@ -222,10 +222,19 @@ internal sealed class FakePairing : IPairingApi
     // The paired list never answers, until the token says stop.
     public bool HangOnList { get; set; }
 
+    // Thrown by the paired list after a short wait, so the caller has already gone past its first await, as a real WinRT read is.
+    public Exception? ThrowOnListLater { get; set; }
+
     public async Task<PairedListResult> ListPairedAsync(CancellationToken ct)
     {
         Calls.Add("list-paired");
         OnListPaired?.Invoke();
+        if (ThrowOnListLater is { } later)
+        {
+            await Task.Delay(200, ct);
+            throw later;
+        }
+
         if (HangOnList)
         {
             await Hang(ct);
