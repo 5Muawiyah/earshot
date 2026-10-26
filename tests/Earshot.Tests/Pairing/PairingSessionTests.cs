@@ -695,6 +695,37 @@ public sealed class PairingSessionTests
         StringAssert.Contains(File.ReadAllText(path), "\"code\":\"NotPaired\"");
     }
 
+    // The headline is a result, never an observation ahead of it: a scan Windows stopped gives Aborted, not the scan's count;
+    // headphones with no name read and a failed pairing give the pairing's status (the 25 October case), not name-unread; and
+    // a radio that could not be read before a pairing that worked gives S_OK. Before, each gave the observation.
+    [TestMethod]
+    public async Task TheHeadlineCodeIsAResultNotAnObservation()
+    {
+        using (var aborted = new FixRig())
+        {
+            ArrangePairs(aborted);
+            aborted.Pairing.Events.Add(new WatchEvent(WatchEventKind.Aborted, null));
+            Assert.AreEqual("Aborted", ConnectHistory.HeadlineCode((await RunAsync(aborted)).ToHistoryEntry(DateTimeOffset.UnixEpoch)));
+        }
+
+        using (var noName = new FixRig())
+        {
+            ArrangePairs(noName);
+            AirPodsAppear(noName, name: "");
+            noName.Pairing.PairResult = new PairingCallResult("AuthenticationTimeout", PairReasons.AuthenticationTimeout, false, null);
+            Assert.AreEqual("AuthenticationTimeout", ConnectHistory.HeadlineCode((await RunAsync(noName)).ToHistoryEntry(DateTimeOffset.UnixEpoch)));
+        }
+
+        using (var unread = new FixRig())
+        {
+            ArrangePairs(unread);
+            AirPodsAppear(unread);
+            PairingSessionResult paired = await RunAsync(unread, radio: new FakeRadioCheck(Radio(RadioCheckState.Unknown)));
+            Assert.AreEqual(PairOutcome.Paired, paired.Outcome);
+            Assert.AreEqual("S_OK", ConnectHistory.HeadlineCode(paired.ToHistoryEntry(DateTimeOffset.UnixEpoch)));
+        }
+    }
+
     // ---- the real watcher's reading of one event ----
 
     // The paired list the tray reads at rest asks only for the address and the container it matches on: not IsPresent ("live and

@@ -393,6 +393,29 @@ internal sealed class ConnectHistory
     private bool IsRecent(string line) =>
         TryParse(line, out ConnectHistoryEntry? entry) && _time.GetUtcNow() - entry.At <= Keep;
 
+    // What was seen rather than what a step did: a scan's count of candidates, a name not read, the radio's state.
+    private static readonly HashSet<string> Observations = new(StringComparer.Ordinal) { "scan", "name-unread", "radio-check" };
+
+    private static readonly HashSet<string> Successes = new(StringComparer.Ordinal)
+    {
+        ConnectHistoryOutcomes.Connected, ConnectHistoryOutcomes.Disconnected, ConnectHistoryOutcomes.Allowed,
+        ConnectHistoryOutcomes.Blocked, ConnectHistoryOutcomes.Paired,
+    };
+
+    // The line's headline code: the first step that failed at its job. A duration or a step that did its job is never it. An
+    // observation is the headline only when no step failed outright and the entry did not succeed (a scan that found nothing, a
+    // radio that blocked the run).
+    internal static string HeadlineCode(ConnectHistoryEntry e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+        if (e.Steps.FirstOrDefault(st => st.Failed && !Observations.Contains(st.Name)) is { } failed)
+        {
+            return failed.CodeName;
+        }
+
+        return Successes.Contains(e.Outcome) ? "S_OK" : e.Steps.FirstOrDefault(st => st.Failed)?.CodeName ?? "S_OK";
+    }
+
     private static string Serialize(ConnectHistoryEntry e)
     {
         using var buffer = new MemoryStream();
@@ -403,9 +426,7 @@ internal sealed class ConnectHistory
             w.WriteString("time", e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
             w.WriteString("step", Safe(e.Action));
             w.WriteString("outcome", Safe(e.Outcome));
-            // The first failed step's code: a duration (milliseconds), a count (the scan's candidates) or a radio state is not a
-            // result, and a step that did its job is not the headline.
-            w.WriteString("code", Safe(e.Steps.FirstOrDefault(st => st.Failed)?.CodeName ?? "S_OK"));
+            w.WriteString("code", Safe(HeadlineCode(e)));
             w.WriteNumber("attempt", e.Retry ? 2 : 1);
             w.WriteNumber("durationMs", e.DurationMs);
             w.WriteString("reason", Safe(e.FailureClass.Length == 0 ? "None" : e.FailureClass));
