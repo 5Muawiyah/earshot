@@ -3,6 +3,7 @@ using Earshot.App;
 using Earshot.Bluetooth;
 using Earshot.Contracts;
 using Earshot.Repair;
+using Earshot.Tests.Integration.Coordinator;
 using Earshot.Tests.Phase1;
 using Earshot.Tests.Phase4;
 using Earshot.Tests.Repair;
@@ -19,8 +20,9 @@ namespace Earshot.Tests.App;
 [TestClass]
 public sealed class StalePinWiringTests
 {
-    private static PairAirPodsServices Services(FixRig rig) => new()
+    private static PairAirPodsServices Services(FixRig rig, TimeSpan? stalePinBudget = null) => new()
     {
+        StalePinBudget = stalePinBudget ?? StalePin.DefaultBudget,
         Api = rig.Pairing,
         Nodes = rig.Nodes,
         Prompter = rig.Prompter,
@@ -72,6 +74,7 @@ public sealed class StalePinWiringTests
             CardContent card = Last(tray);
             Assert.AreEqual("No AirPods are paired with this PC.", card.Status);
             Assert.AreEqual("Pair AirPods", card.Action?.Label);
+            Assert.IsTrue(card.StaysUp, "The way forward after an install, often shown at sign-in, stays until it is used.");
             int shown = tray.Cards.Shown.Count;
 
             tray.Context.StartPinnedPairCheck("again");
@@ -173,8 +176,70 @@ public sealed class StalePinWiringTests
             CardContent card = Last(tray);
             Assert.AreEqual("Your AirPods were removed in Windows. Choose which pair Earshot should use.", card.Status);
             Assert.AreEqual("Choose AirPods", card.Action?.Label);
+            Assert.IsTrue(card.StaysUp, "Often shown at sign-in; until a pair is chosen none is protected.");
             Assert.AreEqual(RecordedNodes.AirPodsContainer, tray.Settings.Current.PinnedContainerId, "Always ask: the other pair is not adopted by itself.");
             Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)));
+        });
+    }
+
+    // At start the tray's own card about a removed pin answers for the pairs, so the coordinator's card about unprotected
+    // AirPods does not replace it. Before, both raced and whichever came last stayed.
+    [TestMethod]
+    public void AtStartTheStalePinCardIsNotReplacedByTheNotProtectedCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            AddASecondPairedPair(rig);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(), pairAirPods: Services(rig), settings: PinTheRigsPair,
+                coordinatorServices: new CoordinatorServices { Protection = protection });
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(PairAirPodsText.StaleChosen, Last(tray).Status);
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == BlockCoordinator.NotProtectedMessage), string.Join(" | ", tray.Cards.Shown.Select(c => c.Content.Status)));
+        });
+    }
+
+    // With the pin still paired, the start look shows nothing and the coordinator's check runs as before.
+    [TestMethod]
+    public void AtStartTheNotProtectedCardStillShowsWhenTheLookSaidNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(), pairAirPods: Services(rig), settings: PinTheRigsPair,
+                coordinatorServices: new CoordinatorServices { Protection = protection });
+            tray.PumpUntilIdle();
+
+            Assert.IsTrue(tray.Cards.Shown.Any(c => c.Content.Status == BlockCoordinator.NotProtectedMessage), string.Join(" | ", tray.Cards.Shown.Select(c => c.Content.Status)));
+        });
+    }
+
+    // A paired list that does not answer ends the look within its budget, saying nothing, so neither the start checks nor a
+    // failed connect's card wait on it.
+    [TestMethod]
+    public void APairedListThatDoesNotAnswerEndsTheLookWithinItsBudget()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.HangOnList = true;
+            PairAirPodsServices services = Services(rig, TimeSpan.FromMilliseconds(100));
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: services, settings: PinTheRigsPair);
+            while (!tray.Log.Has(LogLevel.Info, "Pairing check (start)") && watch.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                tray.PumpUntilIdle();
+                Thread.Sleep(10);
+            }
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Pairing check (start)"), string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
+            Assert.IsEmpty(tray.Cards.Shown);
         });
     }
 

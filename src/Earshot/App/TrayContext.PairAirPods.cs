@@ -68,6 +68,7 @@ internal sealed partial class TrayContext
         {
             // A pair made or removed in Windows arrives as a new device group.
             _coordinator.NewDeviceHook = async _ => KeptThePinnedPairJustNow() || !await CheckPinnedPairAsync("new device", CardPlace.NearTray);
+            _coordinator.StartLookHook = () => _startLookShown?.Task ?? Task.FromResult(false);
         }
 
         _menu.PairAirPodsClicked += (_, _) =>
@@ -132,8 +133,32 @@ internal sealed partial class TrayContext
             return;
         }
 
+        if (reason == "start")
+        {
+            // The coordinator's start check for unprotected AirPods waits for this look's answer (StartLookHook): a card from
+            // here already says what there is to say about the pairs, and the other card would replace it.
+            var shown = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _startLookShown = shown;
+            Launch("check the pinned pair", async () =>
+            {
+                bool showedNothing = true;
+                try
+                {
+                    showedNothing = await CheckPinnedPairAsync(reason, CardPlace.NearTray);
+                }
+                finally
+                {
+                    shown.TrySetResult(!showedNothing);
+                }
+            }, CardPlace.NearTray);
+            return;
+        }
+
         Launch("check the pinned pair", () => CheckPinnedPairAsync(reason, CardPlace.NearTray), CardPlace.NearTray);
     }
+
+    // The start-time look's answer: true when it showed the person a card about the pairs. Null when no look was started.
+    private TaskCompletionSource<bool>? _startLookShown;
 
     // A marker from a run that paired and did not adopt. The stale-pin check comes first and says what it found; then a pair of
     // AirPods that is paired and not the pinned one is offered through the device picker, never adopted by itself. The marker
@@ -273,8 +298,10 @@ internal sealed partial class TrayContext
     // AirPods when none is. The other pair is never adopted by itself, and nothing is unpaired. Nothing pinned with no AirPods
     // paired at all offers Pair AirPods too (once per run, unless the person has just asked for something that needs a pair).
     // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothdevice.getdeviceselectorfrompairingstate
-    private async Task<bool> CheckPinnedPairAsync(string reason, CardPlace place)
+    // token: the caller's own (a connect's), so a press that supersedes it ends this look too; otherwise Earshot's lifetime.
+    private async Task<bool> CheckPinnedPairAsync(string reason, CardPlace place, CancellationToken? token = null)
     {
+        CancellationToken ct = token ?? _lifetime.Token;
         if (_closing || _pairServices is not { } services || _registry.SafeMode)
         {
             return true;
@@ -292,11 +319,12 @@ internal sealed partial class TrayContext
         StalePinResult result;
         try
         {
-            result = await StalePin.ReadAsync(services.Api, services.Nodes, settings.PinnedContainerId, settings.PinnedAddress, _lifetime.Token);
+            result = await StalePin.ReadAsync(services.Api, services.Nodes, settings.PinnedContainerId, settings.PinnedAddress, ct, services.StalePinBudget);
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return true;
+            // Closing, or the connect it was for was superseded: nothing more is shown for it.
+            return _lifetime.IsCancellationRequested;
         }
 
         _log.Info("Pairing check (" + reason + "): " + StalePin.Describe(result));
@@ -320,11 +348,11 @@ internal sealed partial class TrayContext
                 AirPodsDiscoveryResult found;
                 try
                 {
-                    found = await Task.Run(() => AirPodsDiscovery.Find(services.Nodes), _lifetime.Token);
+                    found = await Task.Run(() => AirPodsDiscovery.Find(services.Nodes), ct);
                 }
-                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
-                    return true;
+                    return _lifetime.IsCancellationRequested;
                 }
 
                 bool nonePaired = found.Listed && !found.Candidates.Any(c => c.DevicePresent);
@@ -345,9 +373,10 @@ internal sealed partial class TrayContext
                 }
                 else
                 {
+                    // Stays up until it is used: it is often shown at sign-in, and until a pair is chosen none is protected.
                     ShowCardWithButton(
                         TrayStatus.AppName, PairAirPodsText.StaleChosen, PairAirPodsText.ChooseButton,
-                        () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
+                        () => Launch("choose device", () => ChooseDeviceAsync(place), place), place, staysUp: true);
                 }
 
                 return false;
@@ -400,7 +429,7 @@ internal sealed partial class TrayContext
                 ShowCardWithButton(TrayStatus.AppName, line, RadioLines.BluetoothSettingsButton, () => Launch("open bluetooth settings", () => OpenBluetoothSettingsAsync(place), place), place);
                 break;
             case RadioAction.RecordTrace when TraceOffered:
-                ShowCardWithButton(TrayStatus.AppName, line, RadioLines.RecordTraceButton, () => StartTrace(place), place);
+                ShowCardWithButton(TrayStatus.AppName, line, RadioLines.RecordTraceButton, () => AskForTrace(place), place);
                 break;
             default:
                 ShowCard(TrayStatus.AppName, line, place);
@@ -418,7 +447,8 @@ internal sealed partial class TrayContext
 
         _noAirPodsOffered = true;
         _log.Info("No AirPods are paired with this PC, so Pair AirPods is offered.");
-        ShowCardWithButton(TrayStatus.AppName, PairAirPodsText.NoAirPodsPaired, PairAirPodsText.Title, () => StartPairAirPods(place), place);
+        // Stays up until it is used: it is the way forward after an install with nothing paired, often shown at sign-in.
+        ShowCardWithButton(TrayStatus.AppName, PairAirPodsText.NoAirPodsPaired, PairAirPodsText.Title, () => StartPairAirPods(place), place, staysUp: true);
     }
 
     private async Task PairAirPodsAsync(CardPlace place)
@@ -451,7 +481,6 @@ internal sealed partial class TrayContext
         var setupSteps = new List<StepOutcome>();
         System.Runtime.ExceptionServices.ExceptionDispatchInfo? unexpected = null;
         var runWatch = System.Diagnostics.Stopwatch.StartNew();
-        services.RunFlag.Active = true;
         try
         {
             end = await PairAndAdoptAsync(services, place);
@@ -651,6 +680,10 @@ internal sealed partial class TrayContext
                 _lifetime.Token.ThrowIfCancellationRequested();
             }
 
+            // From here a pairing may form, so the coordinator's automatic blocks and checks wait for the run. Not while only the
+            // first question is up: nothing is scanned or paired then, and the question can stay up for minutes.
+            services.RunFlag.Active = true;
+
             // Written before anything can be paired, so the time between the pairing and the adoption is always covered.
             // Without it a crash between the pairing and the adoption would go unnoticed, so no pairing starts when it cannot be written.
             // A radio that stops the pairing pairs nothing, so no marker is needed and its own line is the one shown.
@@ -733,7 +766,10 @@ internal sealed partial class TrayContext
 
                 return new PairRunEnd(result, false, false)
                 {
-                    Replace = new StepOutcome("replace", false, NativeCodes.NotAttempted, kept.ToString(), null),
+                    // Earshot closed the question, which is not the person's answer.
+                    Replace = _closing
+                        ? new StepOutcome("closing", false, NativeCodes.NotAttempted, "exit", null)
+                        : new StepOutcome("replace", false, NativeCodes.NotAttempted, kept.ToString(), null),
                     ReplaceMs = replaceMs,
                     Adoption = DeviceChoiceResult.NotApplied,
                 };

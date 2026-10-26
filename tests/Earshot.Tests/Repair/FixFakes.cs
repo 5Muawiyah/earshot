@@ -219,11 +219,19 @@ internal sealed class FakePairing : IPairingApi
     // Runs as the paired list is read, before it is answered.
     public Action? OnListPaired { get; set; }
 
-    public Task<PairedListResult> ListPairedAsync(CancellationToken ct)
+    // The paired list never answers, until the token says stop.
+    public bool HangOnList { get; set; }
+
+    public async Task<PairedListResult> ListPairedAsync(CancellationToken ct)
     {
         Calls.Add("list-paired");
         OnListPaired?.Invoke();
-        return Task.FromResult(new PairedListResult(Paired.ToList(), ListSteps.ToList()));
+        if (HangOnList)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+        }
+
+        return new PairedListResult(Paired.ToList(), ListSteps.ToList());
     }
 
     public Task<PairingCallResult> UnpairAsync(string deviceId, CancellationToken ct)

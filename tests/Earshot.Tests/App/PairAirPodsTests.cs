@@ -490,6 +490,74 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // The automatic blocks wait for a pairing only once one may form: not while the first question is up, which can stay for
+    // minutes with nothing scanned. Before, the flag was up from the press.
+    [TestMethod]
+    public void ThePairingFlagIsRaisedOnlyAfterLookForAirPods()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            PairAirPodsServices services = Services(rig);
+            bool? atQuestion = null;
+            bool? atPick = null;
+            rig.Prompter.OnAsk = q =>
+            {
+                if (q.Heading == PairAirPodsText.FirstQuestion.Heading)
+                {
+                    atQuestion ??= services.RunFlag.Active;
+                }
+            };
+            rig.Ui.OnPick = () => atPick = services.RunFlag.Active;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: services);
+
+            Click(tray);
+
+            Assert.IsFalse(atQuestion, "Raised while only the first question was up.");
+            Assert.IsTrue(atPick, "Up once the scan has started.");
+            Assert.IsFalse(services.RunFlag.Active, "Dropped at the end.");
+        });
+    }
+
+    // Exit at "Use these AirPods instead?" closes it: the entry says Earshot closed, not that the person kept the old pair.
+    [TestMethod]
+    public void ExitAtTheReplaceQuestionIsRecordedAsClosing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayCancel();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history });
+            rig.Prompter.OnAsk = q =>
+            {
+                if (q.Heading == PairAirPodsText.ReplaceHeading)
+                {
+                    tray.ClickMenu(MenuModel.Exit);
+                }
+            };
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            Application.Run(tray.Context);
+
+            string[] names = history.Read().Single().Steps.Select(s => s.Name).ToArray();
+            CollectionAssert.Contains(names, "closing", string.Join(", ", names));
+            CollectionAssert.DoesNotContain(names, "replace", string.Join(", ", names));
+        });
+    }
+
     // Exit while the first question is up closes it: the entry says Earshot closed, not that the person said no.
     [TestMethod]
     public void ExitWhileTheFirstQuestionIsUpIsRecordedAsClosing()

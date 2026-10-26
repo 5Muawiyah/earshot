@@ -151,6 +151,24 @@ public sealed class FixRunLockTests
         Assert.AreEqual(FixRunLock.NameFor(redirectedA), FixRunLock.NameFor(Paths.FromEnvironment(n => n == Paths.DataRootVariable ? @"C:\TEMP\Earshot-A" : null)));
     }
 
+    // A run the lock refused is not the end of the run that holds it: no recheck (which would show the card about unprotected
+    // AirPods over that run's window), only the card that says why it did not start. Before, both were done.
+    [TestMethod]
+    public void ARefusedRunSaysWhyAndDoesNotRunTheStartChecksAgain()
+    {
+        int rechecks = 0;
+        int refused = 0;
+
+        Program.OwnFixEnded(ExitCodes.AlreadyRunning, () => rechecks++, () => refused++);
+        Assert.AreEqual(0, rechecks);
+        Assert.AreEqual(1, refused);
+
+        Program.OwnFixEnded(ExitCodes.Ok, () => rechecks++, () => refused++);
+        Program.OwnFixEnded(null, () => rechecks++, () => refused++);
+        Assert.AreEqual(2, rechecks, "Any other end, or one with no code, is rechecked.");
+        Assert.AreEqual(1, refused);
+    }
+
     // The real program: the lock is held here, so a Fix started now ends AlreadyRunning without planning, asking or changing
     // anything. Safe mode and a temporary data folder, whose lock name is the redirected one.
     [TestMethod]

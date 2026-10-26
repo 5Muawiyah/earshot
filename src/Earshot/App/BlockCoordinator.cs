@@ -433,7 +433,7 @@ internal sealed partial class BlockCoordinator : IDisposable
     // At start: answer a Fix connection run that stopped half way (the normal block), then say when paired AirPods are not the
     // ones Earshot protects. Nothing here pins or adopts anything. A failure is logged with its type and code and does not stop
     // the coordinator.
-    private async Task RunFixStartChecksAsync()
+    private async Task RunFixStartChecksAsync(bool atStart = true)
     {
         try
         {
@@ -459,6 +459,17 @@ internal sealed partial class BlockCoordinator : IDisposable
         if (_services.TrayPairing.Active)
         {
             _log.Info("The tray is looking at a pairing that did not finish, so the check for AirPods that Earshot does not protect waits for that look.");
+            return;
+        }
+
+        if (atStart && StartLookHook is { } look && await look())
+        {
+            _log.Info("The tray's look at the pinned pair at start told the person about the pairs, so the check for AirPods that Earshot does not protect did not run.");
+            return;
+        }
+
+        if (_closing || _disposed)
+        {
             return;
         }
 

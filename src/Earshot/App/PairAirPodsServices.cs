@@ -36,6 +36,9 @@ internal sealed class PairAirPodsServices
     // The flag the coordinator reads; the tray sets it for the length of a run.
     public PairRunFlag RunFlag { get; init; } = new();
 
+    // How long the look at whether the pinned pair is still paired waits for Windows' paired list.
+    public TimeSpan StalePinBudget { get; init; } = StalePin.DefaultBudget;
+
     public static PairAirPodsServices CreateReal(Paths paths, ILog log, PairRunFlag runFlag)
     {
         ArgumentNullException.ThrowIfNull(runFlag);

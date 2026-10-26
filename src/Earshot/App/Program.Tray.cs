@@ -485,22 +485,20 @@ internal static partial class Program
                 // The tray's own run ending: through the coalescing signal when there is one, and straight to the recheck when the
                 // event could not be made. A run that ended because another one held the lock says so on a card; that run printed
                 // it only to the log, having no console.
-                fixLauncher = new OwnProgramFixLauncher(() =>
-                {
-                    if (fixEndedSignal is { } signal)
+                fixLauncher = new OwnProgramFixLauncher(() => OwnFixEnded(
+                    fixLauncher?.LastExitCode,
+                    () =>
                     {
-                        signal.Notify("the run the tray started");
-                    }
-                    else
-                    {
-                        registry.UiPost(() => coordinator?.RecheckProtectionAfterFix());
-                    }
-
-                    if (fixLauncher?.LastExitCode == ExitCodes.AlreadyRunning)
-                    {
-                        registry.UiPost(() => context?.SayFixRefusedByTheLock());
-                    }
-                });
+                        if (fixEndedSignal is { } signal)
+                        {
+                            signal.Notify("the run the tray started");
+                        }
+                        else
+                        {
+                            registry.UiPost(() => coordinator?.RecheckProtectionAfterFix());
+                        }
+                    },
+                    () => registry.UiPost(() => context?.SayFixRefusedByTheLock())));
                 CoordinatorServices coordinatorServices = CreateCoordinatorServices(
                     paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker, fixLauncher: fixLauncher);
                 coordinator = new BlockCoordinator(

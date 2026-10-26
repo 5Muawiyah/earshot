@@ -27,6 +27,22 @@ public sealed class StalePinTests
         }
     }
 
+    // A paired list that does not answer within the budget says nothing, with the timeout's code, instead of holding the tray's
+    // look (and the coordinator's start checks behind it) for as long as Windows takes.
+    [TestMethod]
+    public async Task APairedListThatDoesNotAnswerInTimeIsUnknownWithATimeoutCode()
+    {
+        using var rig = new FixRig();
+        rig.Pairing.HangOnList = true;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        StalePinResult result = await StalePin.ReadAsync(rig.Pairing, rig.Nodes, RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress, CancellationToken.None, TimeSpan.FromMilliseconds(100));
+
+        Assert.AreEqual(StalePinState.Unknown, result.State);
+        Assert.IsTrue(result.Steps.Any(s => s.Code == 1460 && !s.Ok), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code)));
+        Assert.IsLessThan(5000L, watch.ElapsedMilliseconds);
+    }
+
     [TestMethod]
     public async Task APairStillInTheListIsNotStale()
     {

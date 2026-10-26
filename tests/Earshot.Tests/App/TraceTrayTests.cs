@@ -269,6 +269,16 @@ public sealed class TraceTrayTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, recorder.Recorded);
+
+            // The card's button asks for a trace; pressed again while one records, it says so and does not stop it. Before, it
+            // was the row's switch and stopped the recording with nothing said.
+            recorder.BeginRecording();
+            tray.PumpUntilIdle();
+            card.Action!.OnClick();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(0, recorder.Stopped);
+            Assert.AreEqual(TraceCopy.AlreadyRecording, tray.Cards.Shown[^1].Content.Status);
         });
     }
 

@@ -21,6 +21,10 @@ internal sealed partial class BlockCoordinator
     // something about the pairs. Set by the tray. UI thread.
     internal Func<CancellationToken, Task<bool>>? NewDeviceHook { get; set; }
 
+    // The tray's own look at the pinned pair at start: true when it showed the person a card about the pairs (a pin Windows no
+    // longer holds, or none paired), which the card about unprotected AirPods would only replace. Asked at start only.
+    internal Func<Task<bool>>? StartLookHook { get; set; }
+
     private void NoteNewDeviceGroups(DeviceSnapshot snapshot)
     {
         if (snapshot.ReadStatus != SnapshotReadStatus.Ok)
@@ -149,6 +153,6 @@ internal sealed partial class BlockCoordinator
 
         _log.Info("A Fix connection run ended; the start checks run again.");
         _notProtectedShown = false;
-        _ = RunFixStartChecksAsync();
+        _ = RunFixStartChecksAsync(atStart: false);
     }
 }

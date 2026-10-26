@@ -85,22 +85,27 @@ internal sealed partial class TrayContext
     internal void RecordTraceFromFixResult()
     {
         _log.Info("Bluetooth trace: asked for from a Fix connection result.");
+        AskForTrace(CardPlace.NearTray);
+    }
 
-        // The result's button asks for a trace; it is not the row's switch, so it never stops one that is running.
+    // A button that asks for a trace (a Fix result's, or a card's) is not the row's switch, so it never stops one that is
+    // running; it says one is.
+    private void AskForTrace(CardPlace place)
+    {
         if (_traceRecorder is { State: TraceState.Recording })
         {
-            ShowCard(TrayStatus.AppName, TraceCopy.AlreadyRecording, CardPlace.NearTray);
+            ShowCard(TrayStatus.AppName, TraceCopy.AlreadyRecording, place);
             return;
         }
 
-        StartTrace(CardPlace.NearTray);
+        StartTrace(place);
     }
 
     // Whether the card may offer the trace button: a recorder, not safe mode, and an installed copy to raise.
     private bool TraceOffered => _traceRecorder is { NeedsSetUp: false } && !_registry.SafeMode;
 
-    // Asking while a recording runs stops it: the row and the button are the same switch. Otherwise the note is shown, and the
-    // recording starts only from its button.
+    // From the settings row, asking while a recording runs stops it: the row's button reads Stop then. Otherwise the note is
+    // shown, and the recording starts only from its button.
     private void StartTrace(CardPlace place)
     {
         if (_closing)

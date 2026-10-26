@@ -46,6 +46,22 @@ internal static partial class Program
         }
     }
 
+    // The tray's own Fix run has ended. A run the lock refused changed nothing, and the run that holds the lock is still going (it
+    // says when it ends), so the start checks are not run again for it: they would put the card about unprotected AirPods over
+    // that run's window. The card says why it did not start instead.
+    internal static void OwnFixEnded(int? exitCode, Action recheck, Action sayRefused)
+    {
+        ArgumentNullException.ThrowIfNull(recheck);
+        ArgumentNullException.ThrowIfNull(sayRefused);
+        if (exitCode == ExitCodes.AlreadyRunning)
+        {
+            sayRefused();
+            return;
+        }
+
+        recheck();
+    }
+
     internal static bool HoldsFixLog(IProcessToken token)
     {
         ArgumentNullException.ThrowIfNull(token);

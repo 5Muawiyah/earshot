@@ -39,7 +39,11 @@ internal static class StalePin
     // The step the paired list reports its read under; the whole read failed when it is not ok.
     private const string PairListStep = "pair-list";
 
-    public static async Task<StalePinResult> ReadAsync(IPairingApi api, INodeReader nodes, Guid pinnedContainer, string pinnedAddress, CancellationToken ct)
+    // How long the paired list is given. A waiting budget, not a measured figure: the look holds the coordinator's start checks
+    // and a failed connect's card, so it must not wait for as long as Windows takes.
+    public static readonly TimeSpan DefaultBudget = TimeSpan.FromSeconds(5);
+
+    public static async Task<StalePinResult> ReadAsync(IPairingApi api, INodeReader nodes, Guid pinnedContainer, string pinnedAddress, CancellationToken ct, TimeSpan? budget = null)
     {
         ArgumentNullException.ThrowIfNull(api);
         ArgumentNullException.ThrowIfNull(nodes);
@@ -50,7 +54,20 @@ internal static class StalePin
         }
 
         var steps = new List<StepOutcome>();
-        PairedListResult paired = await api.ListPairedAsync(ct).ConfigureAwait(false);
+        PairedListResult paired;
+        using (var limit = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            limit.CancelAfter(budget ?? DefaultBudget);
+            try
+            {
+                paired = await api.ListPairedAsync(limit.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                steps.Add(StepOutcomes.FromWin32(PairListStep, 1460, "The paired list did not answer within " + (budget ?? DefaultBudget).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms.", ok: false));
+                return new StalePinResult(StalePinState.Unknown, [], steps);
+            }
+        }
         steps.AddRange(paired.Steps.Where(s => !s.Ok));
         if (paired.Steps.Any(s => s.Step == PairListStep && !s.Ok))
         {
