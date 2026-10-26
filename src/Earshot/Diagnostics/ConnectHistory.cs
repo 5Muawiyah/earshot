@@ -398,7 +398,8 @@ internal sealed class ConnectHistory
             w.WriteString("time", e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
             w.WriteString("step", Safe(e.Action));
             w.WriteString("outcome", Safe(e.Outcome));
-            w.WriteString("code", Safe(e.Steps.FirstOrDefault(st => st.Code != 0)?.CodeName ?? "S_OK"));
+            // The first real code: a step's duration (code name "ms") carries milliseconds, not a result.
+            w.WriteString("code", Safe(e.Steps.FirstOrDefault(st => st.Code != 0 && st.CodeName != "ms")?.CodeName ?? "S_OK"));
             w.WriteNumber("attempt", e.Retry ? 2 : 1);
             w.WriteNumber("durationMs", e.DurationMs);
             w.WriteString("reason", Safe(e.FailureClass.Length == 0 ? "None" : e.FailureClass));

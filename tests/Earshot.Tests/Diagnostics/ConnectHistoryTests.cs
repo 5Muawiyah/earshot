@@ -29,6 +29,21 @@ public sealed class ConnectHistoryTests
         Assert.AreEqual("ks-reconnect", read.Steps.Single().Name);
     }
 
+    // The line's headline code is the first real code, not a step's duration: a pairing's look-ms comes ahead of its pair step,
+    // and doctor keeps the headline. Before, it read "ms".
+    [TestMethod]
+    public void TheHeadlineCodeSkipsDurationSteps()
+    {
+        using var temp = new TempFolder();
+        var time = new ManualTime();
+        string path = Path.Combine(temp.Path, "connect-history.jsonl");
+        var history = new ConnectHistory(path, time, new CapturingLog());
+
+        history.Append(Entry(time.GetUtcNow(), ConnectHistoryOutcomes.Failed, [new HistoryStep("look-ms", 1200, "ms"), new HistoryStep("pair", 2, "NotPaired"), new HistoryStep("pair-ms", 900, "ms")]));
+
+        StringAssert.Contains(File.ReadAllText(path), "\"code\":\"NotPaired\"");
+    }
+
     // An append lock that cannot be opened (another account's, which the tray may not open) never throws into the switch: the
     // code is logged and the entry is written without the lock.
     [TestMethod]
