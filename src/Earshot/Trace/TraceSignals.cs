@@ -42,6 +42,7 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
     private EventWaitHandle? _copied;
     private readonly ILog _log;
     private Process? _tray;
+    private SafeProcessHandle? _trayHandle;
     private ManualResetEvent? _trayExit;
 
     public TraceSignals(TraceRequest request, ILog log)
@@ -60,11 +61,16 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
             _done = System.Threading.EventWaitHandleAcl.OpenExisting(TraceEventNames.Done(_request.Nonce), System.Security.AccessControl.EventWaitHandleRights.Modify);
             _copied = System.Threading.EventWaitHandleAcl.OpenExisting(TraceEventNames.Copied(_request.Nonce), System.Security.AccessControl.EventWaitHandleRights.Synchronize);
             _tray = Process.GetProcessById(_request.TrayPid);
+            _trayHandle = Tracing.TrayUser.OpenForWatch(_request.TrayPid, out string? problem);
+            if (_trayHandle is null)
+            {
+                return problem;
+            }
 
             // A process handle is waitable (it is signalled when the process ends), so it is wrapped in an event object
             // that does not own it and waited on beside the stop event.
             // https://learn.microsoft.com/en-us/windows/win32/sync/using-process-and-thread-objects
-            _trayExit = new ManualResetEvent(false) { SafeWaitHandle = new SafeWaitHandle(_tray.SafeHandle.DangerousGetHandle(), ownsHandle: false) };
+            _trayExit = new ManualResetEvent(false) { SafeWaitHandle = new SafeWaitHandle(_trayHandle.DangerousGetHandle(), ownsHandle: false) };
             return null;
         }
         catch (Exception ex) when (ex is WaitHandleCannotBeOpenedException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or IOException or SecurityException or System.ComponentModel.Win32Exception)
@@ -77,7 +83,8 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
     {
         try
         {
-            return _tray is not null && !_tray.HasExited;
+            // The held handle is signalled once the tray has ended.
+            return _trayExit is not null && !_trayExit.WaitOne(0);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -114,7 +121,7 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
 
         try
         {
-            return Tracing.TrayUser.SidOf(_tray.SafeHandle, _request.TrayPid, out problem);
+            return Tracing.TrayUser.SidOf(_trayHandle!, _request.TrayPid, out problem);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException)
         {
@@ -166,6 +173,7 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
         _done?.Dispose();
         _copied?.Dispose();
         _trayExit?.Dispose();
+        _trayHandle?.Dispose();
         _tray?.Dispose();
     }
 }

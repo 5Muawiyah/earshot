@@ -1531,7 +1531,9 @@ copy of 1.6.0 or later, because an older program would take the verb as a
 request to start its tray. At start it says when run folders of earlier
 recordings are still there. The three events it makes for a run grant the
 signed-in user full control and Administrators wait and set, because the
-helper may be another account. Its read and delete failures go to the machine
+helper may be another account. The helper opens the tray's process only to wait
+on and query it, and its token only to read its user; a helper running as
+another account has not yet been run. Its read and delete failures go to the machine
 log. Like install and fix-apply, the helper refuses to run when its environment
 (the user's, since it is raised from the user's session) sets a variable that
 makes the runtime load other code, use another runtime or write a file where it

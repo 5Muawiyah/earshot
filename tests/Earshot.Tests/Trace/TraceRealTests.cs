@@ -25,6 +25,22 @@ public sealed class TraceRealTests
         Assert.AreEqual(me.User, sid);
     }
 
+    // The helper asks for no more than it needs: a process handle to wait on and query (SYNCHRONIZE and
+    // PROCESS_QUERY_LIMITED_INFORMATION), and a token to query. Before, it waited on Process.SafeHandle, which asks for full
+    // access, and opened the token for duplication as well. The held handle still reads the tray's user.
+    [TestMethod]
+    public void TheHelperAsksOnlyToWaitOnAndQueryTheTray()
+    {
+        Assert.AreEqual(0x00101000u, TrayUser.WatchRights);
+        Assert.AreEqual(0x0008u, TrayUser.TokenRights);
+
+        using Microsoft.Win32.SafeHandles.SafeProcessHandle? handle = TrayUser.OpenForWatch(Environment.ProcessId, out string? problem);
+        Assert.IsNotNull(handle, problem);
+        SecurityIdentifier? sid = TrayUser.SidOf(handle, Environment.ProcessId, out problem);
+        using WindowsIdentity me = WindowsIdentity.GetCurrent();
+        Assert.AreEqual(me.User, sid, problem);
+    }
+
     [TestMethod]
     public void AProcessThatIsNotThereGivesAReasonNotASid()
     {

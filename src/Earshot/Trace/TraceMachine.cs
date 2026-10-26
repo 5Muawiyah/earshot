@@ -226,14 +226,43 @@ internal sealed class TraceMachine : ITraceMachine
 }
 
 // The account the tray runs as, read from its process token. The helper is elevated and may run as a different account's
-// token than the tray, so the helper's own identity is not used.
+// token than the tray, so the helper's own identity is not used. Only the rights each step needs are asked for: a process
+// handle that can be waited on and queried (not Process.SafeHandle, which asks for full access), and a token that can be
+// queried. Whether another account's elevated helper is granted even these on the tray's process has not been run.
 // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess
 // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocesstoken
+// https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
+// https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-gettokeninformation
 internal static partial class TrayUser
 {
     private const uint ProcessQueryLimitedInformation = 0x1000;
+    private const uint Synchronize = 0x00100000;
     private const uint TokenQuery = 0x0008;
-    private const uint TokenDuplicate = 0x0002;
+    private const int TokenUserClass = 1;
+
+    // The rights the helper asks for on the tray's process and its token.
+    internal static uint WatchRights { get; } = Synchronize | ProcessQueryLimitedInformation;
+
+    internal static uint TokenRights { get; } = TokenQuery;
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetTokenInformation(nint tokenHandle, int tokenInformationClass, nint tokenInformation, int tokenInformationLength, out int returnLength);
+
+    // A handle to the tray's process to wait on and query, held for the whole recording so its ID used again names nothing here.
+    public static Microsoft.Win32.SafeHandles.SafeProcessHandle? OpenForWatch(int processId, out string? problem)
+    {
+        problem = null;
+        nint process = OpenProcess(WatchRights, false, (uint)processId);
+        if (process == 0)
+        {
+            int error = Marshal.GetLastWin32Error();
+            problem = "OpenProcess for process " + processId + " failed (Win32 error " + error + "): " + new Win32Exception(error).Message;
+            return null;
+        }
+
+        return new Microsoft.Win32.SafeHandles.SafeProcessHandle(process, ownsHandle: true);
+    }
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
     private static partial nint OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
@@ -290,26 +319,43 @@ internal static partial class TrayUser
     private static SecurityIdentifier? SidOfHandle(nint process, int processId, out string? problem)
     {
         problem = null;
-        if (!OpenProcessToken(process, TokenQuery | TokenDuplicate, out nint token))
+        if (!OpenProcessToken(process, TokenRights, out nint token))
         {
             int error = Marshal.GetLastWin32Error();
             problem = "OpenProcessToken for process " + processId + " failed (Win32 error " + error + "): " + new Win32Exception(error).Message;
             return null;
         }
 
+        nint buffer = 0;
         try
         {
-            using var identity = new WindowsIdentity(token);
-            if (identity.User is null)
+            // TokenUser: a TOKEN_USER, whose first field is the SID's address. The first call only asks for the size.
+            _ = GetTokenInformation(token, TokenUserClass, 0, 0, out int needed);
+            if (needed <= 0)
             {
-                problem = "The token of process " + processId + " has no user.";
+                int error = Marshal.GetLastWin32Error();
+                problem = "GetTokenInformation(TokenUser) for process " + processId + " gave no size (Win32 error " + error + "): " + new Win32Exception(error).Message;
                 return null;
             }
 
-            return identity.User;
+            buffer = Marshal.AllocHGlobal(needed);
+            if (!GetTokenInformation(token, TokenUserClass, buffer, needed, out _))
+            {
+                int error = Marshal.GetLastWin32Error();
+                problem = "GetTokenInformation(TokenUser) for process " + processId + " failed (Win32 error " + error + "): " + new Win32Exception(error).Message;
+                return null;
+            }
+
+            nint sid = Marshal.ReadIntPtr(buffer);
+            return new SecurityIdentifier(sid);
         }
         finally
         {
+            if (buffer != 0)
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+
             _ = CloseHandle(token);
         }
     }
