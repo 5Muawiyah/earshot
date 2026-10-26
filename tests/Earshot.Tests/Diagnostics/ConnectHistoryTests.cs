@@ -29,6 +29,27 @@ public sealed class ConnectHistoryTests
         Assert.AreEqual("ks-reconnect", read.Steps.Single().Name);
     }
 
+    // An append lock that cannot be opened (another account's, which the tray may not open) never throws into the switch: the
+    // code is logged and the entry is written without the lock.
+    [TestMethod]
+    [DataRow("denied")]
+    [DataRow("cannot-open")]
+    public void ALockThatCannotBeOpenedIsLoggedAndTheEntryIsStillWritten(string kind)
+    {
+        using var temp = new TempFolder();
+        var time = new ManualTime();
+        var log = new CapturingLog();
+        Exception thrown = kind == "denied" ? new UnauthorizedAccessException("denied") : new WaitHandleCannotBeOpenedException("cannot open");
+        var history = new ConnectHistory(Path.Combine(temp.Path, "connect-history.jsonl"), time, log, _ => throw thrown);
+
+        StepOutcome written = history.Append(Entry(time.GetUtcNow()));
+
+        Assert.IsTrue(written.Ok, written.Detail);
+        Assert.HasCount(1, history.Read());
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("HRESULT 0x" + thrown.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)),
+            string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
     // The tray and a fix run append to the same file. Each append reads, adds and writes it all, so two at once must not lose
     // each other's entry or trip over one temp file.
     [TestMethod]

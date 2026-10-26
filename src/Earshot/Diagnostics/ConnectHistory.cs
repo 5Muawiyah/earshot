@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Earshot.Contracts;
@@ -65,15 +67,24 @@ internal sealed class ConnectHistory
     private readonly string _path;
     private readonly TimeProvider _time;
     private readonly ILog _log;
+    private readonly Func<string, Mutex> _openLock;
 
     public ConnectHistory(string path, TimeProvider time, ILog log)
+        : this(path, time, log, OpenLockForThisAccount)
+    {
+    }
+
+    // The same, with the call that opens the append lock given, so a test can make it fail as another account's lock would.
+    internal ConnectHistory(string path, TimeProvider time, ILog log, Func<string, Mutex> openLock)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(time);
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(openLock);
         _path = path;
         _time = time;
         _log = log;
+        _openLock = openLock;
     }
 
     public string FilePath => _path;
@@ -137,25 +148,32 @@ internal sealed class ConnectHistory
     //
     // The tray and a fix run both append, from different threads and processes, and an append reads, adds and writes the whole
     // file: a named mutex for this file keeps two appends from losing each other's entry, and each writes its own temp file.
+    // The mutex gives the account that runs Earshot full control, so an elevated fix run of the same account makes one the tray
+    // can still open. One that cannot be opened (another account's, under Administrator protection) is logged with its code
+    // and the entry is written without it.
     // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutex
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutexacl.create
     public StepOutcome Append(ConnectHistoryEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        using var mutex = new Mutex(false, MutexName(_path));
-        bool owned;
-        try
+        using Mutex? mutex = OpenLock();
+        bool owned = false;
+        if (mutex is not null)
         {
-            owned = mutex.WaitOne(AppendWait);
-        }
-        catch (AbandonedMutexException)
-        {
-            // The writer that held it ended part way; the file it left is read like any other.
-            owned = true;
-        }
+            try
+            {
+                owned = mutex.WaitOne(AppendWait);
+            }
+            catch (AbandonedMutexException)
+            {
+                // The writer that held it ended part way; the file it left is read like any other.
+                owned = true;
+            }
 
-        if (!owned)
-        {
-            _log.Warn("The connect history is busy after " + AppendWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s, so this entry is written without waiting longer.");
+            if (!owned)
+            {
+                _log.Warn("The connect history is busy after " + AppendWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s, so this entry is written without waiting longer.");
+            }
         }
 
         try
@@ -166,9 +184,37 @@ internal sealed class ConnectHistory
         {
             if (owned)
             {
-                mutex.ReleaseMutex();
+                mutex!.ReleaseMutex();
             }
         }
+    }
+
+    private Mutex? OpenLock()
+    {
+        try
+        {
+            return _openLock(MutexName(_path));
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException or IOException)
+        {
+            _log.Warn("The connect history's lock could not be opened (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + "), so this entry is written without it.");
+            return null;
+        }
+    }
+
+    private static Mutex OpenLockForThisAccount(string name)
+    {
+        var security = new MutexSecurity();
+        using (WindowsIdentity self = WindowsIdentity.GetCurrent())
+        {
+            if (self.User is { } user)
+            {
+                security.AddAccessRule(new MutexAccessRule(user, MutexRights.FullControl, AccessControlType.Allow));
+            }
+        }
+
+        return MutexAcl.Create(false, name, out _, security);
     }
 
     private static readonly TimeSpan AppendWait = TimeSpan.FromSeconds(5);
