@@ -194,11 +194,11 @@ try
         $offWhy = 'the radio check read Off, logged it, and the card said so'
         if ($null -eq $verdictOff) { $offOutcome = 'inconclusive'; $offWhy = 'the report gave no radio verdict' }
         elseif ($verdictOff -ne 'Off') { $offOutcome = $(if ($verdictOff -eq 'Ok') { 'fail' } else { 'inconclusive' }); $offWhy = 'the radio check read ' + $verdictOff + ' with Bluetooth turned off' }
-        elseif ($offLines.Count -eq 0) { $offOutcome = 'fail'; $offWhy = 'the radio check read Off but no "radio check: Off" line was logged' }
+        elseif (@($offLines).Count -eq 0) { $offOutcome = 'fail'; $offWhy = 'the radio check read Off but no "radio check: Off" line was logged' }
         elseif ($card -eq 'no') { $offOutcome = 'fail'; $offWhy = 'the radio check read Off but the card did not say "Bluetooth is off."' }
         elseif ($card -eq 'unsure') { $offOutcome = 'inconclusive'; $offWhy = 'the radio check read Off and logged it; you were not sure what the card said' }
         Add-Criterion -Run $run -Id 'radio-off-seen' -Criterion 'With Bluetooth turned off, the radio check read Off and the card said "Bluetooth is off."' `
-            -Outcome $offOutcome -Detail ($offWhy + '.')
+            -Outcome $offOutcome -Detail ([string]$offWhy + '.')
 
         Wait-Owner -Run $run -Text 'Turn Bluetooth back on in quick settings. Watch the Earshot card if it is still open. Wait until the line goes, or ten seconds, then come back here.'
         $report = Get-DoctorReport -Label 'doctor-bluetooth-on'
@@ -214,7 +214,7 @@ try
         elseif ($gone -eq 'no') { $onOutcome = 'fail'; $onWhy = 'the radio check read Ok but the line stayed on the card' }
         elseif ($gone -eq 'unsure') { $onOutcome = 'inconclusive'; $onWhy = 'the radio check read Ok; you were not sure the line went' }
         Add-Criterion -Run $run -Id 'radio-cleared' -Criterion 'With Bluetooth back on, the radio check read Ok and the "Bluetooth is off." line went.' `
-            -Outcome $onOutcome -Detail ($onWhy + '.')
+            -Outcome $onOutcome -Detail ([string]$onWhy + '.')
 
         # ---- Pair AirPods ----
         Write-Section -Run $run -Title 'Pair AirPods'
@@ -297,41 +297,41 @@ try
             $notAdopted = Get-LogMatches -Pattern 'Pair AirPods: ' -Regex 'Pair AirPods: the new pair was not adopted\.' -Since $pairStart
             $answered = Get-LogMatches -Pattern 'pair: Windows answered ' -Regex 'pair: Windows answered (Paired|AlreadyPaired) \(-?[0-9]+\)\.' -Since $pairStart
             $radioOk = Get-LogMatches -Pattern 'radio check: Ok in' -Regex 'radio check: Ok in [0-9]+ ms\.' -Since $pairStart
-            if ($failed.Count -gt 0) { Add-Finding -Run $run -Name 'pairFailureLine' -Value ([string]$failed[0] -replace '^.*?(Pair AirPods: )', '$1') }
+            if (@($failed).Count -gt 0) { Add-Finding -Run $run -Name 'pairFailureLine' -Value ([string]@($failed)[0] -replace '^.*?(Pair AirPods: )', '$1') }
 
             $report = Get-DoctorReport -Label 'doctor-after-pair'
             $runs = Get-PairingRuns -Report $report -Since $pairStart
-            $lastRun = $(if ($runs.Count -gt 0) { $runs[$runs.Count - 1] } else { $null })
+            $lastRun = $(if (@($runs).Count -gt 0) { @($runs)[@($runs).Count - 1] } else { $null })
             $modelCheck = [string](Get-Field -Object $lastRun -Name 'modelCheck')
-            Add-Finding -Run $run -Name 'pairingRunsSinceStart' -Value $runs.Count
+            Add-Finding -Run $run -Name 'pairingRunsSinceStart' -Value @($runs).Count
             Add-Finding -Run $run -Name 'pairingRunOutcome' -Value (Get-Field -Object $lastRun -Name 'outcome')
             Add-Finding -Run $run -Name 'pairingRunStatus' -Value (Get-Field -Object $lastRun -Name 'status')
             Add-Finding -Run $run -Name 'pairingRunDurationMs' -Value (Get-Field -Object $lastRun -Name 'durationMs')
 
             # pair-paired
-            if ($started.Count -eq 0) { $o = 'fail'; $w = 'no "Pair AirPods: started from the menu" line was logged' }
-            elseif ($paired.Count -gt 0 -and $answered.Count -gt 0) { $o = 'pass'; $w = 'Windows answered Paired and Earshot logged "Pair AirPods: Paired"' }
-            elseif ($failed.Count -gt 0) { $o = 'fail'; $w = 'Earshot logged ' + ([string]$failed[0] -replace '^.*?(Pair AirPods: )', '$1') }
+            if (@($started).Count -eq 0) { $o = 'fail'; $w = 'no "Pair AirPods: started from the menu" line was logged' }
+            elseif (@($paired).Count -gt 0 -and @($answered).Count -gt 0) { $o = 'pass'; $w = 'Windows answered Paired and Earshot logged "Pair AirPods: Paired"' }
+            elseif (@($failed).Count -gt 0) { $o = 'fail'; $w = 'Earshot logged ' + ([string]@($failed)[0] -replace '^.*?(Pair AirPods: )', '$1') }
             else { $o = 'fail'; $w = 'the pairing started but no line says it paired' }
-            Add-Criterion -Run $run -Id 'pair-paired' -Criterion 'Pair AirPods paired the AirPods from the tray and logged that it did.' -Outcome $o -Detail ($w + '.')
+            Add-Criterion -Run $run -Id 'pair-paired' -Criterion 'Pair AirPods paired the AirPods from the tray and logged that it did.' -Outcome $o -Detail ([string]$w + '.')
 
             # pair-radio-checked
             Add-Criterion -Run $run -Id 'pair-radio-checked' -Criterion 'Pair AirPods read the radio first and found it Ok.' `
-                -Outcome $(if ($radioOk.Count -gt 0) { 'pass' } else { 'fail' }) `
-                -Detail $(if ($radioOk.Count -gt 0) { 'a "radio check: Ok" line was logged after Pair AirPods was chosen.' } else { 'no "radio check: Ok" line was logged after Pair AirPods was chosen.' })
+                -Outcome $(if (@($radioOk).Count -gt 0) { 'pass' } else { 'fail' }) `
+                -Detail $(if (@($radioOk).Count -gt 0) { 'a "radio check: Ok" line was logged after Pair AirPods was chosen.' } else { 'no "radio check: Ok" line was logged after Pair AirPods was chosen.' })
 
             # model-check
-            if ($runs.Count -eq 0) { $o = 'inconclusive'; $w = 'the report lists no pairing run since the start' }
+            if (@($runs).Count -eq 0) { $o = 'inconclusive'; $w = 'the report lists no pairing run since the start' }
             elseif ($modelCheck -eq 'airpods') { $o = 'pass'; $w = 'the pairing run records the model check as airpods' }
             elseif ($modelCheck -eq 'not-airpods') { $o = 'fail'; $w = 'the pairing run records the model check as not-airpods' }
             else { $o = 'fail'; $w = 'the pairing run ended before the model check' }
-            Add-Criterion -Run $run -Id 'model-check' -Criterion 'The model check found the new pair to be AirPods.' -Outcome $o -Detail ($w + '.')
+            Add-Criterion -Run $run -Id 'model-check' -Criterion 'The model check found the new pair to be AirPods.' -Outcome $o -Detail ([string]$w + '.')
 
             # pair-adopted
-            if ($adopted.Count -gt 0 -and $notAdopted.Count -eq 0) { $o = 'pass'; $w = 'Earshot logged that the new pair is the one it uses' }
-            elseif ($notAdopted.Count -gt 0) { $o = 'fail'; $w = 'Earshot logged that the new pair was not adopted' }
+            if (@($adopted).Count -gt 0 -and @($notAdopted).Count -eq 0) { $o = 'pass'; $w = 'Earshot logged that the new pair is the one it uses' }
+            elseif (@($notAdopted).Count -gt 0) { $o = 'fail'; $w = 'Earshot logged that the new pair was not adopted' }
             else { $o = 'fail'; $w = 'no line says the new pair was adopted' }
-            Add-Criterion -Run $run -Id 'pair-adopted' -Criterion 'Earshot took the new pair as the one it uses.' -Outcome $o -Detail ($w + '.')
+            Add-Criterion -Run $run -Id 'pair-adopted' -Criterion 'Earshot took the new pair as the one it uses.' -Outcome $o -Detail ([string]$w + '.')
 
             # setup-one-prompt
             $task = Get-TaskState -Run $run -Label 'task-after-pair'
@@ -342,7 +342,7 @@ try
             elseif ($prompts -eq 'one') { $o = 'pass'; $w = 'one permission prompt, and Earshot is set up' }
             elseif ($prompts -eq 'more') { $o = 'fail'; $w = 'more than one permission prompt' }
             else { $o = 'inconclusive'; $w = 'no permission prompt was raised, so Earshot was set up already and the one-prompt set-up was not exercised' }
-            Add-Criterion -Run $run -Id 'setup-one-prompt' -Criterion 'Set-up asked for one Windows permission prompt and Earshot is set up.' -Outcome $o -Detail ($w + '.')
+            Add-Criterion -Run $run -Id 'setup-one-prompt' -Criterion 'Set-up asked for one Windows permission prompt and Earshot is set up.' -Outcome $o -Detail ([string]$w + '.')
 
             # no-old-reading
             $before = Read-Answer -Run $run -Question 'Before you open the case: does the Earshot gauge or card show a battery figure for the AirPods?' -Options @('yes', 'no')
@@ -353,14 +353,14 @@ try
             if ($before -eq 'yes') { $o = 'fail'; $w = 'a battery figure showed before the case was opened, so an old reading was still there' }
             elseif ($after -eq 'yes') { $o = 'pass'; $w = 'no figure before the case was opened, and one appeared when it was' }
             else { $o = 'inconclusive'; $w = 'no old figure showed, but no new one appeared either' }
-            Add-Criterion -Run $run -Id 'no-old-reading' -Criterion 'No old battery reading showed after the new pair, and the new reading appeared once the case was opened.' -Outcome $o -Detail ($w + '.')
+            Add-Criterion -Run $run -Id 'no-old-reading' -Criterion 'No old battery reading showed after the new pair, and the new reading appeared once the case was opened.' -Outcome $o -Detail ([string]$w + '.')
 
             # connect-after-pairing, then Disconnect
             $since = (Get-Date).ToUniversalTime()
             Wait-Owner -Run $run -Text 'Left-click the Earshot icon, then Connect on the card. Wait until the card says the AirPods are connected or gives a reason, then come back here.'
             $attempt = Get-ConnectAttempt -Since $since
             Add-Finding -Run $run -Name 'connectAfterPairingMs' -Value $attempt.Ms
-            Add-Criterion -Run $run -Id 'connect-after-pairing' -Criterion 'One Connect from the card reached playing within 20 seconds.' -Outcome $attempt.Outcome -Detail ($attempt.Why + '.')
+            Add-Criterion -Run $run -Id 'connect-after-pairing' -Criterion 'One Connect from the card reached playing within 20 seconds.' -Outcome $attempt.Outcome -Detail ([string]$attempt.Why + '.')
             Wait-Owner -Run $run -Text 'Disconnect the AirPods from this PC: left-click the Earshot icon and choose Disconnect. Then come back here.'
 
             # The optional trace.
@@ -372,10 +372,10 @@ try
                 $recording = Get-LogMatches -Pattern 'Bluetooth trace: ' -Regex 'Bluetooth trace: recording\.' -Since $traceStart
                 $saved = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: (Saved|SavedInPlace)\.' -Since $traceStart
                 $ended = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: [A-Za-z]+\.' -Since $traceStart
-                if ($recording.Count -gt 0 -and $saved.Count -gt 0) { $o = 'pass'; $w = 'the trace recorded and ended saved' }
-                elseif ($ended.Count -gt 0) { $o = 'fail'; $w = 'the trace ended without being saved: ' + ([string]$ended[0] -replace '^.*?(Bluetooth trace ended: )', '$1') }
+                if (@($recording).Count -gt 0 -and @($saved).Count -gt 0) { $o = 'pass'; $w = 'the trace recorded and ended saved' }
+                elseif (@($ended).Count -gt 0) { $o = 'fail'; $w = 'the trace ended without being saved: ' + ([string]@($ended)[0] -replace '^.*?(Bluetooth trace ended: )', '$1') }
                 else { $o = 'fail'; $w = 'no line says the trace ended' }
-                Add-Criterion -Run $run -Id 'trace-saved' -Criterion 'The Bluetooth trace recorded and was saved.' -Outcome $o -Detail ($w + '.')
+                Add-Criterion -Run $run -Id 'trace-saved' -Criterion 'The Bluetooth trace recorded and was saved.' -Outcome $o -Detail ([string]$w + '.')
             }
             else
             {

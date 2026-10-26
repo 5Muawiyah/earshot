@@ -82,6 +82,12 @@ public sealed class LiveTestFieldTests
             "diag battery-sweep evidence",
             ["src/Earshot/App/DiagBatterySweep.cs"],
             ["containerIdReadOnAMatchedNode", "friendlyName", "instanceId", "keys", "matched", "present", "watchedValues"]),
+
+        // Test 24 reads the radio check's verdict and the last pairing runs out of the doctor report.
+        new(
+            "doctor",
+            ["src/Earshot/Commands/DoctorReport.cs"],
+            ["durationMs", "modelCheck", "outcome", "pairing", "radio", "state", "status", "time"]),
     ];
 
     // The scripts also read the small files Earshot keeps beside the application. Those are serialised

@@ -9,9 +9,9 @@ namespace Earshot.Tests.TestWindow;
 public sealed class RunAllOrderTests
 {
     [TestMethod]
-    public void HasTwentySixItemsTwelveSinglesFiveVariantsNineMoreSingles()
+    public void HasTwentySevenItemsTwelveSinglesFiveVariantsTenMoreSingles()
     {
-        Assert.AreEqual(26, RunAllOrder.Items.Count);
+        Assert.AreEqual(27, RunAllOrder.Items.Count);
     }
 
     [TestMethod]
