@@ -159,7 +159,7 @@ internal sealed class RadioCheck : IRadioCheck
         _log = log;
     }
 
-    public static RadioCheck CreateReal(ILog? log = null) => new(new WinRtRadioApi(), new CfgMgr32DevNodeStatusReader(), null, log);
+    public static RadioCheck CreateReal(ILog? log = null, TimeSpan? budget = null) => new(new WinRtRadioApi(), new CfgMgr32DevNodeStatusReader(), budget, log);
 
     public async Task<RadioCheckResult> CheckAsync(CancellationToken ct)
     {
@@ -260,8 +260,8 @@ internal sealed class RadioCheck : IRadioCheck
             state,
             RadioLines.For(state, problem),
             RadioLines.ActionFor(state),
-            adapter?.Found,
-            adapter?.ClassicSupported,
+            adapter is { Answered: true } ? adapter.Found : null,
+            adapter is { Answered: true } ? adapter.ClassicSupported : null,
             adapter?.RadioState,
             node is { Located: true } ? node.Status : null,
             problem,
@@ -313,8 +313,17 @@ internal sealed class WinRtRadioApi : IRadioApi
             return new AdapterReading(false, false, null, null, steps);
         }
 
-        bool classic = adapter.IsClassicSupported;
-        steps.Add(StepOutcomes.FromHResult("bluetooth-classic", 0, classic ? "supported" : "not supported", ok: classic));
+        // A read that fails claims nothing: the adapter is not called one without Classic Bluetooth, and the code is kept.
+        bool classic = true;
+        try
+        {
+            classic = adapter.IsClassicSupported;
+            steps.Add(StepOutcomes.FromHResult("bluetooth-classic", 0, classic ? "supported" : "not supported", ok: classic));
+        }
+        catch (Exception ex) when (ex is COMException or InvalidOperationException)
+        {
+            steps.Add(StepOutcomes.FromHResult("bluetooth-classic", ex.HResult, ex.GetType().Name, ok: false));
+        }
 
         int? radioState = null;
         try

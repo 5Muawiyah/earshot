@@ -554,9 +554,15 @@ internal static class DoctorReport
             string date = radio.GetProperty("driverDate").GetString() is { Length: > 0 } day ? " (" + day + ")" : "";
             sb.AppendLine("Bluetooth radio: " + (radioState ?? "state unknown") + problem + ", driver " + (radio.GetProperty("driverVersion").GetString() ?? "version unknown") + date + ".");
         }
+        else if (radioState == "NoAdapter")
+        {
+            // Only a read that answered with no default adapter.
+            sb.AppendLine("Bluetooth radio: none found.");
+        }
         else
         {
-            sb.AppendLine("Bluetooth radio: none found" + (radioState is null ? "" : " (" + radioState + ")") + ".");
+            // The read did not finish, threw or was not made: nothing is said to be missing.
+            sb.AppendLine("Bluetooth radio: not read" + (radioState is null ? "" : " (" + radioState + ")") + ".");
         }
 
         JsonElement startup = report.GetProperty("startup");

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Earshot.Bluetooth;
 using Earshot.Commands;
 using Earshot.Infra;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -260,8 +261,9 @@ public sealed class DoctorTests
         StringAssert.Contains(output, "Bluetooth radio: Problem, problem code 10, driver 23.60.0.2 (2024-03-09).");
     }
 
+    // Nothing was read, so nothing is said to be missing. Before, this said "none found", which the AI guide reads as no adapter.
     [TestMethod]
-    public void ARadioNobodyReadSaysNoneFoundWithNoStateAndEveryRadioKeyIsStillThere()
+    public void ARadioNobodyReadSaysNotReadAndEveryRadioKeyIsStillThere()
     {
         string output = Run(new FakeDoctorSource(new DoctorFacts()));
         using JsonDocument report = JsonDocument.Parse(Fenced(output));
@@ -271,7 +273,45 @@ public sealed class DoctorTests
         Assert.AreEqual(JsonValueKind.Null, radio.GetProperty("state").ValueKind);
         Assert.AreEqual(JsonValueKind.Null, radio.GetProperty("problemCode").ValueKind);
         Assert.AreEqual(0, radio.GetProperty("readCodes").GetArrayLength());
-        StringAssert.Contains(output, "Bluetooth radio: none found.");
+        StringAssert.Contains(output, "Bluetooth radio: not read.");
+        Assert.IsFalse(output.Contains("Bluetooth radio: none found", StringComparison.Ordinal));
+    }
+
+    // Only a read that answered and found no adapter says none was found; a read that did not finish says it was not read.
+    [TestMethod]
+    public void OnlyAnAnsweredReadWithNoAdapterSaysNoneFound()
+    {
+        string none = Run(new FakeDoctorSource(new DoctorFacts { Radio = new RadioFact { AdapterFound = false, State = "NoAdapter" } }));
+        string unread = Run(new FakeDoctorSource(new DoctorFacts { Radio = new RadioFact { State = "Unknown" } }));
+        string notAnswered = Run(new FakeDoctorSource(new DoctorFacts { Radio = new RadioFact { AdapterFound = false, State = "Unknown" } }));
+
+        StringAssert.Contains(none, "Bluetooth radio: none found.");
+        StringAssert.Contains(unread, "Bluetooth radio: not read (Unknown).");
+        StringAssert.Contains(notAnswered, "Bluetooth radio: not read (Unknown).");
+        Assert.IsFalse(unread.Contains("Bluetooth radio: none found", StringComparison.Ordinal));
+    }
+
+    // An adapter with no Classic Bluetooth was found: the check stops before its node is read, and doctor still says it is
+    // there. Before, the unread node made it "none found (NoClassic)", the opposite of the card's line.
+    [TestMethod]
+    public void AnAdapterWithoutClassicBluetoothIsFound()
+    {
+        var result = new RadioCheckResult(RadioCheckState.NoClassic, RadioLines.For(RadioCheckState.NoClassic, null), RadioLines.ActionFor(RadioCheckState.NoClassic),
+            AdapterFound: true, ClassicSupported: false, RadioState: null, DevNodeStatus: null, ProblemCode: null, DriverVersion: null, DriverDate: null, ReadCodes: [], ElapsedMs: 5);
+
+        RadioFact fact = RealDoctorSource.RadioFactFrom(result);
+        string output = Run(new FakeDoctorSource(new DoctorFacts { Radio = fact }));
+
+        Assert.IsTrue(fact.Found);
+        StringAssert.Contains(output, "Bluetooth radio: NoClassic");
+        Assert.IsFalse(output.Contains("Bluetooth radio: none found", StringComparison.Ordinal));
+    }
+
+    // Doctor runs in a process of its own, cold, so its read of the radio is given longer than the card's.
+    [TestMethod]
+    public void DoctorGivesTheRadioReadLongerThanTheCard()
+    {
+        Assert.IsGreaterThan(RadioCheck.DefaultBudget, RealDoctorSource.RadioBudget);
     }
 
     [TestMethod]

@@ -288,10 +288,22 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
     private RadioFact ReadRadio()
     {
         // Off the calling thread's context: a WinRT wait must not depend on one.
-        RadioCheckResult result = Task.Run(() => RadioCheck.CreateReal(log).CheckAsync(CancellationToken.None)).GetAwaiter().GetResult();
+        RadioCheckResult result = Task.Run(() => RadioCheck.CreateReal(log, RadioBudget).CheckAsync(CancellationToken.None)).GetAwaiter().GetResult();
+        return RadioFactFrom(result);
+    }
+
+    // Doctor runs in a process of its own, with nothing loaded yet, so its read is given longer than the card's. A waiting
+    // budget, not a measured figure.
+    internal static readonly TimeSpan RadioBudget = TimeSpan.FromSeconds(5);
+
+    // Found: Windows gave a default adapter. Its node may still be unread (an adapter without Classic Bluetooth stops the check
+    // before the node), which leaves the node's fields empty, not the adapter missing.
+    internal static RadioFact RadioFactFrom(RadioCheckResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
         return new RadioFact
         {
-            Found = result.AdapterFound == true && result.DevNodeStatus is not null,
+            Found = result.AdapterFound == true,
             DriverVersion = result.DriverVersion,
             AdapterFound = result.AdapterFound,
             ClassicSupported = result.ClassicSupported,

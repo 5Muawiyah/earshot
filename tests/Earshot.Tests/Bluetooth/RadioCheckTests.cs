@@ -134,6 +134,7 @@ public sealed class RadioCheckTests
         Assert.AreEqual(RadioAction.None, r.Action);
         Assert.IsFalse(r.BlocksRepair);
         Assert.AreEqual(unchecked((int)0x8007048F), r.HistoryCode);
+        Assert.IsNull(r.AdapterFound, "Not asked is not the same as not found.");
     }
 
     [TestMethod]
