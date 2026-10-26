@@ -87,6 +87,23 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
         }
     }
 
+    // Process.SessionId is ProcessIdToSessionId's answer.
+    // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-processidtosessionid
+    public bool TrayInThisSession()
+    {
+        try
+        {
+            using Process self = Process.GetCurrentProcess();
+            return _tray is not null && _tray.SessionId == self.SessionId;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            _log.Warn("trace: the tray process's session could not be read (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "), so it counts as another session's.");
+            return false;
+        }
+    }
+
     public TraceStopReason WaitForStop(TimeSpan max)
     {
         if (_stop is null || _trayExit is null)

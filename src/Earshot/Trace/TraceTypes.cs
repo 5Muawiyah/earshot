@@ -226,12 +226,13 @@ internal static class TraceCopy
     public const string SetUpFirst = "Set up or update Earshot first, then record a Bluetooth trace.";
     public const string Untrusted = "Earshot's trace folder under ProgramData can be changed by more than administrators, so nothing was copied from it.";
 
+    // Whether the helper's own copy went is known only once it ends; when it could not, AdminCopyKept follows.
     public static string NotKept(string folder, string problem) =>
-        "The trace was recorded but could not be copied to " + folder + " (" + problem + "), so it was not kept. Try again.";
+        "The trace was recorded but could not be copied to " + folder + " (" + problem + "). Try again.";
 
     public static string Leftover(int count) =>
         "The Earshot\\trace folder under ProgramData still holds " + count.ToString(CultureInfo.InvariantCulture) +
-        " earlier Bluetooth trace folder(s), which only administrators can open. They may hold pairing keys; an administrator can delete them.";
+        " Bluetooth trace folder(s), which only administrators can open. When no trace is recording they are left from earlier recordings and may hold pairing keys; an administrator can delete them.";
     public const string AdminCopyKept = "Earshot's own copy could not be deleted. It is in the Earshot\\trace folder under ProgramData, which only administrators can open.";
 
     public static string SavedIn(string folder) => "Trace saved in " + folder + ". Delete it when you're done.";

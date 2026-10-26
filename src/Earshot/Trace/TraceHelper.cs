@@ -43,6 +43,10 @@ internal interface ITraceSignals
 
     bool TrayRunning();
 
+    // True when the tray process named on the command line is in this helper's own Windows session: the trace is made readable
+    // for that process's user, so it must be the one at this screen.
+    bool TrayInThisSession();
+
     // Blocks until the tray asks to stop, the tray process exits, or max passes.
     TraceStopReason WaitForStop(TimeSpan max);
 
@@ -102,6 +106,12 @@ internal static class TraceHelper
             return TraceOutcome.Refused;
         }
 
+        if (!signals.TrayInThisSession())
+        {
+            log.Warn("trace: the tray (process " + request.TrayPid.ToString(CultureInfo.InvariantCulture) + ") is in another Windows session, so nothing was started.");
+            return TraceOutcome.Refused;
+        }
+
         string? folderProblem = machine.PrepareRunFolder(request.Nonce, out string runFolder);
         if (folderProblem is not null)
         {
@@ -142,7 +152,9 @@ internal static class TraceHelper
         // the trace, so the run ends with its own exit code and the tray tells the person.
         if (outcome != TraceOutcome.Discarded && !signals.WaitCopied(CopyWait))
         {
-            log.Warn("trace: the tray did not say it was finished within " + CopyWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s, so nobody took the file and it is deleted.");
+            log.Warn(signals.TrayRunning()
+                ? "trace: the tray did not say it was finished within " + CopyWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s, so nobody took the file and it is deleted."
+                : "trace: the tray exited before it said it was finished, so nobody took the file and it is deleted.");
         }
 
         string? deleteProblem = machine.DeleteRunFolder(runFolder);

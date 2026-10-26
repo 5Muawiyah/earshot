@@ -284,6 +284,26 @@ public sealed class TraceRecorderTests
         Assert.AreEqual(TraceOutcome.SetupFailed, result.Outcome);
         Assert.IsTrue(rig.Factory.Signals.CopiedSet, "Nobody can read the helper's copy where it is, so the helper is told to delete it now.");
         Assert.AreEqual(TraceCopy.NotKept(Destination, "disk full"), result.Message);
+        Assert.IsFalse(result.Message.Contains("not kept", StringComparison.Ordinal), "Whether the helper's copy went is not known until it ends.");
+    }
+
+    // The copy failed and then the helper could not delete its own copy: the person is told where that copy is. Before, the
+    // card said the trace was not kept, while a copy that may hold pairing keys stayed under ProgramData.
+    [TestMethod]
+    public async Task ACopyThatFailsWhoseHelperCouldNotDeleteItsCopySaysWhereThatCopyIs()
+    {
+        var rig = new Rig();
+        rig.Files.CopyProblem = "disk full";
+        Task<TraceResult> run = rig.Recorder.RecordAsync(CancellationToken.None);
+        await Rig.Until(() => rig.Calls.Count >= 2);
+        rig.Files.ResultText = Saved;
+        rig.Factory.Signals.Finish();
+        rig.Launcher.Completion.SetResult(new ElevatedRun(ExitCodes.IoError, StepOutcomes.FromWin32("runas", 0)));
+
+        TraceResult result = await run;
+
+        StringAssert.Contains(result.Message, TraceCopy.NotKept(Destination, "disk full"));
+        StringAssert.Contains(result.Message, TraceCopy.AdminCopyKept);
     }
 
     [TestMethod]
@@ -331,7 +351,9 @@ public sealed class TraceRecorderTests
         rig.Files.Leftovers = 2;
 
         Assert.AreEqual(TraceCopy.Leftover(2), rig.Recorder.LeftoverNotice());
-        StringAssert.Contains(TraceCopy.Leftover(2), "2 earlier Bluetooth trace folder");
+        StringAssert.Contains(TraceCopy.Leftover(2), "2 Bluetooth trace folder");
+        // A folder another session is recording into now is counted too, so the notice does not call them all earlier.
+        Assert.IsFalse(TraceCopy.Leftover(2).Contains("2 earlier", StringComparison.Ordinal));
     }
 
     // A copy cut off by Exit is left under a temporary name, never as a trace that looks whole; the start removes it.

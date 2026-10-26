@@ -32,6 +32,7 @@ public sealed class TraceRealTests
 
         Assert.IsNull(sid);
         Assert.IsFalse(string.IsNullOrEmpty(problem));
+        StringAssert.Contains(problem, "(Win32 error ", "The raw code is kept, not only its message.");
     }
 
     [TestMethod]
@@ -147,6 +148,18 @@ public sealed class TraceRealTests
         Assert.IsFalse(helper.WaitCopied(TimeSpan.FromMilliseconds(100)));
         tray.SetCopied();
         Assert.IsTrue(helper.WaitCopied(TimeSpan.FromSeconds(10)));
+    }
+
+    // The test process stands in for the tray: it is in the helper's own session.
+    [TestMethod]
+    public void ATrayInThisSessionIsSeenAsSo()
+    {
+        string nonce = NewNonce();
+        using var tray = TrayTraceSignals.Create(nonce);
+        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, nonce), new CapturingLog());
+        Assert.IsNull(helper.Open());
+
+        Assert.IsTrue(helper.TrayInThisSession());
     }
 
     [TestMethod]

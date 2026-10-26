@@ -215,8 +215,9 @@ internal sealed class TraceRecorder : ITraceRecorder
         TraceResult mapped = await FinishAsync(nonce, signals, result).ConfigureAwait(false);
         ElevatedRun finished = await helper.ConfigureAwait(false);
 
-        // The helper deletes its own copy once the tray has taken the file, and says so by its exit code when it could not.
-        if (mapped.Outcome == TraceOutcome.Saved && finished.ExitCode == ExitCodes.IoError)
+        // The helper deletes its own copy once the tray has taken the file, or at once when the copy failed, and says so by its
+        // exit code when it could not.
+        if (result.FileName.Length > 0 && finished.ExitCode == ExitCodes.IoError)
         {
             _log.Warn("trace: the helper could not delete its own copy of the trace.");
             return mapped with { Message = mapped.Message + " " + TraceCopy.AdminCopyKept };
@@ -335,7 +336,7 @@ internal sealed class TraceRecorder : ITraceRecorder
 
         if (!TraceMarker.SameBoot(marker.BootSeconds, _files.BootSeconds()))
         {
-            _log.Info("trace: the marker is from before the PC last started, so no recording is running from it.");
+            _log.Info("trace: the marker is not from this start of the PC (or the clock moved by more than 30 s since), so it is not taken to mean a recording is running.");
             return null;
         }
 

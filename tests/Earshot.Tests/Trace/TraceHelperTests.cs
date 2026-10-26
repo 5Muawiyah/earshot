@@ -89,6 +89,10 @@ internal sealed class FakeTraceSignals : ITraceSignals
 
     public bool TrayRunning() => TrayAlive;
 
+    public bool SameSession { get; set; } = true;
+
+    public bool TrayInThisSession() => SameSession;
+
     public TraceStopReason WaitForStop(TimeSpan max)
     {
         Calls.Add("wait");
@@ -98,10 +102,18 @@ internal sealed class FakeTraceSignals : ITraceSignals
 
     public void SignalDone() => Calls.Add("done");
 
+    // The tray exits while the helper waits for it to copy.
+    public bool TrayExitsDuringCopyWait { get; set; }
+
     public bool WaitCopied(TimeSpan max)
     {
         Calls.Add("wait copied");
         WaitedForCopy = max;
+        if (TrayExitsDuringCopyWait)
+        {
+            TrayAlive = false;
+        }
+
         return CopiedSet;
     }
 }
@@ -334,6 +346,31 @@ public sealed class TraceHelperTests
 
         Assert.IsNotEmpty(runner.TempFolders);
         Assert.IsTrue(runner.TempFolders.All(f => f == Path.Combine(machine.TraceFolder, Nonce)), string.Join(" | ", runner.TempFolders));
+    }
+
+    // The trace is made readable for the user of the process named on the command line, so a process in another session (another
+    // person signed in on this PC) gets nothing started. Before, any process id was taken.
+    [TestMethod]
+    public void ATrayInAnotherSessionIsRefusedBeforeAnythingStarts()
+    {
+        var (outcome, machine, _, runner, _) = Run((_, s, _) => s.SameSession = false);
+
+        Assert.AreEqual(TraceOutcome.Refused, outcome);
+        Assert.IsEmpty(runner.Calls);
+        Assert.IsFalse(machine.Calls.Any(c => c.StartsWith("folder ", StringComparison.Ordinal)));
+    }
+
+    // The log says which it was: the tray exited, or it did not answer in time. Before, a tray that exited after a few seconds
+    // was logged as not answering within the whole wait.
+    [TestMethod]
+    public void ATrayThatExitsBeforeItCopiesIsLoggedAsExited()
+    {
+        var (_, _, _, _, exited) = Run((_, s, _) => { s.CopiedSet = false; s.TrayExitsDuringCopyWait = true; });
+        var (_, _, _, _, silent) = Run((_, s, _) => s.CopiedSet = false);
+
+        Assert.IsTrue(exited.Has(LogLevel.Warn, "the tray exited before it said it was finished"), string.Join(" | ", exited.Entries.Select(e => e.Message)));
+        Assert.IsFalse(exited.Has(LogLevel.Warn, "did not say it was finished within"));
+        Assert.IsTrue(silent.Has(LogLevel.Warn, "did not say it was finished within"));
     }
 
     [TestMethod]

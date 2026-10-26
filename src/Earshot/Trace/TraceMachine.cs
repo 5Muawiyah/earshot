@@ -250,7 +250,8 @@ internal static partial class TrayUser
         nint process = OpenProcess(ProcessQueryLimitedInformation, false, (uint)processId);
         if (process == 0)
         {
-            problem = "OpenProcess for process " + processId + " failed: " + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+            int error = Marshal.GetLastWin32Error();
+            problem = "OpenProcess for process " + processId + " failed (Win32 error " + error + "): " + new Win32Exception(error).Message;
             return null;
         }
 
@@ -258,7 +259,8 @@ internal static partial class TrayUser
         {
             if (!OpenProcessToken(process, TokenQuery | TokenDuplicate, out nint token))
             {
-                problem = "OpenProcessToken for process " + processId + " failed: " + new Win32Exception(Marshal.GetLastWin32Error()).Message;
+                int error = Marshal.GetLastWin32Error();
+                problem = "OpenProcessToken for process " + processId + " failed (Win32 error " + error + "): " + new Win32Exception(error).Message;
                 return null;
             }
 
