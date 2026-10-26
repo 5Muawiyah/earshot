@@ -2888,8 +2888,8 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             if (gateRepinned)
             {
-                _log.Warn("The boot block now uses " + choice.Address + ", but " + (_closing ? "Earshot is closing, so the tray did not save it" : "the tray could not save it") +
-                    ", so a connect that needs an allow is refused until the device is chosen again.");
+                // With the gate re-pinned the save was tried even while closing, so this is always a failed save.
+                _log.Warn("The boot block now uses " + choice.Address + ", but the tray could not save it, so a connect that needs an allow is refused until the device is chosen again.");
             }
 
             return DeviceChoiceResult.NotApplied;
