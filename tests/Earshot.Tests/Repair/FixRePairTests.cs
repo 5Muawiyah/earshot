@@ -64,6 +64,45 @@ public sealed class FixRePairTests
         Assert.AreEqual(FixRig.NewAirPodsAddress, result.Adoptable!.Address);
     }
 
+    // Before the pairing window exists the person has no Cancel, and the run holds the Fix lock: a paired list that does not
+    // answer ends the run within its budget, with nothing removed.
+    [TestMethod]
+    public async Task APairedListThatDoesNotAnswerBeforeTheRemovalRemovesNothingWithinItsBudget()
+    {
+        using var rig = new FixRig();
+        ArrangeHappyPairing(rig);
+        rig.Pairing.HangOnList = true;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        RePairResult result = await Make(rig).RunAsync(RePairConsent(), Target, CancellationToken.None);
+
+        Assert.AreEqual(RePairFailure.NotResolved, result.Failure, string.Join("; ", result.Lines));
+        Assert.IsFalse(result.Touched);
+        Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)));
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "pair-list" && s.Code == 1460 && s.CodeName == "earshot-timeout"), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code)));
+        Assert.IsLessThan(10_000L, watch.ElapsedMilliseconds);
+    }
+
+    // A removal Windows does not answer: the run ends within its budget, says it cannot tell whether the pair was removed, and
+    // counts as touched, so the closing block follows.
+    [TestMethod]
+    public async Task ARemovalThatDoesNotAnswerEndsWithinItsBudgetAndSaysItCannotTell()
+    {
+        using var rig = new FixRig();
+        ArrangeHappyPairing(rig);
+        rig.Pairing.HangOnUnpair = true;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        RePairResult result = await Make(rig).RunAsync(RePairConsent(), Target, CancellationToken.None);
+
+        Assert.AreEqual(RePairFailure.UnpairFailed, result.Failure);
+        Assert.IsTrue(result.Touched);
+        Assert.AreEqual(1460, result.Statuses.Single().Code);
+        Assert.IsTrue(result.Lines.Any(l => l.Contains("not known whether it was removed", StringComparison.Ordinal)), string.Join("; ", result.Lines));
+        Assert.IsFalse(rig.Pairing.Calls.Contains("watch"), "Nothing was scanned.");
+        Assert.IsLessThan(10_000L, watch.ElapsedMilliseconds);
+    }
+
     [TestMethod]
     public async Task AFirstDeviceListedBeforeThePromptIsNeverACandidate()
     {

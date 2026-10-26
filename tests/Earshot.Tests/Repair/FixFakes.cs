@@ -234,9 +234,17 @@ internal sealed class FakePairing : IPairingApi
         return new PairedListResult(Paired.ToList(), ListSteps.ToList());
     }
 
-    public Task<PairingCallResult> UnpairAsync(string deviceId, CancellationToken ct)
+    // UnpairAsync waits until it is cancelled, as a removal Windows never answers does.
+    public bool HangOnUnpair { get; set; }
+
+    public async Task<PairingCallResult> UnpairAsync(string deviceId, CancellationToken ct)
     {
         Calls.Add("unpair:" + deviceId);
+        if (HangOnUnpair)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+        }
+
         if (UnpairResult.Success)
         {
             if (UnpairRemovesFromList)
@@ -247,7 +255,7 @@ internal sealed class FakePairing : IPairingApi
             OnUnpaired?.Invoke();
         }
 
-        return Task.FromResult(UnpairResult);
+        return UnpairResult;
     }
 
     public IUnpairedWatch Watch()
@@ -394,6 +402,7 @@ internal sealed class FixRig : IDisposable
             PairTimeout = TimeSpan.FromMilliseconds(300),
             PostPairWait = TimeSpan.Zero,
             PairedListWait = TimeSpan.FromMilliseconds(200),
+            UnpairWait = TimeSpan.FromMilliseconds(200),
             Delay = (_, _) => Task.CompletedTask,
         },
     };

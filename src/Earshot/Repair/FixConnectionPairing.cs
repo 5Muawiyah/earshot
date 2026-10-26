@@ -524,7 +524,23 @@ internal sealed class RePairer
 
         if (target is not null)
         {
-            PairedListResult list = await _api.ListPairedAsync(ct).ConfigureAwait(false);
+            // Both calls before the window have budgets of their own: the person has no Cancel yet, and the run holds the Fix lock.
+            PairedListResult list;
+            using (var listWait = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                listWait.CancelAfter(_options.PairedListWait);
+                try
+                {
+                    list = await _api.ListPairedAsync(listWait.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    steps.Add(StepOutcomes.EarshotTimeout("pair-list", "The paired list did not answer within " + _options.PairedListWait.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms."));
+                    lines.Add("Windows did not list the paired devices in time, so nothing was removed.");
+                    return Done(false, RePairFailure.NotResolved);
+                }
+            }
+
             steps.AddRange(list.Steps);
             List<PairedDevice> matches = list.Devices.Where(d => string.Equals(d.Address12, target.Address, StringComparison.Ordinal)).ToList();
             if (matches.Count != 1)
@@ -545,9 +561,30 @@ internal sealed class RePairer
 
             touched = true;
             Began = true;
-            PairingCallResult unpair = await _api.UnpairAsync(paired.Id, ct).ConfigureAwait(false);
+            PairingCallResult unpair;
+            bool unanswered = false;
+            using (var unpairWait = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                unpairWait.CancelAfter(_options.UnpairWait);
+                try
+                {
+                    unpair = await _api.UnpairAsync(paired.Id, unpairWait.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    unanswered = true;
+                    unpair = new PairingCallResult(StepOutcomes.EarshotTimeoutName, StepOutcomes.EarshotTimeoutCode, false, null);
+                }
+            }
+
             statuses.Add(unpair);
             lines.Add("Remove " + target.Name + ": " + unpair.Name + " (" + unpair.Code.ToString(CultureInfo.InvariantCulture) + ").");
+            if (unanswered)
+            {
+                lines.Add("Windows did not answer in time, so it is not known whether it was removed. Nothing else was done.");
+                return Done(false, RePairFailure.UnpairFailed);
+            }
+
             if (!unpair.Success)
             {
                 lines.Add("Windows did not remove it. Nothing else was done.");

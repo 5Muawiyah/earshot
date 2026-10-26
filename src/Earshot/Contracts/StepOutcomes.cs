@@ -27,8 +27,10 @@ public static class StepOutcomes
     // so neither a log nor the history takes it for a timeout Windows returned.
     public const string EarshotTimeoutName = "earshot-timeout";
 
+    public const int EarshotTimeoutCode = 1460;
+
     public static StepOutcome EarshotTimeout(string step, string detail) =>
-        new(step, Ok: false, 1460, EarshotTimeoutName, detail);
+        new(step, Ok: false, EarshotTimeoutCode, EarshotTimeoutName, detail);
 
     // A step this build cannot perform and that made no native call.
     public static StepOutcome NotAvailable(string step, string detail) =>

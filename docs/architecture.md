@@ -1309,7 +1309,12 @@ standard user can change it. A run with nothing to undo needs no administrator
 run and goes on as before. When the re-pair found the AirPods and this PC could
 not reach them, the result has a Record a Bluetooth trace button, which asks the
 tray (a named event, `Local\Earshot.TraceRequested`) to show the same note and
-Record button as its settings row.
+Record button as its settings row. The paired-list read and the removal come
+before the pairing window, so the person has no Cancel yet: they are given 5
+and 30 seconds (waiting budgets), and past either the run stops with
+earshot-timeout; a removal that did not answer says it is not known whether
+the pair was removed. A re-pair cut off by Cancel, the window's close or a fault
+once it has begun still writes its connect-history entry.
 
 ### Pair AirPods
 

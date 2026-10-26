@@ -75,6 +75,10 @@ internal sealed class FixOptions
     // that could not be looked at, and the run (holding the Fix lock and the pairing flag) does not wait on Windows.
     public TimeSpan PairedListWait { get; init; } = TimeSpan.FromSeconds(5);
 
+    // How long Fix's removal of the old pair is given. A waiting budget, not a measured figure: it runs before the pairing window
+    // exists, so the person has no Cancel, and the run holds the Fix lock.
+    public TimeSpan UnpairWait { get; init; } = TimeSpan.FromSeconds(30);
+
     public Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = static (span, ct) => Task.Delay(span, ct);
 }
 
