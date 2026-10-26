@@ -35,6 +35,20 @@ public sealed class RadioCheckTests
     private static RadioCheck Check(AdapterReading reading, DevNodeStatusInfo node, TimeSpan? budget = null, FakeNodes? nodes = null) =>
         new(new FakeRadioApi(_ => Task.FromResult(reading)), nodes ?? new FakeNodes(node), budget);
 
+    // The log line of a read that failed carries the read's raw code. Before, it gave the state alone.
+    [TestMethod]
+    public async Task TheLogLineCarriesTheCodeOfAReadThatFailed()
+    {
+        var log = new CapturingLog();
+        AdapterReading failed = new(false, false, null, null, [StepOutcomes.FromHResult("bluetooth-adapter", unchecked((int)0x8007001F), "GetDefaultAsync failed.", ok: false)]);
+        var check = new RadioCheck(new FakeRadioApi(_ => Task.FromResult(failed)), new FakeNodes(Node()), log: log);
+
+        await check.CheckAsync(CancellationToken.None);
+
+        Assert.IsTrue(log.Entries.Any(e => e.Message.StartsWith("radio check:", StringComparison.Ordinal) && e.Message.Contains("0x8007001F", StringComparison.Ordinal)),
+            string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
     [TestMethod]
     public async Task AnAdapterWithClassicAnOnRadioAndNoProblemIsOkAndSaysNothing()
     {

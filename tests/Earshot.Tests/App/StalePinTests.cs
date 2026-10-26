@@ -192,6 +192,27 @@ public sealed class StalePinTests
         Assert.AreEqual(FixRig.SecondAirPodsContainer, other.ContainerId);
     }
 
+    // A read that failed puts its raw code in the log line: the paired list's HRESULT, and a node read's CONFIGRET without the
+    // device instance it named. Before, the line gave the state alone.
+    [TestMethod]
+    public async Task TheLogLineCarriesTheCodesOfAReadThatFailed()
+    {
+        using var rig = new FixRig();
+        rig.Pairing.ListSteps.Add(StepOutcomes.FromHResult("pair-list", unchecked((int)0x8007001F), "FindAllAsync failed.", ok: false));
+
+        string line = StalePin.Describe(await Read(rig));
+
+        StringAssert.Contains(line, "Unknown");
+        StringAssert.Contains(line, "pair-list");
+        StringAssert.Contains(line, "0x8007001F");
+
+        string node = @"BTHENUM\DEV_" + RecordedNodes.AirPodsAddress + @"\7&1a2b3c4d&0&BLUETOOTHDEVICE_" + RecordedNodes.AirPodsAddress;
+        string nodeLine = StalePin.Describe(new StalePinResult(StalePinState.Unknown, [], [StepOutcomes.FromConfigRet("cm-container:" + node, 0x25)]));
+        StringAssert.Contains(nodeLine, "cm-container");
+        StringAssert.Contains(nodeLine, "0x00000025");
+        Assert.IsFalse(nodeLine.Contains(RecordedNodes.AirPodsAddress, StringComparison.OrdinalIgnoreCase), nodeLine);
+    }
+
     [TestMethod]
     public async Task TheLogLineNamesNoDeviceAndNoAddress()
     {

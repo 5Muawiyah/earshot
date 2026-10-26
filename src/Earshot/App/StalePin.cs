@@ -102,10 +102,11 @@ internal static class StalePin
     private static string NameOf(AirPodsCandidate candidate, PairedDevice device) =>
         !string.IsNullOrWhiteSpace(device.Name) ? device.Name : !string.IsNullOrWhiteSpace(candidate.Name) ? candidate.Name : "AirPods";
 
-    // One log line for the result; numbers and states only, never a name or an address.
+    // One log line for the result, with the raw code of each read that failed; numbers and states only, never a name or an address.
     public static string Describe(StalePinResult result)
     {
         ArgumentNullException.ThrowIfNull(result);
-        return "pinned AirPods: " + result.State + (result.IsStale ? ", " + result.Others.Count.ToString(CultureInfo.InvariantCulture) + " other pair(s) paired" : "") + ".";
+        return "pinned AirPods: " + result.State + (result.IsStale ? ", " + result.Others.Count.ToString(CultureInfo.InvariantCulture) + " other pair(s) paired" : "") + "." +
+            StepOutcomes.DescribeFailures(result.Steps);
     }
 }

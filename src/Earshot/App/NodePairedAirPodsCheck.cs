@@ -20,6 +20,8 @@ internal sealed class NodePairedAirPodsCheck : IPairedAirPodsCheck
     public PairedAirPodsReading Read()
     {
         AirPodsDiscoveryResult found = AirPodsDiscovery.Find(_nodes);
-        return found.Listed ? new PairedAirPodsReading(true, found.Candidates.Count(c => c.DevicePresent)) : PairedAirPodsReading.Unknown;
+        return found.Listed
+            ? new PairedAirPodsReading(true, found.Candidates.Count(c => c.DevicePresent))
+            : PairedAirPodsReading.Unknown with { Steps = found.Steps.Where(s => !s.Ok).ToList() };
     }
 }

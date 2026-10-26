@@ -231,7 +231,7 @@ internal sealed partial class TrayContext
         if (!found.Listed)
         {
             // New AirPods may be paired and unblocked, and nothing can be told now: the person is told, and the marker stays.
-            _log.Warn("Pair AirPods: the devices could not be listed, so the person is asked to choose and the marker is kept.");
+            _log.Warn("Pair AirPods: the devices could not be listed, so the person is asked to choose and the marker is kept." + StepOutcomes.DescribeFailures(found.Steps));
             return await OfferChooseLeftPairAsync(PairAirPodsText.RecoverUnread, place);
         }
 
@@ -279,6 +279,7 @@ internal sealed partial class TrayContext
         AirPodsDiscoveryResult found = await Task.Run(() => AirPodsDiscovery.Find(services.Nodes), CancellationToken.None);
         if (!found.Listed)
         {
+            _log.Warn("Pair AirPods: the devices could not be listed, so whether a new pair was left cannot be told." + StepOutcomes.DescribeFailures(found.Steps));
             return null;
         }
 
@@ -522,7 +523,7 @@ internal sealed partial class TrayContext
             return RadioSays.Stop;
         }
 
-        _log.Info("Pairing check (" + reason + "): radio " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms.");
+        _log.Info("Pairing check (" + reason + "): radio " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms." + StepOutcomes.DescribeFailures(result.ReadCodes));
         if (_closing || _elevatedRun == PairRun)
         {
             return RadioSays.Stop;
@@ -577,7 +578,7 @@ internal sealed partial class TrayContext
 
         var watch = System.Diagnostics.Stopwatch.StartNew();
         RadioCheckResult result = await radio.CheckAsync(ct);
-        _log.Info("Radio check after a failed connect, " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms.");
+        _log.Info("Radio check after a failed connect, " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms." + StepOutcomes.DescribeFailures(result.ReadCodes));
         return result;
     }
 

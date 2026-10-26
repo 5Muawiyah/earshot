@@ -71,9 +71,12 @@ internal sealed class NoProtectionCheck : IProtectionCheck
 // asks it before Earshot is set up: with none paired there is nothing to connect in Windows, and the person is taken to Pair AirPods.
 //   Read   the node list could be read at all
 //   Count  how many sets of AirPods are paired now
+//   Steps  the failed steps of a read that could not be done, with their raw codes
 internal sealed record PairedAirPodsReading(bool Read, int Count)
 {
     public static PairedAirPodsReading Unknown { get; } = new(false, 0);
+
+    public IReadOnlyList<Earshot.Contracts.StepOutcome> Steps { get; init; } = [];
 
     public bool NonePaired => Read && Count == 0;
 }

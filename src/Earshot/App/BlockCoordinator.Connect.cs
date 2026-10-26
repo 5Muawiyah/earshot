@@ -498,6 +498,12 @@ internal sealed partial class BlockCoordinator
     private async Task<ToggleReport> OpenSettingsBeforeSetUpAsync(ToggleRequest request, List<StepOutcome> steps, CancellationToken ct)
     {
         PairedAirPodsReading paired = await _services.PairedAirPods.ReadAsync(ct);
+        steps.AddRange(paired.Steps);
+        if (!paired.Read)
+        {
+            _log.Info("connect in windows: whether any AirPods are paired could not be read, so Bluetooth settings is opened." + StepOutcomes.DescribeFailures(paired.Steps));
+        }
+
         if (paired.NonePaired)
         {
             _log.Info("connect in windows: Earshot is not set up and no AirPods are paired, so Pair AirPods is offered instead.");

@@ -35,4 +35,23 @@ public static class StepOutcomes
     // A step this build cannot perform and that made no native call.
     public static StepOutcome NotAvailable(string step, string detail) =>
         new(step, Ok: false, NativeCodes.NotAvailable, NativeCodes.Name(NativeCodes.NotAvailable), detail);
+
+    // The failed steps of a read, for its log line: each step's name without the device it named (an instance id carries the
+    // address), its code's name and the raw code, each once. Empty when nothing failed.
+    public static string DescribeFailures(IEnumerable<StepOutcome> steps)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        List<string> failed = steps
+            .Where(s => !s.Ok)
+            .Select(s => StepName(s.Step) + " " + s.CodeName + " (0x" + unchecked((uint)s.Code).ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ")")
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return failed.Count == 0 ? "" : " Failed: " + string.Join(", ", failed) + ".";
+    }
+
+    private static string StepName(string step)
+    {
+        int colon = step.IndexOf(':', StringComparison.Ordinal);
+        return colon < 0 ? step : step[..colon];
+    }
 }

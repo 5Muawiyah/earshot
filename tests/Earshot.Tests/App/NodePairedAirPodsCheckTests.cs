@@ -77,4 +77,19 @@ public sealed class NodePairedAirPodsCheckTests
         Assert.IsFalse(reading.Read);
         Assert.IsFalse(reading.NonePaired, "Not knowing is never a reason to say nothing is paired.");
     }
+
+    // The failed list's raw code goes with the reading, for the connect's steps and log. Before, it was dropped.
+    [TestMethod]
+    public async Task AFailedListCarriesItsCode()
+    {
+        using var rig = new FixRig();
+        rig.Gate.Nodes.ListResult = CfgMgr32.CR_FAILURE;
+
+        PairedAirPodsReading reading = await new NodePairedAirPodsCheck(rig.Nodes).ReadAsync(CancellationToken.None);
+
+        Earshot.Contracts.StepOutcome step = reading.Steps.Single();
+        Assert.AreEqual("cm-list", step.Step);
+        Assert.AreEqual((int)CfgMgr32.CR_FAILURE, step.Code);
+        Assert.IsFalse(step.Ok);
+    }
 }
