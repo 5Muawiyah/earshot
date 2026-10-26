@@ -814,7 +814,7 @@
     { "test": "23", "kind": "check", "scriptText": "restart-reached", "plain": "This computer should have been restarted for the last three connects." },
     { "test": "23", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." },
 
-    { "test": "24", "kind": "precondition", "scriptText": "Earshot 1.5.0 or later is installed, set up, and running in the tray.", "plain": "Earshot 1.5.0 or later is installed, set up, and its icon is showing near the clock." },
+    { "test": "24", "kind": "precondition", "scriptText": "Earshot 1.6.0 or later is installed, set up, and running in the tray.", "plain": "Earshot 1.6.0 or later is installed, set up, and its icon is showing near the clock." },
     { "test": "24", "kind": "precondition", "scriptText": "Block at boot is on.", "plain": "Block at boot is on." },
     { "test": "24", "kind": "precondition", "scriptText": "The AirPods are paired with this PC and with your iPhone, and your iPhone and the AirPods case are with you.", "plain": "The AirPods are paired with this computer and with your iPhone, and your iPhone and the AirPods case are with you." },
     { "test": "24", "kind": "precondition", "scriptText": "No other Bluetooth headphones or speakers are paired with this PC.", "plain": "No other Bluetooth headphones or speakers are paired with this computer." },

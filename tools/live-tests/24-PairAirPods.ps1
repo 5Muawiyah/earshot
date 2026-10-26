@@ -164,7 +164,7 @@ function Get-NodeSummary
 try
 {
     $ready = Show-Preconditions -Run $run -Preconditions @(
-        'Earshot 1.5.0 or later is installed, set up, and running in the tray.',
+        'Earshot 1.6.0 or later is installed, set up, and running in the tray.',
         'Block at boot is on.',
         'The AirPods are paired with this PC and with your iPhone, and your iPhone and the AirPods case are with you.',
         'No other Bluetooth headphones or speakers are paired with this PC.'
