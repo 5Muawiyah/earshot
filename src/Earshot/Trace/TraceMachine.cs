@@ -40,7 +40,7 @@ internal sealed class TraceMachine : ITraceMachine
         _log = log;
         _machineFolder = paths.MachineFolder;
         TraceFolder = Path.Combine(paths.MachineFolder, "trace");
-        WprPath = WprCommand.ExePath(Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+        WprPath = WprCommand.ExePath(Environment.SystemDirectory);
     }
 
     public string WprPath { get; }

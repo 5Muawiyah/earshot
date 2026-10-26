@@ -62,6 +62,8 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     public string? CopyProblem { get; set; }
     public string? Marker { get; set; }
     public string? Untrusted { get; set; }
+    public const long DefaultBoot = 1_790_000_000;
+    public long Boot { get; set; } = DefaultBoot;
     public int Leftovers { get; set; }
     public HashSet<int> Alive { get; } = [];
     public List<string> Calls { get; } = [];
@@ -84,6 +86,7 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     public void OpenFolder(string folder) => Calls.Add("open " + folder);
     public string? ReadMarker() => Marker;
     public bool ProcessAlive(int pid) => Alive.Contains(pid);
+    public long BootSeconds() => Boot;
 }
 
 internal sealed class FakeLauncher : IElevatedLauncher
@@ -441,7 +444,7 @@ public sealed class TraceRecorderTests
     public void AMarkerWhoseHelperIsGoneMakesTheNextStartSayATraceMayStillBeRunning()
     {
         var rig = new Rig();
-        rig.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce));
+        rig.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot));
 
         Assert.AreEqual("A Bluetooth trace may still be running. Restart the PC to stop it.", rig.Recorder.StillRunningNotice());
     }
@@ -450,8 +453,30 @@ public sealed class TraceRecorderTests
     public void AMarkerWhoseHelperIsAliveIsNotAStaleOne()
     {
         var rig = new Rig();
-        rig.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce));
+        rig.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot));
         rig.Files.Alive.Add(5150);
+
+        Assert.IsNull(rig.Recorder.StillRunningNotice());
+    }
+
+    // A restart ends every recording, so a marker written before this start of the PC says nothing. Before, it said a trace
+    // may still be running at every start until another trace ran, because a standard user cannot remove it.
+    [TestMethod]
+    public void AMarkerFromBeforeTheLastRestartSaysNothing()
+    {
+        var rig = new Rig();
+        rig.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot - 600));
+
+        Assert.IsNull(rig.Recorder.StillRunningNotice());
+    }
+
+    // A marker in a trace folder that fails the machine folder's check could be anyone's, so it says nothing.
+    [TestMethod]
+    public void AMarkerInATraceFolderThatFailsItsCheckSaysNothing()
+    {
+        var rig = new Rig();
+        rig.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot));
+        rig.Files.Untrusted = "the trace folder can be changed by Users";
 
         Assert.IsNull(rig.Recorder.StillRunningNotice());
     }

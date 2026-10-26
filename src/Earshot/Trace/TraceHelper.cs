@@ -72,7 +72,10 @@ internal static class TraceHelper
 
     internal const string ProfileFileName = "BluetoothStack.wprp";
     internal const string ResultFileName = "result.txt";
-    internal const string MarkerFileName = "running.txt";
+    // One per Windows session, as the wpr instance name is, so two people tracing at once keep their own.
+    internal static string MarkerFileName { get; } = MarkerFileNameFor(System.Diagnostics.Process.GetCurrentProcess().SessionId);
+
+    internal static string MarkerFileNameFor(int sessionId) => "running-S" + sessionId.ToString(CultureInfo.InvariantCulture) + ".txt";
 
     public static TraceOutcome Run(TraceRequest request, ITraceMachine machine, ITraceSignals signals, IProcessRunner runner, ILog log, Func<DateTime> utcNow)
     {
@@ -186,14 +189,14 @@ internal static class TraceHelper
             return TraceOutcome.WprMissing;
         }
 
-        // A session an earlier helper left behind would make -start fail. The cancel names Earshot's own instance, so it cannot
-        // end another program's recording. "No trace running" is the normal answer, so the code is recorded and nothing is
+        // A session an earlier helper left behind would make -start fail. The cancel names Earshot's own instance, which by
+        // wpr's page should keep it to Earshot's own recording (not yet seen in a real one). "No trace running" is the normal answer, so the code is recorded and nothing is
         // concluded from it.
         ProcessRun cancel = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
         log.Info("trace: wpr -cancel " + Describe(cancel));
 
         string markerPath = Path.Combine(machine.TraceFolder, MarkerFileName);
-        string? marker = machine.WriteFile(markerPath, Encoding.UTF8.GetBytes(TraceMarker.Serialize(new TraceMarker(Environment.ProcessId, request.Nonce))));
+        string? marker = machine.WriteFile(markerPath, Encoding.UTF8.GetBytes(TraceMarker.Serialize(new TraceMarker(Environment.ProcessId, request.Nonce, TraceMarker.BootSecondsNow()))));
         if (marker is not null)
         {
             log.Warn("trace: the marker could not be written: " + marker);

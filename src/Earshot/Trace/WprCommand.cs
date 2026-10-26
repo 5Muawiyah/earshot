@@ -9,7 +9,8 @@ namespace Earshot.Tracing;
 // Two options from the same page keep the recording Earshot's own. -recordtempto names the folder the recording is written to
 // before it is saved, so the file being recorded sits in the run folder only administrators can open instead of the user's
 // %TEMP%. -instancename names the session; the page says it must be the last parameter and that every later command for the
-// session must give the same name, so -stop and -cancel can only reach the session Earshot started, never another program's.
+// session must give the same name, so -stop and -cancel should reach only the session Earshot started. That is read from the
+// page and not yet seen in a real recording (verification.md).
 internal static class WprCommand
 {
     // With the terminal services session in it, so a cancel before a start reaches only this session's Earshot recording, not
@@ -18,15 +19,17 @@ internal static class WprCommand
 
     internal static string InstanceNameFor(int sessionId) => "EarshotBluetoothTraceS" + sessionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    public static string ExePath(string systemRoot)
+    // systemDirectory: GetSystemDirectory's answer, not a path built from an environment variable.
+    // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsystemdirectoryw
+    public static string ExePath(string systemDirectory)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(systemRoot);
-        if (!Path.IsPathFullyQualified(systemRoot))
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemDirectory);
+        if (!Path.IsPathFullyQualified(systemDirectory))
         {
-            throw new ArgumentException("The Windows folder must be a full path.", nameof(systemRoot));
+            throw new ArgumentException("The system folder must be a full path.", nameof(systemDirectory));
         }
 
-        return Path.Combine(systemRoot, "System32", "wpr.exe");
+        return Path.Combine(systemDirectory, "wpr.exe");
     }
 
     public static IReadOnlyList<string> Start(string profilePath, string recordFolder)

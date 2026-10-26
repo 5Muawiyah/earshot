@@ -179,7 +179,7 @@ public sealed class TraceHelperTests
         CollectionAssert.DoesNotContain(runner.Calls.Select(c => c.Split(' ')[0]).ToList(), "-stop");
         CollectionAssert.Contains(signals.Calls, "done");
         Assert.IsTrue(machine.FolderDeleted);
-        Assert.IsFalse(machine.Files.Keys.Any(k => k.EndsWith("running.txt", StringComparison.Ordinal)), "The marker is removed.");
+        Assert.IsFalse(machine.Files.Keys.Any(k => k.EndsWith(TraceHelper.MarkerFileName, StringComparison.Ordinal)), "The marker is removed.");
     }
 
     [TestMethod]
@@ -235,8 +235,10 @@ public sealed class TraceHelperTests
     {
         var (_, machine, _, _, _) = Run();
 
-        int wrote = machine.Calls.IndexOf("write running.txt");
-        int removed = machine.Calls.IndexOf("delete running.txt");
+        // One marker per Windows session, so two people tracing at once do not write over each other's.
+        Assert.AreEqual("running-S" + System.Diagnostics.Process.GetCurrentProcess().SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt", TraceHelper.MarkerFileName);
+        int wrote = machine.Calls.IndexOf("write " + TraceHelper.MarkerFileName);
+        int removed = machine.Calls.IndexOf("delete " + TraceHelper.MarkerFileName);
         Assert.IsTrue(wrote >= 0 && removed > wrote, string.Join(" | ", machine.Calls));
     }
 

@@ -142,14 +142,26 @@ internal sealed record TraceResultFile(TraceOutcome Outcome, string FileName, in
         || (name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && name is not "." and not ".." && !name.Contains(':', StringComparison.Ordinal));
 }
 
-// running.txt in the trace folder, while a helper has a session open. A marker whose helper is gone means the session may
-// still be recording: it runs until stopped or the PC restarts.
-internal sealed record TraceMarker(int HelperPid, string Nonce)
+// running-S<session>.txt in the trace folder, while a helper has a session open. A marker whose helper is gone means the session
+// may still be recording: it runs until stopped or the PC restarts. BootSeconds is when this start of the PC began (Unix
+// seconds, from the time since start), so a marker from before a restart, which ended every recording, says nothing.
+internal sealed record TraceMarker(int HelperPid, string Nonce, long BootSeconds)
 {
+    // Two readings of the same start of the PC differ by clock corrections only; a restart is far more than this apart from
+    // the start before it, because the trace was recorded in between.
+    private const long SameBootTolerance = 30;
+
+    // GetTickCount64 counts from the start of the PC, sleep included.
+    // https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-gettickcount64
+    public static long BootSecondsNow() => (DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(Environment.TickCount64)).ToUnixTimeSeconds();
+
+    public static bool SameBoot(long a, long b) => Math.Abs(a - b) <= SameBootTolerance;
+
     public static string Serialize(TraceMarker marker)
     {
         ArgumentNullException.ThrowIfNull(marker);
-        return "helper=" + marker.HelperPid.ToString(CultureInfo.InvariantCulture) + "\nnonce=" + marker.Nonce + "\n";
+        return "helper=" + marker.HelperPid.ToString(CultureInfo.InvariantCulture) + "\nnonce=" + marker.Nonce
+            + "\nboot=" + marker.BootSeconds.ToString(CultureInfo.InvariantCulture) + "\n";
     }
 
     public static bool TryParse(string? text, out TraceMarker? marker)
@@ -162,6 +174,7 @@ internal sealed record TraceMarker(int HelperPid, string Nonce)
 
         int? pid = null;
         string? nonce = null;
+        long? boot = null;
         foreach (string line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             string trimmed = line.TrimEnd('\r');
@@ -174,18 +187,23 @@ internal sealed record TraceMarker(int HelperPid, string Nonce)
             {
                 nonce = trimmed[6..];
             }
+            else if (trimmed.StartsWith("boot=", StringComparison.Ordinal)
+                && long.TryParse(trimmed.AsSpan(5), NumberStyles.None, CultureInfo.InvariantCulture, out long seconds) && seconds > 0)
+            {
+                boot = seconds;
+            }
             else
             {
                 return false;
             }
         }
 
-        if (pid is null || nonce is null)
+        if (pid is null || nonce is null || boot is null)
         {
             return false;
         }
 
-        marker = new TraceMarker(pid.Value, nonce);
+        marker = new TraceMarker(pid.Value, nonce, boot.Value);
         return true;
     }
 }

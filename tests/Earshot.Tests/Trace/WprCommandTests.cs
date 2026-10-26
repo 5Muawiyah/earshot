@@ -1,3 +1,4 @@
+using Earshot.Infra;
 using Earshot.Tracing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -72,16 +73,20 @@ public sealed class WprCommandTests
         Assert.ThrowsExactly<ArgumentException>(() => WprCommand.Start(@"C:\p.wprp", @"relative"));
     }
 
+    // The system folder is GetSystemDirectory's answer (Environment.SystemDirectory), which no environment variable of the
+    // person's can move; the helper runs with that person's environment.
     [TestMethod]
-    public void TheProgramIsTheOneInSystem32()
+    public void TheProgramIsTheOneInTheSystemFolder()
     {
-        Assert.AreEqual(@"C:\Windows\System32\wpr.exe", WprCommand.ExePath(@"C:\Windows"));
-        Assert.AreEqual(@"C:\Windows\System32\wpr.exe", WprCommand.ExePath(@"C:\Windows\"));
+        Assert.AreEqual(@"C:\Windows\System32\wpr.exe", WprCommand.ExePath(@"C:\Windows\System32"));
+        Assert.AreEqual(@"C:\Windows\System32\wpr.exe", WprCommand.ExePath(@"C:\Windows\System32\"));
+        var machine = new TraceMachine(Paths.Current, new Earshot.Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
+        Assert.AreEqual(Path.Combine(Environment.SystemDirectory, "wpr.exe"), machine.WprPath);
     }
 
     [TestMethod]
-    public void ARelativeSystemRootIsRefused()
+    public void ARelativeSystemFolderIsRefused()
     {
-        Assert.ThrowsExactly<ArgumentException>(() => WprCommand.ExePath(@"Windows"));
+        Assert.ThrowsExactly<ArgumentException>(() => WprCommand.ExePath(@"System32"));
     }
 }

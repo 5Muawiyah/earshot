@@ -55,9 +55,13 @@ internal interface ITraceUserFiles
 
     void OpenFolder(string folder);
 
+    // This session's marker, or null.
     string? ReadMarker();
 
     bool ProcessAlive(int pid);
+
+    // When this start of the PC began, in Unix seconds (TraceMarker.BootSecondsNow).
+    long BootSeconds();
 }
 
 internal sealed class TraceRecorder : ITraceRecorder
@@ -291,10 +295,30 @@ internal sealed class TraceRecorder : ITraceRecorder
         }
     }
 
+    // Only a marker in a trace folder that passes its check, from this start of the PC, whose helper is gone. The helper's id
+    // can be reused by another process within the same start, which only keeps the notice back.
     public string? StillRunningNotice()
     {
-        if (!TraceMarker.TryParse(_files.ReadMarker(), out TraceMarker? marker) || marker is null)
+        string? text = _files.ReadMarker();
+        if (text is null)
         {
+            return null;
+        }
+
+        if (_files.TrustProblem() is { } untrusted)
+        {
+            _log.Info("trace: a marker is there, and it is not used, because the trace folder did not pass its check: " + untrusted);
+            return null;
+        }
+
+        if (!TraceMarker.TryParse(text, out TraceMarker? marker) || marker is null)
+        {
+            return null;
+        }
+
+        if (!TraceMarker.SameBoot(marker.BootSeconds, _files.BootSeconds()))
+        {
+            _log.Info("trace: the marker is from before the PC last started, so no recording is running from it.");
             return null;
         }
 
@@ -459,6 +483,8 @@ internal sealed class TraceUserFiles : ITraceUserFiles
             return null;
         }
     }
+
+    public long BootSeconds() => TraceMarker.BootSecondsNow();
 
     public bool ProcessAlive(int pid)
     {

@@ -119,10 +119,12 @@ public sealed class TraceModeTests
     [TestMethod]
     public void TheMarkerRoundTripsAndRejectsJunk()
     {
-        string text = TraceMarker.Serialize(new TraceMarker(5150, Nonce));
+        string text = TraceMarker.Serialize(new TraceMarker(5150, Nonce, 1_790_000_000));
         Assert.IsTrue(TraceMarker.TryParse(text, out TraceMarker? marker));
         Assert.AreEqual(5150, marker!.HelperPid);
         Assert.AreEqual(Nonce, marker.Nonce);
+        Assert.AreEqual(1_790_000_000, marker.BootSeconds);
+        Assert.IsFalse(TraceMarker.TryParse("helper=5150\nnonce=" + Nonce + "\n", out _), "A marker with no start time of the PC is not one.");
         Assert.IsFalse(TraceMarker.TryParse("helper=abc\nnonce=x", out _));
         Assert.IsFalse(TraceMarker.TryParse("", out _));
     }
