@@ -531,6 +531,12 @@ internal sealed partial class TrayContext
             return RadioSays.Stop;
         }
 
+        // A read that answered as the look was cancelled (a press that superseded the connect) ends the look all the same.
+        if (ct.IsCancellationRequested)
+        {
+            return RadioSays.Stop;
+        }
+
         _log.Info("Pairing check (" + reason + "): radio " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms." + StepOutcomes.DescribeFailures(result.ReadCodes));
         if (_closing || _elevatedRun == PairRun)
         {

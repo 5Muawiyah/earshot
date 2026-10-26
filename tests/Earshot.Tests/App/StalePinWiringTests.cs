@@ -466,6 +466,49 @@ public sealed class StalePinWiringTests
         });
     }
 
+    // The same click landing while the radio read is answering, so the read itself does not throw: the look still stops and
+    // shows nothing for the old connect. Before, it went on to show its own Pair AirPods card, and the new connect showed another.
+    [TestMethod]
+    public void AClickAsTheStalePinLooksRadioReadAnswersShowsNothingForTheOldConnect()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok));
+            PairAirPodsServices plain = Services(rig);
+            var services = new PairAirPodsServices
+            {
+                StalePinBudget = plain.StalePinBudget, Api = plain.Api, Nodes = plain.Nodes, Prompter = plain.Prompter,
+                UiFactory = plain.UiFactory, Radio = radio, Options = plain.Options, LockName = plain.LockName,
+            };
+            long now = 0;
+            TrayHarness? running = null;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: services, tickCount: () => now);
+            running = tray;
+            tray.PumpUntilIdle();
+            tray.Cards.Shown.Clear();
+
+            int lookRead = radio.Checks + 2;
+            radio.OnCheck = n =>
+            {
+                if (n == lookRead)
+                {
+                    now += 5000;
+                    running.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+                }
+            };
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+
+            tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(2, tray.Connection.Calls.Count(c => c.Connect), string.Join(", ", tray.Connection.Calls));
+            Assert.AreEqual(1, tray.Cards.Shown.Count(c => c.Content.Status == PairAirPodsText.NoAirPodsPaired), string.Join(" | ", tray.Cards.Statuses));
+        });
+    }
+
     // The looks at the pinned pair only read: at start, on a new device group and after a failed connect, each asks Windows for
     // the paired list and nothing else (no watch, no pair, no unpair) and changes no device node. Whether reading that list
     // pages anything is for the PC's at-rest trace.
