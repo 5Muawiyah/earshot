@@ -69,7 +69,7 @@ internal static class PairAirPodsText
 
     public const string PairedAndUsing = "Paired. Earshot now uses these AirPods.";
 
-    public const string PairedNotAdopted = "Paired, but Earshot could not switch to these AirPods, so they are not protected yet. Choose them from the menu.";
+    public const string PairedNotAdopted = "Paired, but Earshot could not switch to these AirPods, so they are not protected yet.";
 
     // Said only from a read of the device tree that found no paired AirPods.
     public const string NoAirPodsPaired = "No AirPods are paired with this PC.";

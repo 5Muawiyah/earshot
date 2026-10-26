@@ -51,9 +51,10 @@ public sealed class PairAirPodsTests
         rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
     }
 
-    private static PairAirPodsServices Services(FixRig rig, RadioCheckState radio = RadioCheckState.Ok, string? lockName = null, IPairRecoveryMarker? marker = null) => new()
+    private static PairAirPodsServices Services(FixRig rig, RadioCheckState radio = RadioCheckState.Ok, string? lockName = null, IPairRecoveryMarker? marker = null, TimeSpan? stalePinBudget = null) => new()
     {
         Marker = marker ?? NoPairRecoveryMarker.Instance,
+        StalePinBudget = stalePinBudget ?? StalePin.DefaultBudget,
         Api = rig.Pairing,
         Nodes = rig.Nodes,
         Prompter = rig.Prompter,
@@ -332,6 +333,35 @@ public sealed class PairAirPodsTests
 
     // Set-up after a pairing is handed the run straight from the pairing. Before, the pairing let it go and set-up looked at the
     // pin first, so a Fix or an update pressed in between could start.
+    // A set-up the person declined at the administrator prompt is recorded with Windows' code, not as "not attempted". Before,
+    // the code was only in the log.
+    [TestMethod]
+    public void ASetUpDeclinedAfterAPairingIsRecordedWithItsCode()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history },
+                arrange: h =>
+                {
+                    h.Block.Status = Block(BlockState.NotSetUp);
+                    h.Block.OnRunSetup = _ => Task.FromResult(ControllerResult.Fail("Declined", [StepOutcomes.FromWin32("runas", 1223, "The operation was cancelled by the user.", ok: false)]));
+                });
+
+            Click(tray);
+
+            HistoryStep setup = history.Read().Single().Steps.Single(s => s.Name == "setup");
+            Assert.AreEqual(1223, setup.Code);
+        });
+    }
+
     [TestMethod]
     public void SetUpAfterAPairingTakesTheRunWithNoGapInBetween()
     {
@@ -424,7 +454,7 @@ public sealed class PairAirPodsTests
 
             // The check for AirPods Earshot does not protect waited for the look, which gave way: it runs once the pairing has
             // ended. Before, it was skipped for the whole session.
-            const string Owed = "The check for AirPods that Earshot does not protect runs now: a pairing started during the look at one that did not finish";
+            const string Owed = "The check for AirPods that Earshot does not protect runs now: a pairing started during the tray's start-time look at the pairs";
             var watch = System.Diagnostics.Stopwatch.StartNew();
             while (!tray.Log.Has(LogLevel.Info, Owed) && watch.Elapsed < TimeSpan.FromSeconds(10))
             {
@@ -433,6 +463,50 @@ public sealed class PairAirPodsTests
             }
 
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, Owed), string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
+        });
+    }
+
+    // A start-time recovery that ends while a pairing shows only its first question drops the flag: nothing is scanned yet.
+    // Before, the recovery kept it up for the pairing, for as long as the question stayed.
+    [TestMethod]
+    public void ARecoveryThatEndsAtThePairingsFirstQuestionDropsTheFlag()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayCancel();
+            var marker = new FakePairRecoveryMarker();
+            PairAirPodsServices services = Services(rig, marker: marker, stalePinBudget: TimeSpan.FromSeconds(1));
+            TrayHarness? running = null;
+            bool? atQuestion = null;
+            rig.Prompter.OnAsk = q =>
+            {
+                if (q.Heading != PairAirPodsText.FirstQuestion.Heading || running is null)
+                {
+                    return;
+                }
+
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                while (!running.Log.Has(LogLevel.Info, "stops, because a pairing has started") && watch.Elapsed < TimeSpan.FromSeconds(10))
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(5);
+                }
+
+                atQuestion = services.RunFlag.Active;
+            };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: services);
+            running = tray;
+
+            // A start-time recovery whose look at the paired list is slow (it ends on its budget), with Pair AirPods pressed meanwhile.
+            marker.Present = true;
+            rig.Pairing.HangOnList = true;
+            tray.Context.StartPinnedPairCheck("start");
+            Click(tray);
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "stops, because a pairing has started"), "The recovery was still looking when the pairing started.");
+            Assert.IsFalse(atQuestion, "The flag stayed up for a pairing that had only asked its first question.");
         });
     }
 
@@ -519,6 +593,60 @@ public sealed class PairAirPodsTests
             Assert.IsFalse(atQuestion, "Raised while only the first question was up.");
             Assert.IsTrue(atPick, "Up once the scan has started.");
             Assert.IsFalse(services.RunFlag.Active, "Dropped at the end.");
+        });
+    }
+
+    // Choose device while Pair AirPods runs says the pairing is running and opens no picker, whose choice would race the
+    // pairing's adoption. Before, the picker opened.
+    [TestMethod]
+    public void ChooseDeviceIsRefusedWhileAPairingRuns()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            TrayHarness? running = null;
+            rig.Ui.OnPick = () => running!.ClickMenu(MenuModel.ChooseDevice);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            running = tray;
+
+            Click(tray);
+
+            Assert.IsTrue(tray.Cards.Shown.Any(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage), string.Join(" | ", tray.Cards.Shown.Select(c => c.Content.Status)));
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Choose device: not opened, because Pair AirPods is running."));
+        });
+    }
+
+    // Exit while the pick is up closes it: the entry says Earshot closed, not that the person chose nothing.
+    [TestMethod]
+    public void ExitAtThePickIsRecordedAsClosing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Ui.Pick = -1;
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history });
+            rig.Ui.OnPick = () => tray.ClickMenu(MenuModel.Exit);
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            Application.Run(tray.Context);
+
+            ConnectHistoryEntry entry = history.Read().Single();
+            string[] names = entry.Steps.Select(s => s.Name).ToArray();
+            CollectionAssert.Contains(names, "closing", string.Join(", ", names));
+            CollectionAssert.DoesNotContain(names, "cancelled", string.Join(", ", names));
         });
     }
 
@@ -972,6 +1100,34 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // The gate refused the new pair: its code goes in the adopt step, and the card about the pair left unprotected stays up with
+    // the picker. Before, the step said "not attempted" and the card went after a few seconds with no button.
+    [TestMethod]
+    public void AnAdoptionTheGateRefusedIsRecordedWithItsCodeAndItsCardStaysUp()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history },
+                arrange: h => h.Block.OnSetDevice = _ => Task.FromResult(ControllerResult.Fail("refused", [StepOutcomes.FromWin32("set-device", 1062, "not started", ok: false)])));
+
+            Click(tray);
+
+            HistoryStep adopt = history.Read().Single().Steps.Single(s => s.Name == "adopt");
+            Assert.AreEqual(1062, adopt.Code);
+            CardContent card = tray.Cards.Shown.Last(c => c.Content.Status == PairAirPodsText.PairedNotAdopted).Content;
+            Assert.IsTrue(card.StaysUp);
+            Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+        });
+    }
+
     // A tray that stopped between the pairing and the adoption: at the next start the new pair is paired and not pinned, so the
     // device picker is offered for it. Nothing is adopted by itself.
     [TestMethod]
@@ -1091,6 +1247,7 @@ public sealed class PairAirPodsTests
             CardContent card = tray.Cards.Shown[^1].Content;
             Assert.AreEqual(PairingText.Unverified, card.Status);
             Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+            Assert.IsTrue(card.StaysUp, "A pair left unprotected until one is chosen: the card stays until it is used.");
             Assert.IsTrue(marker.Exists(), "Kept, so the next start looks again.");
         });
     }

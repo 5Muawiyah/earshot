@@ -2150,7 +2150,8 @@ internal sealed partial class TrayContext : ApplicationContext
     }
 
     // Set-up itself, once the set-up run is this tray's: by RunSetupAsync, or handed over from a pairing that just adopted a pair.
-    private async Task RunSetupClaimedAsync(CardPlace place)
+    // The set-up's result, for the caller that records its step (Pair AirPods' history); null when it did not run.
+    private async Task<ControllerResult?> RunSetupClaimedAsync(CardPlace place)
     {
         ControllerResult? result = await WithElevatedProgramAsync(
             () => RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place));
@@ -2158,6 +2159,8 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             PointStartupAtInstalledCopy();
         }
+
+        return result;
     }
 
     // Setup has put a copy in %ProgramFiles%\Earshot: with Open on startup on, the Run value starts that copy from now
@@ -2662,6 +2665,15 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
+        // A choice made while Pair AirPods runs would race its adoption: the pair it adopts could be left unpinned, with no
+        // marker and no card. The pairing answers for the pairs.
+        if (_elevatedRun == PairRun)
+        {
+            _log.Info("Choose device: not opened, because Pair AirPods is running.");
+            ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, place);
+            return;
+        }
+
         // No picker for a choice that would be refused once made.
         if (_picker is null && RefusedAtSessionEnd("choose device", TrayStatus.AppName, place))
         {
@@ -2729,6 +2741,7 @@ internal sealed partial class TrayContext : ApplicationContext
     internal async Task<DeviceChoiceResult> ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place, bool fromPairRun = false)
     {
         ArgumentNullException.ThrowIfNull(choice);
+        _lastGateRefusal = null;
 
         // Asked here as well as in RunOperationAsync: before setup the device is only saved, with no operation.
         if (RefusedAtSessionEnd(GateVerbs.SetDevice, choice.Name, place))
@@ -2758,6 +2771,8 @@ internal sealed partial class TrayContext : ApplicationContext
             ControllerResult? result = await RunOperationAsync(GateVerbs.SetDevice, ct => _coordinator.ChangeDeviceAsync(choice.Address, ct), place);
             if (result is not { IsSuccess: true })
             {
+                _lastGateRefusal = result?.Steps.FirstOrDefault(s => !s.Ok);
+
                 // The refusal or failure is already logged and on a card; the tray keeps the device it had.
                 _log.Warn("Device not changed to " + choice.Name + " (" + choice.Address + "): the boot block did not take it" +
                     (result is null ? "." : " (" + result.Status + ")."));

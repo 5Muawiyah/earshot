@@ -30,6 +30,33 @@ public sealed class FixRecheckTests
         Assert.AreEqual(2, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
     }
 
+    // A tray pairing that starts while the start checks wait for the tray's look: the card about unprotected AirPods is not shown
+    // over it (its Fix button would be refused by the lock), and the card's once-per-run rule is not spent. Before, the pairing
+    // flag was looked at only before the look.
+    [TestMethod]
+    public void TheNotProtectedCardIsNotShownWhileTheTrayPairs()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        h.Coordinator.StartLookHook = () =>
+        {
+            h.TrayPairing.Active = true;
+            return Task.FromResult(false);
+        };
+        h.Start();
+        h.Pump();
+
+        Assert.AreEqual(0, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+
+        h.TrayPairing.Active = false;
+        h.Coordinator.CheckProtectionAfterTrayPairing("the pairing ended");
+        h.Pump();
+
+        Assert.AreEqual(1, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage), "Shown once the pairing has ended.");
+    }
+
     // A pair made in Windows' settings, or by a Fix run started from Setup or the install script, arrives as a new device group.
     // The check for AirPods Earshot does not protect runs again then, after a settle, not only at the next sign-in. The card
     // keeps its once-per-run rule.

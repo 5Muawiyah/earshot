@@ -69,7 +69,7 @@ internal sealed class FixRecoveryAtStart : IStartRecovery
 
         if (stays)
         {
-            _log.Warn("fix: the marker could not be removed, so it is answered again at the next start. A Fix connection run started as administrator removes it.");
+            _log.Warn("fix: the marker could not be removed, so it is answered again at the next start. A Fix connection run started as administrator removes it once it reaches its pairing step.");
         }
 
         return outcome == FixRecoveryOutcome.Blocked;

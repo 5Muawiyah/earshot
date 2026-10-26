@@ -464,7 +464,7 @@ internal sealed partial class BlockCoordinator : IDisposable
 
         if (atStart && StartLookHook is { } look && await look())
         {
-            _log.Info("The tray's look at the pinned pair at start told the person about the pairs, so the check for AirPods that Earshot does not protect did not run.");
+            _log.Info("The tray's look at the pinned pair at start answers for the pairs, so the check for AirPods that Earshot does not protect did not run.");
             return;
         }
 
@@ -503,6 +503,14 @@ internal sealed partial class BlockCoordinator : IDisposable
     {
         if (_notProtectedShown || _closing || _disposed)
         {
+            return;
+        }
+
+        // A tray pairing that started while this was read answers for the pairs; the card would show over it and its button
+        // would be refused by the lock. The tray asks for the check again when the pairing ends.
+        if (_services.TrayPairing.Active)
+        {
+            _log.Info("The tray's Pair AirPods started while the check for AirPods that Earshot does not protect read, so it says nothing now.");
             return;
         }
 

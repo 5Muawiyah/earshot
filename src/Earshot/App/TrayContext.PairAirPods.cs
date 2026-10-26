@@ -36,8 +36,8 @@ internal sealed partial class TrayContext
 
     private bool KeptThePinnedPairJustNow() => _keptPinnedPairAt is { } at && _time.GetUtcNow() - at < KeptPairQuiet;
 
-    // The start-time look at a pairing that did not finish gave way to a Pair AirPods pressed while it looked, so the check for
-    // AirPods Earshot does not protect, which waited for that look, is owed once the pairing ends.
+    // A start-time look (at a pairing that did not finish, or at the pinned pair) gave way to a Pair AirPods pressed while it
+    // looked, so the check for AirPods Earshot does not protect, which waited for that look, is owed once the pairing ends.
     private bool _protectionCheckOwed;
 
     // The pairing flag is dropped: the coordinator reads the state again now, and a check the look owed runs (not over the line
@@ -56,7 +56,7 @@ internal sealed partial class TrayContext
             _protectionCheckOwed = false;
             if (!KeptThePinnedPairJustNow())
             {
-                _coordinator.CheckProtectionAfterTrayPairing("a pairing started during the look at one that did not finish");
+                _coordinator.CheckProtectionAfterTrayPairing("a pairing started during the tray's start-time look at the pairs");
             }
         }
     }
@@ -119,7 +119,7 @@ internal sealed partial class TrayContext
                 finally
                 {
                     _recoveringPair = false;
-                    DropPairRunFlag(services, keep: _elevatedRun == PairRun);
+                    DropPairRunFlag(services, keep: _pairRunFlagRaised);
                 }
 
                 // The coordinator's check for AirPods Earshot does not protect waited while this ran. When nothing was shown, it
@@ -157,8 +157,14 @@ internal sealed partial class TrayContext
         Launch("check the pinned pair", () => CheckPinnedPairAsync(reason, CardPlace.NearTray), CardPlace.NearTray);
     }
 
+    // The pairing run has raised the flag itself (Look for AirPods was pressed), so a recovery that ends meanwhile leaves it up.
+    private bool _pairRunFlagRaised;
+
     // The start-time look's answer: true when it showed the person a card about the pairs. Null when no look was started.
     private TaskCompletionSource<bool>? _startLookShown;
+
+    // The gate's first failing step the last time it refused a device choice, for the pairing's adopt step.
+    private StepOutcome? _lastGateRefusal;
 
     // A marker from a run that paired and did not adopt. The stale-pin check comes first and says what it found; then a pair of
     // AirPods that is paired and not the pinned one is offered through the device picker, never adopted by itself. The marker
@@ -338,6 +344,14 @@ internal sealed partial class TrayContext
         if (_elevatedRun == PairRun)
         {
             _log.Info("Pairing check (" + reason + "): a pairing started while it looked, so it says nothing.");
+            if (reason == "start")
+            {
+                // The coordinator's start check waits for this look; the pairing answers for the pairs now, and the check runs
+                // once it ends (DropPairRunFlag).
+                _protectionCheckOwed = true;
+                return false;
+            }
+
             return true;
         }
 
@@ -486,15 +500,22 @@ internal sealed partial class TrayContext
             end = await PairAndAdoptAsync(services, place);
             if (end.Early is null && end.Session is not null && end.RunSetUp && !_closing)
             {
-                // The run is handed straight from the pairing to set-up, so nothing else (a Fix, an update) can start in
-                // between. The pin was made a moment ago, so set-up's own look at whether it is still paired is not needed.
+                // The run is handed straight from the pairing to set-up, so nothing else of the tray's own (an update, a Fix
+                // started here) can start in between. The Fix lock is let go when the pairing ends, so a Fix from Setup.exe or
+                // the install script could start now, with its own two questions. The pin was made a moment ago, so set-up's own
+                // look at whether it is still paired is not needed.
                 _elevatedRun = SetupRun;
                 UpdatePresentation(forceIcon: false);
                 var setupWatch = System.Diagnostics.Stopwatch.StartNew();
-                await RunSetupClaimedAsync(place);
+                ControllerResult? setUpResult = await RunSetupClaimedAsync(place);
                 BootBlockStatus? after = await ReadBlockStatusQuietlyAsync();
                 bool done = after is not null && !TrayStatus.NeedsSetUp(after);
-                setupSteps.Add(new StepOutcome("setup", done, done ? 0 : NativeCodes.NotAttempted, done ? "S_OK" : NativeCodes.Name(NativeCodes.NotAttempted), null));
+
+                // A set-up that did not take carries the code of its first failing step (a declined prompt is ERROR_CANCELLED).
+                StepOutcome? failing = done ? null : setUpResult?.Steps.FirstOrDefault(s => !s.Ok);
+                setupSteps.Add(failing is { } f
+                    ? new StepOutcome("setup", false, f.Code, f.CodeName, f.Step)
+                    : new StepOutcome("setup", done, done ? 0 : NativeCodes.NotAttempted, done ? "S_OK" : NativeCodes.Name(NativeCodes.NotAttempted), null));
                 setupSteps.Add(Milliseconds("setup-ms", setupWatch.ElapsedMilliseconds));
             }
         }
@@ -523,6 +544,7 @@ internal sealed partial class TrayContext
         {
             EndElevatedRun(PairRun);
             EndElevatedRun(SetupRun);
+            _pairRunFlagRaised = false;
             DropPairRunFlag(services, keep: _recoveringPair);
         }
 
@@ -574,6 +596,7 @@ internal sealed partial class TrayContext
             {
                 DeviceChoiceResult.Applied => new StepOutcome("adopt", true, 0, "S_OK", null),
                 DeviceChoiceResult.AppliedGateNotRepinned => new StepOutcome("adopt", false, 1, "gate-not-repinned", null),
+                _ when !adopted && end.AdoptRefusal is { } refused => new StepOutcome("adopt", false, refused.Code, refused.CodeName, refused.Step),
                 _ => new StepOutcome("adopt", adopted, adopted ? 0 : NativeCodes.NotAttempted, adopted ? "S_OK" : NativeCodes.Name(NativeCodes.NotAttempted), null),
             });
             later.Add(Milliseconds("adopt-ms", end.AdoptMs));
@@ -622,6 +645,9 @@ internal sealed partial class TrayContext
         public long AdoptMs { get; init; }
 
         public DeviceChoiceResult? Adoption { get; init; }
+
+        // The gate's first failing step when it refused the new pair, for the adopt step's code.
+        public StepOutcome? AdoptRefusal { get; init; }
 
         // The answer to "use these instead?", when it was asked, and how long it took.
         public StepOutcome? Replace { get; init; }
@@ -682,6 +708,7 @@ internal sealed partial class TrayContext
 
             // From here a pairing may form, so the coordinator's automatic blocks and checks wait for the run. Not while only the
             // first question is up: nothing is scanned or paired then, and the question can stay up for minutes.
+            _pairRunFlagRaised = true;
             services.RunFlag.Active = true;
 
             // Written before anything can be paired, so the time between the pairing and the adoption is always covered.
@@ -709,8 +736,7 @@ internal sealed partial class TrayContext
                 // Paired and not looked at: maybe AirPods. The marker stays, so the next start looks again, and the picker is
                 // offered now; nothing is adopted without the person's choice.
                 _log.Warn("Pair AirPods: the paired device could not be checked, so the recovery marker is kept and the device picker is offered.");
-                ShowCardWithButton(TrayStatus.AppName, PairingText.Unverified, PairAirPodsText.ChooseButton,
-                    () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
+                OfferChooseLeftPair(PairingText.Unverified, place);
                 return new PairRunEnd(result, null, false);
             }
 
@@ -812,11 +838,21 @@ internal sealed partial class TrayContext
                 setUp = TrayStatus.NeedsSetUp(status);
             }
 
-            ShowCard(TrayStatus.AppName, !adopted ? PairAirPodsText.PairedNotAdopted : setUp ? PairingText.SetsItselfUp : PairAirPodsText.PairedAndUsing, place);
+            if (!adopted)
+            {
+                // A pair paired and not adopted is not protected until one is chosen, so the card stays up with the picker.
+                OfferChooseLeftPair(PairAirPodsText.PairedNotAdopted, place);
+            }
+            else
+            {
+                ShowCard(TrayStatus.AppName, setUp ? PairingText.SetsItselfUp : PairAirPodsText.PairedAndUsing, place);
+            }
+
             return new PairRunEnd(result, adopted, setUp)
             {
                 AdoptMs = adoptMs,
                 Adoption = adoption,
+                AdoptRefusal = adopted ? null : _lastGateRefusal,
                 Replace = replace is null ? null : new StepOutcome("replace", true, 0, FixAnswer.Ok.ToString(), null),
                 ReplaceMs = replaceMs,
             };
