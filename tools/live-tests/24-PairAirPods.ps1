@@ -4,14 +4,18 @@
 
 .DESCRIPTION
     Earshot's Pair AirPods must pair the owner's AirPods from the tray with the case in pairing mode,
-    take them as the pair Earshot uses, set itself up with one Windows permission prompt and connect
-    them once. Before that, the radio check must say "Bluetooth is off." while Bluetooth is off and
-    stop saying it when Bluetooth is back on.
+    take them as the pair Earshot uses, stay set up with at most one Windows permission prompt and
+    connect them once. Before that, the radio check must say "Bluetooth is off." after a failed
+    Connect while Bluetooth is off, and read Ok again when Bluetooth is back on.
 
     The test turns Bluetooth off and on, asks you to remove your AirPods in Windows, then walks the
     Pair AirPods steps with the iPhone's Bluetooth off. It reads the lines Earshot logs for the radio
     check and for pairing, and the last pairing run in Earshot's own report (doctor), and holds each
     criterion to those lines. One Connect and one Disconnect follow. The Bluetooth trace is optional.
+
+    The test starts with Earshot set up, so set-up right after a pairing (with its one prompt) does
+    not run here; it runs only under fakes. The same AirPods are paired again, so they keep their
+    last readings: dropping the readings of a replaced pair is not something this test can see.
 
     What it records but cannot prove from the log: whether the list showed your AirPods with a name, what
     Earshot asked while pairing (a yes or no question, a number to check, or neither), whether Windows showed a box of
@@ -20,8 +24,9 @@
     signal, a device that is not AirPods being left paired and unused (no other headphones may be
     paired), and AirPods models other than yours.
 
-    It settles whether Pair AirPods pairs and adopts the AirPods from the tray, sets up with one prompt,
-    shows no old reading, connects once, and whether the radio check reads a real radio turned off.
+    It settles whether Pair AirPods pairs and adopts the AirPods from the tray, leaves Earshot set up
+    with at most one prompt, connects once, whether the radio check reads a real radio turned off,
+    and whether a Bluetooth trace is saved to the person's folder.
 
 .PARAMETER ExePath
     Earshot.exe: the installed copy or an unzipped release.
@@ -46,7 +51,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'LiveTest.psm1') -Force
 
 $run = New-LiveTestRun -TestId '24-pair-airpods' -Title 'Pair AirPods' `
-    -Settles 'Whether Pair AirPods pairs and adopts the AirPods from the tray, sets up with one prompt, shows no old reading and connects once, and whether the radio check reads a real radio turned off.' `
+    -Settles 'Whether Pair AirPods pairs and adopts the AirPods from the tray, leaves Earshot set up with at most one prompt and connects once, whether the radio check reads a real radio turned off, and whether a Bluetooth trace is saved to the person''s folder.' `
     -ExePath $ExePath -RunRoot $RunRoot
 
 # The figure this release was built to for a Connect: playing within 20 s of being asked for.
@@ -171,7 +176,7 @@ try
     ) -PhysicalActions @(
         'Turn Bluetooth off and on again in quick settings.',
         'Remove your AirPods in Windows Settings, then pair them again with Pair AirPods in Earshot, with the case in pairing mode and Bluetooth off on your iPhone.',
-        'Allow Earshot when Windows asks, once, for set-up.',
+        'If Windows asks for permission after the pairing, allow it once.',
         'Open the case next to this PC, then connect once from the Earshot card.'
     )
 
@@ -182,12 +187,12 @@ try
         # ---- Bluetooth off, then on ----
         Write-Section -Run $run -Title 'Bluetooth off, then on'
         $offStart = (Get-Date).ToUniversalTime()
-        Wait-Owner -Run $run -Text 'Open quick settings and turn Bluetooth off. Then left-click the Earshot icon and choose Connect on the card; it will not connect, and that is expected. Read what the card says, then come back here.'
+        Wait-Owner -Run $run -Text 'Open quick settings and turn Bluetooth off. Then right-click the Earshot icon and choose Connect in the menu; it will not connect, and that is expected. Read what the card says, then come back here.'
         $report = Get-DoctorReport -Label 'doctor-bluetooth-off'
         $verdictOff = Get-RadioVerdict -Report $report
         # The tray's own line for the read after the failed Connect: the doctor run above writes a "radio check:" line of its own,
         # so that one would prove nothing about the card.
-        $offLines = Get-LogMatches -Pattern 'Radio check after a failed connect: Off in' -Regex 'Radio check after a failed connect: Off in [0-9]+ ms\.' -Since $offStart
+        $offLines = Get-LogMatches -Pattern 'Radio check after a failed connect, Off in' -Regex 'Radio check after a failed connect, Off in [0-9]+ ms\.' -Since $offStart
         $card = Read-Answer -Run $run -Question 'Did the Earshot card say "Bluetooth is off."?' -Options @('yes', 'no', 'unsure')
         Add-Finding -Run $run -Name 'radioVerdictOff' -Value $verdictOff
         Add-Finding -Run $run -Name 'cardSaidBluetoothOff' -Value $card
@@ -202,20 +207,17 @@ try
         Add-Criterion -Run $run -Id 'radio-off-seen' -Criterion 'With Bluetooth turned off, the radio check read Off and the card said "Bluetooth is off."' `
             -Outcome $offOutcome -Detail ([string]$offWhy + '.')
 
-        Wait-Owner -Run $run -Text 'Turn Bluetooth back on in quick settings. Watch the Earshot card if it is still open. Wait until the line goes, or ten seconds, then come back here.'
+        # The card closes by itself, so whether its line "went" says nothing; the radio check's own reading is what is held.
+        Wait-Owner -Run $run -Text 'Turn Bluetooth back on in quick settings. Wait ten seconds, then come back here.'
         $report = Get-DoctorReport -Label 'doctor-bluetooth-on'
         $verdictOn = Get-RadioVerdict -Report $report
-        $gone = Read-Answer -Run $run -Question 'Did the "Bluetooth is off." line go from the card once Bluetooth was on?' -Options @('yes', 'no', 'unsure')
         Add-Finding -Run $run -Name 'radioVerdictOn' -Value $verdictOn
-        Add-Finding -Run $run -Name 'cardLineWentAway' -Value $gone
 
         $onOutcome = 'pass'
-        $onWhy = 'the radio check read Ok again and the line went'
+        $onWhy = 'the radio check read Ok again'
         if ($null -eq $verdictOn) { $onOutcome = 'inconclusive'; $onWhy = 'the report gave no radio verdict' }
         elseif ($verdictOn -ne 'Ok') { $onOutcome = $(if ($verdictOn -eq 'Off') { 'fail' } else { 'inconclusive' }); $onWhy = 'the radio check read ' + $verdictOn + ' with Bluetooth turned on' }
-        elseif ($gone -eq 'no') { $onOutcome = 'fail'; $onWhy = 'the radio check read Ok but the line stayed on the card' }
-        elseif ($gone -eq 'unsure') { $onOutcome = 'inconclusive'; $onWhy = 'the radio check read Ok; you were not sure the line went' }
-        Add-Criterion -Run $run -Id 'radio-cleared' -Criterion 'With Bluetooth back on, the radio check read Ok and the "Bluetooth is off." line went.' `
+        Add-Criterion -Run $run -Id 'radio-cleared' -Criterion 'With Bluetooth back on, the radio check read Ok.' `
             -Outcome $onOutcome -Detail ([string]$onWhy + '.')
 
         # ---- Pair AirPods ----
@@ -226,8 +228,7 @@ try
             @{ Id = 'pair-radio-checked'; Text = 'Pair AirPods read the radio first and found it Ok.' }
             @{ Id = 'model-check'; Text = 'The model check found the new pair to be AirPods.' }
             @{ Id = 'pair-adopted'; Text = 'Earshot took the new pair as the one it uses.' }
-            @{ Id = 'setup-one-prompt'; Text = 'Earshot is set up after the pairing, with at most one Windows permission prompt.' }
-            @{ Id = 'no-old-reading'; Text = 'No old battery reading showed after the new pair, and the new reading appeared once the case was opened.' }
+            @{ Id = 'setup-one-prompt'; Text = 'Earshot is still set up after the pairing, with at most one Windows permission prompt.' }
             @{ Id = 'connect-after-pairing'; Text = 'One Connect from the card reached playing within 20 seconds.' }
             @{ Id = 'trace-saved'; Text = 'The Bluetooth trace recorded and was saved.' }
         )
@@ -271,7 +272,7 @@ try
                 -Outcome $(if ($named -eq 'yes') { 'pass' } else { 'fail' }) `
                 -Detail $(if ($named -eq 'yes') { 'the list showed the AirPods with a name.' } else { 'the list showed the AirPods as "Headphones with no name"; that is the signal the empty-name rule watches for.' })
 
-            Wait-Owner -Run $run -Text 'Choose your AirPods in the list and press Pair. If Earshot asks "Does your device show ...", answer it. Allow anything Windows asks. Then come back here when Earshot says Paired, or gives a reason.'
+            Wait-Owner -Run $run -Text 'Choose your AirPods in the list and press Pair. If Earshot asks "Does your device show ...", answer it. If Earshot asks whether to use these AirPods instead, choose Use these. Allow anything Windows asks. Then come back here when Earshot says Paired, or gives a reason.'
             $askedYesNo = Read-Answer -Run $run -Question 'Did Earshot ask you a yes or no question while pairing?' -Options @('yes', 'no')
             $askedNumber = Read-Answer -Run $run -Question 'Did Earshot show a number to check while pairing?' -Options @('yes', 'no')
             $dialog = Read-Answer -Run $run -Question 'Did Windows show a pairing box of its own?' -Options @('yes', 'no')
@@ -279,9 +280,9 @@ try
             Add-Finding -Run $run -Name 'pairingShowedNumber' -Value $askedNumber
             Add-Finding -Run $run -Name 'windowsShowedItsOwnBox' -Value $dialog
 
-            # Set-up follows the pairing: one administrator prompt.
+            # This test starts set up, so no set-up follows the pairing; a prompt here would be unexpected but is allowed once.
             Wait-Owner -Run $run -Text 'If Windows asks for permission for Earshot, allow it once. Wait until the Earshot card says it is using your AirPods, then come back here.'
-            $askedPermission = Read-Answer -Run $run -Question 'Did Windows ask for administrator permission while Earshot set itself up?' -Options @('yes', 'no')
+            $askedPermission = Read-Answer -Run $run -Question 'Did Windows ask for administrator permission after the pairing?' -Options @('yes', 'no')
             $askedAgain = 'no'
             if ($askedPermission -eq 'yes')
             {
@@ -342,21 +343,10 @@ try
             Add-Finding -Run $run -Name 'setUpAfterPair' -Value $setUp
             if ($null -eq $task) { $o = 'inconclusive'; $w = 'the set-up state could not be read' }
             elseif (-not $setUp) { $o = 'fail'; $w = 'Earshot is not set up after the pairing' }
-            elseif ($prompts -eq 'one') { $o = 'pass'; $w = 'one permission prompt, and Earshot is set up' }
+            elseif ($prompts -eq 'one') { $o = 'pass'; $w = 'one permission prompt, and Earshot is still set up' }
             elseif ($prompts -eq 'more') { $o = 'fail'; $w = 'more than one permission prompt' }
-            else { $o = 'pass'; $w = 'no permission prompt was needed, because Earshot was set up already (this test starts set up), and it is still set up' }
-            Add-Criterion -Run $run -Id 'setup-one-prompt' -Criterion 'Earshot is set up after the pairing, with at most one Windows permission prompt.' -Outcome $o -Detail ([string]$w + '.')
-
-            # no-old-reading
-            $before = Read-Answer -Run $run -Question 'Before you open the case: does the Earshot gauge or card show a battery figure for the AirPods?' -Options @('yes', 'no')
-            Wait-Owner -Run $run -Text 'Put both AirPods in the case and close the lid. Wait ten seconds, then open the lid next to this PC and leave it open for half a minute. Then come back here.'
-            $after = Read-Answer -Run $run -Question 'Now the case is open: does a battery figure appear for the AirPods?' -Options @('yes', 'no')
-            Add-Finding -Run $run -Name 'readingBeforeCaseOpened' -Value $before
-            Add-Finding -Run $run -Name 'readingAfterCaseOpened' -Value $after
-            if ($before -eq 'yes') { $o = 'fail'; $w = 'a battery figure showed before the case was opened, so an old reading was still there' }
-            elseif ($after -eq 'yes') { $o = 'pass'; $w = 'no figure before the case was opened, and one appeared when it was' }
-            else { $o = 'inconclusive'; $w = 'no old figure showed, but no new one appeared either' }
-            Add-Criterion -Run $run -Id 'no-old-reading' -Criterion 'No old battery reading showed after the new pair, and the new reading appeared once the case was opened.' -Outcome $o -Detail ([string]$w + '.')
+            else { $o = 'pass'; $w = 'no permission prompt, and Earshot is still set up (this test starts set up, so set-up after a pairing is not tested here)' }
+            Add-Criterion -Run $run -Id 'setup-one-prompt' -Criterion 'Earshot is still set up after the pairing, with at most one Windows permission prompt.' -Outcome $o -Detail ([string]$w + '.')
 
             # connect-after-pairing, then Disconnect
             $since = (Get-Date).ToUniversalTime()
@@ -372,7 +362,8 @@ try
             {
                 $traceStart = (Get-Date).ToUniversalTime()
                 Wait-Owner -Run $run -Text 'Open Earshot settings and choose Record a Bluetooth trace. Read the note, then press Record on it. Allow the Windows permission prompt once. Wait about ten seconds, then press Stop. Wait for the card to say where it saved the trace, then come back here.'
-                $recording = Get-LogMatches -Pattern 'Bluetooth trace: ' -Regex 'Bluetooth trace: recording\.' -Since $traceStart
+                # The tray's line when the helper is asked for: it says only that the trace was started, so the pass rests on Saved and the file.
+                $recording = Get-LogMatches -Pattern 'Bluetooth trace: ' -Regex 'Bluetooth trace: started; ' -Since $traceStart
                 # Saved only: SavedInPlace means the file stayed where only administrators can open it, so the person was not handed it.
                 $saved = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: Saved\.' -Since $traceStart
                 $ended = Get-LogMatches -Pattern 'Bluetooth trace ended: ' -Regex 'Bluetooth trace ended: [A-Za-z]+\.' -Since $traceStart

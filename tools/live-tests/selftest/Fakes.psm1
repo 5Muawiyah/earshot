@@ -122,13 +122,13 @@ $script:LogFixtures = @(
 
     # test 24: the radio check, Pair AirPods and the Bluetooth trace, in the shapes the tray writes (RadioCheck.cs, TrayContext.PairAirPods.cs,
     # PairingSession.cs, TrayContext.Trace.cs). The Pair AirPods pattern is one read of three lines; the script tells them apart.
-    [ordered]@{ Pattern = 'Radio check after a failed connect: Off in'; Raw = $true; Text = 'Radio check after a failed connect: Off in 21 ms.' }
+    [ordered]@{ Pattern = 'Radio check after a failed connect, Off in'; Raw = $true; Text = 'Radio check after a failed connect, Off in 21 ms.' }
     [ordered]@{ Pattern = 'radio check: Ok in'; Raw = $true; Text = 'radio check: Ok in 18 ms.' }
     [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: started from the menu.' }
     [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: Paired, None.' }
     [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: the new pair is the one Earshot uses.' }
     [ordered]@{ Pattern = 'pair: Windows answered '; Raw = $true; Text = 'pair: Windows answered Paired (0).' }
-    [ordered]@{ Pattern = 'Bluetooth trace: '; Raw = $true; Text = 'Bluetooth trace: recording.' }
+    [ordered]@{ Pattern = 'Bluetooth trace: '; Raw = $true; Text = 'Bluetooth trace: started; it records once the administrator prompt is allowed.' }
     [ordered]@{ Pattern = 'Bluetooth trace ended: '; Raw = $true; Text = 'Bluetooth trace ended: Saved.' }
 )
 
@@ -262,17 +262,14 @@ $script:Answers = [ordered]@{
 
     # test 24: Pair AirPods.
     'did the earshot card say "bluetooth is off."'                           = 'yes'
-    'did the "bluetooth is off." line go from the card'                      = 'yes'
     'can you put the case into pairing mode now'                             = 'yes'
     'are your airpods airpods pro 3 or airpods 4'                            = 'yes'
     'does the list show your airpods with a name'                            = 'yes'
     'did earshot ask you a yes or no question while pairing'                 = 'no'
     'did earshot show a number to check while pairing'                       = 'no'
     'did windows show a pairing box of its own'                              = 'no'
-    'did windows ask for administrator permission while earshot set itself up' = 'yes'
+    'did windows ask for administrator permission after the pairing'         = 'yes'
     'did windows ask for it more than once'                                  = 'no'
-    'before you open the case: does the earshot gauge'                       = 'no'
-    'now the case is open: does a battery figure appear'                     = 'yes'
     'do you want to try the bluetooth trace now'                             = 'yes'
 
     # test 20: hand back on Exit.

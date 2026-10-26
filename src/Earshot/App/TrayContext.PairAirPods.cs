@@ -339,7 +339,7 @@ internal sealed partial class TrayContext
 
         var watch = System.Diagnostics.Stopwatch.StartNew();
         RadioCheckResult result = await radio.CheckAsync(ct);
-        _log.Info("Radio check after a failed connect: " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms.");
+        _log.Info("Radio check after a failed connect, " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms.");
         return result;
     }
 

@@ -975,27 +975,27 @@
         none = @{ Overall = 'fail'; Criteria = @{
                 'radio-off-seen' = 'fail'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'fail'
                 'pair-radio-checked' = 'fail'; 'model-check' = 'pass'; 'pair-adopted' = 'fail'; 'setup-one-prompt' = 'pass'
-                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'fail'; 'trace-saved' = 'fail' }
+                'connect-after-pairing' = 'fail'; 'trace-saved' = 'fail' }
             FindingsInclude = @{ 'pairReached' = 'reached'; 'radioVerdictOff' = 'Off'; 'radioVerdictOn' = 'Ok'; 'connectAfterPairingMs' = $null } }
         one  = @{ Overall = 'pass'; Criteria = @{
                 'radio-off-seen' = 'pass'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'pass'
                 'pair-radio-checked' = 'pass'; 'model-check' = 'pass'; 'pair-adopted' = 'pass'; 'setup-one-prompt' = 'pass'
-                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'pass'; 'trace-saved' = 'pass' }
+                'connect-after-pairing' = 'pass'; 'trace-saved' = 'pass' }
             FindingsInclude = @{ 'pairingRunOutcome' = 'paired'; 'pairingRunStatus' = 'Paired'; 'connectAfterPairingMs' = 1719; 'permissionPrompts' = 'one' } }
         two  = @{ Overall = 'inconclusive'; Criteria = @{
                 'radio-off-seen' = 'pass'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'pass'
                 'pair-radio-checked' = 'pass'; 'model-check' = 'pass'; 'pair-adopted' = 'pass'; 'setup-one-prompt' = 'pass'
-                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'inconclusive'; 'trace-saved' = 'pass' } }
+                'connect-after-pairing' = 'inconclusive'; 'trace-saved' = 'pass' } }
         'not-reached' = @{ Overall = 'inconclusive'; Criteria = @{
                 'radio-off-seen' = 'pass'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'inconclusive'; 'pair-paired' = 'inconclusive'
                 'pair-radio-checked' = 'inconclusive'; 'model-check' = 'inconclusive'; 'pair-adopted' = 'inconclusive'
-                'setup-one-prompt' = 'inconclusive'; 'no-old-reading' = 'inconclusive'; 'connect-after-pairing' = 'inconclusive'
+                'setup-one-prompt' = 'inconclusive'; 'connect-after-pairing' = 'inconclusive'
                 'trace-saved' = 'inconclusive' }
             FindingsInclude = @{ 'pairReached' = 'not reached' } }
         'pair-failed' = @{ Overall = 'fail'; Criteria = @{
                 'radio-off-seen' = 'fail'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'fail'
                 'pair-radio-checked' = 'fail'; 'model-check' = 'fail'; 'pair-adopted' = 'fail'; 'setup-one-prompt' = 'pass'
-                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'fail'; 'trace-saved' = 'fail' }
+                'connect-after-pairing' = 'fail'; 'trace-saved' = 'fail' }
             FindingsInclude = @{ 'pairFailureLine' = 'Pair AirPods: Failed, NoDevice.'; 'pairingRunOutcome' = 'failed' } }
     }
 }
