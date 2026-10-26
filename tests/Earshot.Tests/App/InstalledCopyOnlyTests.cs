@@ -27,7 +27,7 @@ public sealed class InstalledCopyOnlyTests
     public void TheTraysRecorderNeedsSetUpExactlyWhenThereIsNoInstalledCopy()
     {
         Paths paths = Real();
-        using Tracing.ITraceRecorder? recorder = Program.CreateTraceRecorder(paths, new CapturingLog());
+        using Earshot.Tracing.ITraceRecorder? recorder = Program.CreateTraceRecorder(paths, new CapturingLog());
 
         Assert.IsNotNull(recorder);
         Assert.AreEqual(!File.Exists(paths.InstalledExe), recorder.NeedsSetUp);
