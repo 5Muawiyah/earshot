@@ -13,8 +13,8 @@ internal interface ITraceRecorder : IDisposable
     // Raised on whichever thread changed the state.
     event EventHandler? StateChanged;
 
-    // True when there is no installed copy of Earshot to raise: the trace is then not offered, and asking for one says to set
-    // up Earshot first.
+    // True when there is no installed copy of Earshot that may be raised (see InstalledExecutable): the cards then do not offer
+    // the trace, and the settings row's Record says to set up Earshot first.
     bool NeedsSetUp { get; }
 
     // Where a saved trace is copied, for the note shown before recording.
@@ -33,8 +33,9 @@ internal interface ITraceRecorder : IDisposable
     string? LeftoverNotice();
 }
 
-// InstalledExecutable: %ProgramFiles%\Earshot\Earshot.exe when it is there, otherwise null. Only that copy is ever raised: a copy
-// run from Downloads or a build folder sits where a standard user can change it. DestinationFolder: where the person finds the
+// InstalledExecutable: %ProgramFiles%\Earshot\Earshot.exe when it is there, is 1.6.0 or later and its folder passes
+// InstalledCopy.Assess, otherwise null. Only that copy is ever raised: a copy run from Downloads or a build folder sits where a
+// standard user can change it. DestinationFolder: where the person finds the
 // trace, %LOCALAPPDATA%\Earshot\traces, which no folder backup uploads (Documents can be).
 internal sealed record TraceRecorderOptions(bool SafeMode, Func<string?> InstalledExecutable, string DestinationFolder, int TrayPid, Func<string> NewNonce);
 

@@ -5,12 +5,13 @@ using Earshot.Tray;
 
 namespace Earshot.App;
 
-// Record a Bluetooth trace, from the settings page, from the card that says the AirPods could not be reached, and from a Fix
-// connection result that points at this PC's Bluetooth (TraceRequestSignal). Each starts the same way: the note about what a
+// Record a Bluetooth trace, from the settings page, from the Unreachable card (headphones found with no name read, then a pairing
+// that did not finish), and from a Fix connection result that is Unreachable (TraceRequestSignal). Each starts the same way: the note about what a
 // trace holds is shown first, and only its Record button goes on. The recorder (package: Trace) then asks for one administrator
 // prompt, raising only the installed copy, records until Stop, copies the trace to %LOCALAPPDATA%\Earshot\traces and opens the
 // folder; the tray shows that it is running with a Stop button, and says how it ended. Nothing is sent anywhere. Not offered in
-// safe mode, and with no installed copy the row says to set up Earshot first. A trace changes no device, service or pairing.
+// safe mode. With no installed copy that may be raised, the cards do not offer it and the settings row's Record says to set up
+// Earshot first. A trace changes no device, service or pairing.
 internal sealed partial class TrayContext
 {
     private ITraceRecorder? _traceRecorder;
