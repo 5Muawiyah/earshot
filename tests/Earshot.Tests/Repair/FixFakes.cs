@@ -119,7 +119,14 @@ internal sealed class FakeRePairUi : IFixRePairUi
         return Task.FromResult(ConfirmPin);
     }
 
-    public void ShowResult(string text) => Shown.Add("result:" + text);
+    // The trace button's answer when it is offered.
+    public bool PressTrace { get; set; }
+
+    public bool ShowResult(string text, bool offerTrace)
+    {
+        Shown.Add("result:" + text + (offerTrace ? " [trace offered]" : ""));
+        return offerTrace && PressTrace;
+    }
 
     public void Close() => Shown.Add("closed");
 }
@@ -300,6 +307,12 @@ internal sealed class FixRig : IDisposable
 
     public FakeElevator Elevator { get; } = new();
 
+    // In place of the fake elevator when a test needs another kind (the one that says to set up Earshot first).
+    public IFixElevator? ElevatorOverride { get; set; }
+
+    // The trace request the result window's button makes; null for a host with no tray to ask.
+    public Func<bool>? RequestTrace { get; set; }
+
     public FakePairing Pairing { get; } = new();
 
     public FakeRePairUi Ui { get; } = new();
@@ -328,7 +341,7 @@ internal sealed class FixRig : IDisposable
         Desktop = Desktop,
         Prompter = Prompter,
         PlanFiles = PlanFiles,
-        Elevator = Elevator,
+        Elevator = ElevatorOverride ?? Elevator,
         Pairing = Pairing,
         RePairUi = Ui,
         Gate = GateFake,
@@ -337,6 +350,7 @@ internal sealed class FixRig : IDisposable
         Log = Log,
         Radio = Radio,
         History = History,
+        RequestTrace = RequestTrace,
         Options = new FixOptions
         {
             BaselineWait = TimeSpan.FromMilliseconds(50),

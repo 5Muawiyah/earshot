@@ -37,6 +37,10 @@ internal enum FixOutcome
 
 internal sealed record FixResult(FixOutcome Outcome, IReadOnlyList<string> Lines, IReadOnlyList<StepOutcome> Steps)
 {
+    // The re-pair found the AirPods and this PC could not reach them: the one result that points at this PC's Bluetooth where a
+    // trace can show where it stopped, as the tray's card for the same line offers.
+    public bool OfferTrace { get; init; }
+
     public int ExitCode => Outcome switch
     {
         FixOutcome.Usage => Earshot.ExitCodes.Usage,
@@ -55,6 +59,12 @@ internal static class FixConnection
     public const string NoProtectedFolderNote = "Fix connection could not make a folder that only administrators can reach for its plan, so nothing was changed.";
 
     public const string PlanOnlyNote = "Nothing was changed. Earshot asks on the screen before it changes anything, so run Fix connection where a person can answer.";
+
+    public const string SetUpFirstNote = "Set up Earshot first. Fix connection makes its changes through the installed copy, so nothing was changed.";
+
+    public const string RecordTraceButton = "Record a Bluetooth trace";
+
+    public const string TraceNotHeardNote = "Earshot isn't running, so the trace can't be started from here. Start Earshot, then choose Bluetooth trace in its settings.";
 
     // The only option: where the plan is printed. It is read by the caller that opens the output; here it is accepted and ignored.
     internal static bool TryParseArgs(IReadOnlyList<string> args, out string problem)
@@ -106,7 +116,17 @@ internal static class FixConnection
 
         FixResult result = await RunWithPersonAsync(dialog, plan, host, steps, ct).ConfigureAwait(false);
         host.Output.WriteLine(string.Join(Environment.NewLine, result.Lines));
-        host.RePairUi.ShowResult(string.Join(Environment.NewLine, result.Lines));
+        bool offerTrace = result.OfferTrace && host.RequestTrace is not null;
+        if (host.RePairUi.ShowResult(string.Join(Environment.NewLine, result.Lines), offerTrace) && offerTrace)
+        {
+            // The tray shows the note and its Record button; nothing is recorded from here.
+            host.Log.Info("fix: the person asked for a Bluetooth trace from the result.");
+            if (!host.RequestTrace!())
+            {
+                host.RePairUi.ShowResult(TraceNotHeardNote, offerTrace: false);
+            }
+        }
+
         return result;
     }
 
@@ -125,6 +145,9 @@ internal static class FixConnection
         public bool NewPairUnprotected { get; set; }
 
         public bool Installed { get; init; }
+
+        // The re-pair found the AirPods and could not reach them.
+        public bool PcBluetoothUnreachable { get; set; }
     }
 
     // The first question when there is nothing to undo. It issues no consent and starts nothing: the second question, which
@@ -161,7 +184,7 @@ internal static class FixConnection
         }
 
         bool ended = await EndAsync(host, state, lines, steps).ConfigureAwait(false);
-        return new FixResult(ended ? outcome : FixOutcome.Failed, lines, steps);
+        return new FixResult(ended ? outcome : FixOutcome.Failed, lines, steps) { OfferTrace = state.PcBluetoothUnreachable };
     }
 
     private static async Task<FixOutcome> ChangeAndRePairAsync(
@@ -179,6 +202,15 @@ internal static class FixConnection
         }
         else
         {
+            // Changes need the administrator run, and only the installed copy is raised: with none, nothing is asked.
+            if (host.Elevator is NotInstalledFixElevator)
+            {
+                steps.Add(NotInstalledFixElevator.Why);
+                host.Log.Warn("fix: Earshot is not installed, so the changes were not offered.");
+                lines.Add(SetUpFirstNote);
+                return FixOutcome.Failed;
+            }
+
             FixConsentAnswer first = dialog.AskChanges(plan);
             if (first.Consent is null)
             {
@@ -275,6 +307,7 @@ internal static class FixConnection
 
         lines.AddRange(repaired.Lines);
         steps.AddRange(repaired.Steps);
+        state.PcBluetoothUnreachable = repaired.Session?.Unreachable == true;
         foreach (PairingCallResult status in repaired.Statuses)
         {
             lines.Add("Status: " + status.Name + " (" + status.Code.ToString(CultureInfo.InvariantCulture) + ").");

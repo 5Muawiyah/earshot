@@ -78,7 +78,9 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         ? new FixPrompt(title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")
         : new FixPrompt(title, "Enter " + pin + " on your device", "Windows is showing this number to pair.", [], [], "Continue");
 
-    public void ShowResult(string text)
+    // With offerTrace, a second button asks the tray for Record a Bluetooth trace, which shows its note before anything is
+    // recorded.
+    public bool ShowResult(string text, bool offerTrace)
     {
         ArgumentNullException.ThrowIfNull(text);
         Close();
@@ -89,8 +91,14 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
             Text = text,
             AllowCancel = true,
         };
+        var trace = new TaskDialogButton(FixConnection.RecordTraceButton);
+        if (offerTrace)
+        {
+            page.Buttons.Add(trace);
+        }
+
         page.Buttons.Add(TaskDialogButton.OK);
-        TaskDialog.ShowDialog(page);
+        return TaskDialog.ShowDialog(page) == trace;
     }
 
     public void Close()

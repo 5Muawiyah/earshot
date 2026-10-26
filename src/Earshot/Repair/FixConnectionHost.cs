@@ -47,7 +47,8 @@ internal interface IFixRePairUi
 
     Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin);
 
-    void ShowResult(string text);
+    // The run's result. offerTrace adds a Record a Bluetooth trace button; true when the person pressed it.
+    bool ShowResult(string text, bool offerTrace);
 
     void Close();
 }
@@ -112,6 +113,10 @@ internal sealed class FixHost
 
     // The machine folder, where the elevated run leaves its step codes. Null when there is none to read.
     public string? MachineFolder { get; init; }
+
+    // Asks the tray to start Record a Bluetooth trace (TraceRequestSignal); true when a tray heard it. Null when there is no tray
+    // to ask, and the result then offers no trace button.
+    public Func<bool>? RequestTrace { get; init; }
 }
 
 // ---- real implementations that sit on machine state ----

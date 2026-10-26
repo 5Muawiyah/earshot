@@ -117,7 +117,8 @@ internal static partial class Program
     private static FixElevation ChooseFixElevation(Paths paths, IProcessToken token, ILog log)
     {
         var ordinaryFiles = new FixPlanFiles(Path.Combine(paths.LocalFolder, "fix"));
-        var prompting = new ShellRunasFixElevator(new ShellRunasLauncher(), File.Exists(paths.InstalledExe) ? paths.InstalledExe : Environment.ProcessPath ?? paths.InstalledExe);
+        // Only the installed copy is raised; with none, a run with changes to make says to set up Earshot first.
+        IFixElevator prompting = FixElevationChoice.Prompting(new ShellRunasLauncher(), InstalledCopy(paths, File.Exists)());
         if (paths.IsSafeMode || paths.IsRedirected)
         {
             return new FixElevation(ordinaryFiles, prompting, false, null, null);
@@ -202,6 +203,10 @@ internal static partial class Program
             Output = output,
             Log = log,
             MachineFolder = paths.MachineFolder,
+
+            // A result that points at this PC's Bluetooth offers the trace; the tray's card does the rest. Not in safe mode, where
+            // the tray refuses a trace.
+            RequestTrace = paths.IsSafeMode ? null : () => TraceRequestSignal.Raise(TraceRequestSignal.NameFor(paths), log),
         };
     }
 

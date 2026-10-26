@@ -431,6 +431,7 @@ internal static partial class Program
             OwnProgramFixLauncher? fixLauncher = null;
             IDisposable? exitSignal = null;
             FixEndedSignal? fixEndedSignal = null;
+            TraceRequestSignal? traceRequestSignal = null;
             SettingsFileWatcher? settingsWatcher = null;
             try
             {
@@ -504,6 +505,11 @@ internal static partial class Program
                 };
 
                 TrayContext shown = context;
+
+                // A Fix connection result that points at this PC's Bluetooth asks for a trace; the tray answers with the note
+                // and its Record button, the same as the settings row.
+                traceRequestSignal = TraceRequestSignal.Listen(
+                    TraceRequestSignal.NameFor(paths), () => registry.UiPost(shown.RecordTraceFromFixResult), log);
                 showWait = ThreadPool.RegisterWaitForSingleObject(
                     showEvent,
                     (_, _) => ui.Post(static state => ((TrayContext)state!).ShowStatusCard(), shown),
@@ -548,6 +554,7 @@ internal static partial class Program
 
                 exitSignal?.Dispose();
                 fixEndedSignal?.Dispose();
+                traceRequestSignal?.Dispose();
                 settingsWatcher?.Dispose();
 
                 // Nothing after this point may resume on the UI thread: its message loop has ended. The card

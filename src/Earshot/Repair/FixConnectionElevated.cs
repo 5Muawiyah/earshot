@@ -102,6 +102,14 @@ internal sealed record FixElevation(IFixPlanFiles PlanFiles, IFixElevator Elevat
 
 internal static class FixElevationChoice
 {
+    // The prompting apply step: the installed copy through the administrator prompt, or, with none, the one that says to set up
+    // Earshot first. installedExe is null when %ProgramFiles%\Earshot\Earshot.exe is not there.
+    public static IFixElevator Prompting(IElevatedLauncher launcher, string? installedExe)
+    {
+        ArgumentNullException.ThrowIfNull(launcher);
+        return installedExe is null ? new NotInstalledFixElevator() : new ShellRunasFixElevator(launcher, installedExe);
+    }
+
     // From an elevated administrator the apply step runs in this process and the plan goes to a new admin-only folder; from
     // anyone else the ordinary pair is used (a plan in the user's folder, one administrator prompt). When the admin-only folder
     // cannot be made and checked, the run is refused with the step that failed, and nothing falls back to the ordinary folder.
@@ -128,6 +136,22 @@ internal static class FixElevationChoice
         }
 
         return new FixElevation(new FixPlanFiles(root), new InProcessFixElevator(apply), true, root, null);
+    }
+}
+
+// The apply step when Earshot is not installed. Only %ProgramFiles%\Earshot\Earshot.exe is ever raised: a copy run from Downloads
+// or a build folder sits where a standard user can change it. A run with changes to make says to set up Earshot first before
+// it asks anything (FixConnection), and this applies nothing.
+internal sealed class NotInstalledFixElevator : IFixElevator
+{
+    public const string StepName = "installed-copy";
+
+    public static StepOutcome Why => StepOutcomes.NotAttempted(StepName, "Earshot is not installed in Program Files, so there is no copy to raise.");
+
+    public Task<ElevatedRun> ApplyAsync(FixConsent consent, string planPath, string planSha256, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(consent);
+        return Task.FromResult(new ElevatedRun(null, Why));
     }
 }
 
