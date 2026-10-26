@@ -123,7 +123,7 @@ internal static partial class Program
         {
             // One run at a time on this PC: a Fix started from the tray, from Setup.exe and from the install script is three
             // programs, so the lock is a named mutex. The run that finds it taken starts nothing and says nothing else.
-            using FixRunLock? runLock = FixRunLock.TryAcquire(FixRunLock.NameFor(paths), log);
+            FixRunLock? runLock = FixRunLock.TryAcquire(FixRunLock.NameFor(paths), log);
             if (runLock is null)
             {
                 log.Warn("fix: the Fix lock is held (by a Fix connection or Pair AirPods run, or by another program holding its name), so this run was not started.");
@@ -132,16 +132,28 @@ internal static partial class Program
                 return;
             }
 
-            try
+            ctx.ExitCode = RunHoldingTheLock(runLock, () => RunFix(ctx.Args, paths, token, log, output.Writer), () => FixEndedSignal.Raise(FixEndedSignal.NameFor(paths), log));
+        }
+    }
+
+    // Runs the Fix with its lock, lets the lock go, and only then tells the tray the run ended: however the run was started, the
+    // tray runs its start checks again (a run can end with a new pair Earshot does not protect), and a Pair AirPods pressed on
+    // that news must find the lock free.
+    internal static int RunHoldingTheLock(FixRunLock runLock, Func<int> run, Action ended)
+    {
+        ArgumentNullException.ThrowIfNull(runLock);
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(ended);
+        try
+        {
+            using (runLock)
             {
-                ctx.ExitCode = RunFix(ctx.Args, paths, token, log, output.Writer);
+                return run();
             }
-            finally
-            {
-                // However the run was started, the tray hears that it ended and runs its start checks again: a run can end with a
-                // new pair Earshot does not protect.
-                FixEndedSignal.Raise(FixEndedSignal.NameFor(paths), log);
-            }
+        }
+        finally
+        {
+            ended();
         }
     }
 

@@ -32,6 +32,28 @@ public sealed class FixRunLockTests
             string.Join(" | ", log.Entries.Select(e => e.Message)));
     }
 
+    // The tray hears that a Fix run ended only once the run has let go of the lock, so a Pair AirPods pressed on that news is not
+    // refused as "may already be running". Before, the news came while the lock was still held.
+    [TestMethod]
+    public void TheEndOfARunIsToldOnlyOnceItsLockIsFree()
+    {
+        string name = UniqueName();
+        var log = new CapturingLog();
+        FixRunLock? held = FixRunLock.TryAcquire(name, log);
+        Assert.IsNotNull(held);
+        bool freeWhenTold = false;
+
+        int code = Program.RunHoldingTheLock(held, () => 7, () =>
+            freeWhenTold = Task.Run(() =>
+            {
+                using FixRunLock? next = FixRunLock.TryAcquire(name, log);
+                return next is not null;
+            }).GetAwaiter().GetResult());
+
+        Assert.AreEqual(7, code);
+        Assert.IsTrue(freeWhenTold, "The lock was still held when the end of the run was told.");
+    }
+
     [TestMethod]
     public void AReleasedLockCanBeTakenAgain()
     {
