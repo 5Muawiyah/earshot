@@ -29,8 +29,8 @@ public sealed class RadioCheckTests
     private static AdapterReading Adapter(int? radioState, bool found = true, bool classic = true, string? id = RadioNode) =>
         new(found, classic, radioState, id, found ? [] : [StepOutcomes.FromHResult("bluetooth-adapter", 0, "GetDefaultAsync returned no adapter.", ok: false)]);
 
-    private static DevNodeStatusInfo Node(uint status = CfgMgr32.DN_STARTED, uint problem = 0, string? version = "23.60.0.2", DateOnly? date = null) =>
-        new(true, status, problem, version, date ?? new DateOnly(2024, 3, 9), []);
+    private static DevNodeStatusInfo Node(uint status = CfgMgr32.DN_STARTED, uint problem = 0, string? version = "1.2.3.4", DateOnly? date = null) =>
+        new(true, status, problem, version, date ?? new DateOnly(2020, 1, 2), []);
 
     private static RadioCheck Check(AdapterReading reading, DevNodeStatusInfo node, TimeSpan? budget = null, FakeNodes? nodes = null) =>
         new(new FakeRadioApi(_ => Task.FromResult(reading)), nodes ?? new FakeNodes(node), budget);
@@ -44,8 +44,8 @@ public sealed class RadioCheckTests
         Assert.IsNull(r.Line);
         Assert.AreEqual(RadioAction.None, r.Action);
         Assert.IsFalse(r.BlocksRepair);
-        Assert.AreEqual("23.60.0.2", r.DriverVersion);
-        Assert.AreEqual("2024-03-09", r.DriverDate);
+        Assert.AreEqual("1.2.3.4", r.DriverVersion);
+        Assert.AreEqual("2020-01-02", r.DriverDate);
         Assert.AreEqual(0, r.HistoryCode);
         Assert.AreEqual(0, r.ProblemCode);
     }

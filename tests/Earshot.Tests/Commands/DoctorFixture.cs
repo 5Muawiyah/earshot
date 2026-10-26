@@ -44,8 +44,8 @@ internal static class DoctorFixture
             { "name": "BthAvctpSvc", "state": "" }
           ],
           "radio": {
-            "found": true, "driverVersion": "23.60.0.2", "adapterFound": true, "classicSupported": true, "state": "Problem", "radioState": "On",
-            "devNodeStatus": "0x00000400", "problemCode": 10, "driverDate": "2024-03-09",
+            "found": true, "driverVersion": "1.2.3.4", "adapterFound": true, "classicSupported": true, "state": "Problem", "radioState": "On",
+            "devNodeStatus": "0x00000400", "problemCode": 10, "driverDate": "2020-01-02",
             "readCodes": [ "cm-status-radio:CR_SUCCESS", "bluetooth-radio:S_OK" ]
           },
           "startup": { "runCommand": "\"C:\\Users\\jonathan\\AppData\\Local\\Programs\\Earshot\\Earshot.exe\" --startup", "targetExists": false, "approvedFlag": "02" },

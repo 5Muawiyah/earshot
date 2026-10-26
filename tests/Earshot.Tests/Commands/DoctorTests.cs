@@ -255,10 +255,10 @@ public sealed class DoctorTests
         Assert.AreEqual("On", radio.GetProperty("radioState").GetString());
         Assert.AreEqual("0x00000400", radio.GetProperty("devNodeStatus").GetString());
         Assert.AreEqual(10, radio.GetProperty("problemCode").GetInt32());
-        Assert.AreEqual("23.60.0.2", radio.GetProperty("driverVersion").GetString());
-        Assert.AreEqual("2024-03-09", radio.GetProperty("driverDate").GetString());
+        Assert.AreEqual("1.2.3.4", radio.GetProperty("driverVersion").GetString());
+        Assert.AreEqual("2020-01-02", radio.GetProperty("driverDate").GetString());
         Assert.AreEqual(2, radio.GetProperty("readCodes").GetArrayLength());
-        StringAssert.Contains(output, "Bluetooth radio: Problem, problem code 10, driver 23.60.0.2 (2024-03-09).");
+        StringAssert.Contains(output, "Bluetooth radio: Problem, problem code 10, driver 1.2.3.4 (2020-01-02).");
     }
 
     // Nothing was read, so nothing is said to be missing. Before, this said "none found", which the AI guide reads as no adapter.
