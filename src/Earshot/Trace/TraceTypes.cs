@@ -8,7 +8,7 @@ internal enum TraceOutcome
     // The trace is saved and the tray has it (or is about to).
     Saved,
 
-    // The trace is saved but stays in the administrators-only folder: the tray was gone, or the file could not be made readable.
+    // The trace is saved but stays in the administrators-only folder: the file could not be made readable.
     SavedInPlace,
 
     // The tray exited while the recording ran, so nobody would collect a file: the session was cancelled and nothing was saved.

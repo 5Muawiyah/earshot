@@ -68,7 +68,7 @@ internal static class PairReasons
             AuthenticationTimeout => "Pairing took too long and stopped.",
             AuthenticationNotAllowed or ProtectionLevelCouldNotBeMet or InvalidCeremonyData or RequiredHandlerNotRegistered =>
                 "Windows couldn't complete the pairing (code " + number + ").",
-            AuthenticationFailure => "Pairing was turned down.",
+            AuthenticationFailure => "Pairing failed when this PC and the device checked each other.",
             NoSupportedProfiles => "Windows found nothing it can use on this device.",
             AccessDenied => "Windows didn't allow Earshot to pair.",
             PairingCanceled or RejectedByHandler => "Pairing was cancelled.",
@@ -80,8 +80,7 @@ internal static class PairReasons
 }
 
 // The words of the Pair AirPods steps, one line each (British English, no em dashes). Drafts for the prose pass.
-// Apple's page for putting AirPods in pairing mode: AirPods 4, AirPods 5 and AirPods Pro 3 by a double-tap on the front of
-// the case, every other model by holding the setup button on the back, both until the status light flashes white. The two
+// Apple's page for putting AirPods in pairing mode: AirPods 4 and AirPods Pro 3 by a double-tap on the front of the case, every other model by holding the setup button on the back, both until the status light flashes white. The two
 // lines are Earshot's words, not Apple's.
 // https://support.apple.com/en-us/108786
 internal static class PairingText

@@ -20,8 +20,9 @@ namespace Earshot.App;
 //
 // The name is open to every user of the PC (Everyone may wait on it), because a Setup.exe run is elevated and under
 // Administrator protection that is another account than the signed-in one. Anything on the PC can therefore take the name and
-// stop a Fix from starting. That is accepted: a program of the same user could do worse, and the refusal is logged with its
-// code, so it is seen rather than mistaken for a fault in Fix.
+// stop a Fix from starting. That is accepted: a program of the same user could do worse. A lock that cannot be opened is logged
+// with its code; a lock that is held is logged as held, by a run or by whatever else holds the name, since which it is cannot
+// be told.
 // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutexacl.create
 // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutex.releasemutex
 // https://learn.microsoft.com/en-us/windows/win32/termserv/kernel-object-namespaces

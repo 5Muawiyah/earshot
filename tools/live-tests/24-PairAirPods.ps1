@@ -17,8 +17,8 @@
     Earshot asked while pairing (a yes or no question, a number to check, or neither), whether Windows showed a box of
     its own, and the minor class the scan saw (Earshot does not log it, so it is only asked for).
     What stays unproved: the radio lines for a switch, a broken driver or no radio, the empty-name
-    signal, undoing the pairing of a device that is not AirPods (no other headphones may be paired),
-    and AirPods models other than yours.
+    signal, a device that is not AirPods being left paired and unused (no other headphones may be
+    paired), and AirPods models other than yours.
 
     It settles whether Pair AirPods pairs and adopts the AirPods from the tray, sets up with one prompt,
     shows no old reading, connects once, and whether the radio check reads a real radio turned off.
@@ -96,7 +96,7 @@ function Get-DoctorReport
     return $result.json
 }
 
-# The radio check's verdict by name (Ok, Off, SwitchedOff, Problem, NoAdapter, Unknown), or $null when the report has none.
+# The radio check's verdict by name (Ok, Off, SwitchedOff, Problem, NoAdapter, NoClassic, Unknown), or $null when the report has none.
 function Get-RadioVerdict
 {
     param($Report)

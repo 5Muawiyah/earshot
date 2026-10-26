@@ -216,7 +216,7 @@ internal sealed class PairingSession
             lines.Add("Pair " + shown + ": " + pair.Name + " (" + pair.Code.ToString(CultureInfo.InvariantCulture) + ")" + (pair.Detail is null ? "." : ", " + pair.Detail + "."));
             history.Add(new StepOutcome("pair", pair.Success, pair.Code, pair.Name, null));
             history.Add(Ms("pair-ms", pairMs));
-            _log.Info("pair: Windows answered " + pair.Name + " (" + pair.Code.ToString(CultureInfo.InvariantCulture) + ").");
+            _log.Info("pair: " + (pair.Name == CancelledTimeout ? "Earshot stopped waiting for Windows: " : "Windows answered ") + pair.Name + " (" + pair.Code.ToString(CultureInfo.InvariantCulture) + ").");
             if (!pair.Success)
             {
                 // The one PC-side signal of the debug run: the name request is the page that timed out, so Windows listed the

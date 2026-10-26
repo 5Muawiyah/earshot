@@ -183,7 +183,7 @@ public sealed class PairingSessionTests
 
         Assert.AreEqual(PairOutcome.Failed, result.Outcome);
         Assert.AreEqual(PairFailureReason.PairFailed, result.Reason);
-        Assert.AreEqual("Pairing was turned down.", result.CardLine);
+        Assert.AreEqual("Pairing failed when this PC and the device checked each other.", result.CardLine);
         Assert.IsFalse(result.Unreachable, "A named device that fails to pair says nothing about the PC.");
         Assert.AreEqual(FailureClass.Unknown.ToString(), result.ToHistoryEntry(DateTimeOffset.UnixEpoch).FailureClass);
     }

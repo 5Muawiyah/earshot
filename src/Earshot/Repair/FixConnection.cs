@@ -64,7 +64,7 @@ internal static class FixConnection
 
     public const string RecordTraceButton = "Record a Bluetooth trace";
 
-    public const string TraceNotHeardNote = "Earshot isn't running, so the trace can't be started from here. Start Earshot, then choose Bluetooth trace in its settings.";
+    public const string TraceNotHeardNote = "Earshot didn't answer, so the trace can't be started from here. Start Earshot, then choose Bluetooth trace in its settings.";
 
     // The only option: where the plan is printed. It is read by the caller that opens the output; here it is accepted and ignored.
     internal static bool TryParseArgs(IReadOnlyList<string> args, out string problem)

@@ -62,7 +62,7 @@ internal static partial class Program
             using FixRunLock? runLock = FixRunLock.TryAcquire(FixRunLock.NameFor(paths), log);
             if (runLock is null)
             {
-                log.Warn("fix: another Fix connection or Pair AirPods run holds the lock, so this run was not started.");
+                log.Warn("fix: the Fix lock is held (by a Fix connection or Pair AirPods run, or by another program holding its name), so this run was not started.");
                 output.Writer.WriteLine(FixRunLock.FixAlreadyRunningMessage);
                 ctx.ExitCode = ExitCodes.AlreadyRunning;
                 return;

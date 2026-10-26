@@ -27,7 +27,7 @@ public sealed class PairReasonsTests
             [6] = "Windows reports a hardware failure.",
             [7] = "Pairing took too long and stopped.",
             [8] = "Windows couldn't complete the pairing (code 8).",
-            [9] = "Pairing was turned down.",
+            [9] = "Pairing failed when this PC and the device checked each other.",
             [10] = "Windows found nothing it can use on this device.",
             [11] = "Windows couldn't complete the pairing (code 11).",
             [12] = "Windows didn't allow Earshot to pair.",
