@@ -148,16 +148,18 @@ Startup on is not covered.
   used. Every step goes in the connect history with its result code (Windows'
   own where Windows gave one) and its time. It has not had a live run yet (test
   24 is pending).
-- **Says when this PC's Bluetooth is the problem.** After a Connect or a
-  pairing fails, Earshot reads this PC's Bluetooth once and, when it is the
-  cause, says only what it saw: "Bluetooth is off.", "Bluetooth is turned off
-  by a switch or setting on this PC.", "Bluetooth on this PC isn't working.
-  Windows reports problem code N." or "Windows finds no Bluetooth on this PC.",
-  each with a Bluetooth settings button, or "Bluetooth on this PC can't do
-  Classic Bluetooth, which AirPods need for sound.", with no button, and no fix
-  for the AirPods. A read of the Bluetooth adapter that fails says nothing. When the
-  AirPods were found and could not be reached it says "This PC found the
-  AirPods but couldn't reach them." with a Record a Bluetooth trace button.
+- **Says when this PC's Bluetooth is the problem.** After a Connect fails, and
+  before a pairing starts, Earshot reads this PC's Bluetooth once and, when it
+  is the cause, says only what it saw: "Bluetooth is off.", "Bluetooth is turned
+  off by a switch on this PC or by its firmware.", "Bluetooth on this PC isn't
+  working. Windows reports problem code N." or "Windows finds no Bluetooth on
+  this PC.", each with a Bluetooth settings button, or "Bluetooth on this PC
+  can't do Classic Bluetooth, which AirPods need for sound.", with no button,
+  and no fix for the AirPods. A read of the Bluetooth adapter that fails says
+  nothing. When headphones with no name read were found and could not be
+  paired, it says "This PC found the headphones but couldn't reach them." with
+  a Record a Bluetooth trace button. That reading of the PC as the cause rests
+  on one sitting, on 25 October.
   `Earshot.exe doctor` reports the driver's version and date, the problem code,
   the radio state and the last pairing attempts.
 - **Record a Bluetooth trace**, new in 1.6.0, on the settings page and on that

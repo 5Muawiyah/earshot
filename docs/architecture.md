@@ -1397,20 +1397,23 @@ https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
 | State | Line | Button |
 |---|---|---|
 | Off | Bluetooth is off. | Bluetooth settings |
-| Switched off | Bluetooth is turned off by a switch or setting on this PC. | Bluetooth settings |
+| Switched off | Bluetooth is turned off by a switch on this PC or by its firmware. | Bluetooth settings |
 | Problem | Bluetooth on this PC isn't working. Windows reports problem code N. | Bluetooth settings |
 | No adapter | Windows finds no Bluetooth on this PC. | Bluetooth settings |
 | No Classic Bluetooth | Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound. | None |
-| Unreachable | This PC found the AirPods but couldn't reach them. | Record a Bluetooth trace |
+| Unreachable | This PC found the headphones but couldn't reach them. | Record a Bluetooth trace |
 
 Each line claims only what was read. In these states the card offers nothing
 for the AirPods: no Fix connection, no Connect in Windows, no reset advice,
 because the fault is this PC's. An Ok or unread radio leaves the failure's own
 offers, and so does a read of the default adapter that threw or that this
 Windows cannot make: it is Unknown, with its code in the history, not "no
-Bluetooth". Unreachable comes from a pairing, never from these reads: the AirPods
-were found with no name read and the pairing then failed. That is what a
-driver that cannot page devices looks like (see [verification.md](verification.md)).
+Bluetooth". Unreachable comes from a pairing, never from these reads: the
+headphones picked were found with no name read and the pairing then failed, for
+a reason other than a stop on purpose, Earshot's own time limit or the device
+not being ready to pair. That is what a driver that cannot page devices looked
+like on 25 October, the one sitting the reading rests on (see
+[verification.md](verification.md)).
 
 ### Record a Bluetooth trace
 
@@ -1436,12 +1439,16 @@ prompt. The helper:
    see `THIRD-PARTY-NOTICES.txt`) into it, reads it back and checks its hash.
 3. Runs `wpr.exe` from System32: `-cancel`, `-start <profile>!BluetoothStack.Verbose
    -filemode -recordtempto <run folder>`, and `-stop <file>`, each ending
-   `-instancename EarshotBluetoothTraceS<session id>`, so the recording in progress stays in
-   the run folder and a stop or cancel reaches only Earshot's own session.
+   `-instancename EarshotBluetoothTraceS<session id>`. Microsoft's page says the
+   first keeps the recording in progress in the given folder and the second makes
+   a stop or cancel reach only the session of that name; neither has been run in a
+   real recording yet (see [verification.md](verification.md)).
    https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options
 4. Stops and saves when the tray asks or after 10 minutes. When the tray
-   process exits first (Exit, a sign-out, a crash), nobody would collect a
-   file, so it runs `wpr -cancel` instead and saves nothing. A start that timed
+   process exits first (Exit, a crash) while the helper still runs, nobody would
+   collect a file, so it runs `wpr -cancel` instead and saves nothing. A
+   sign-out may end the helper too before it can cancel; the recording session
+   can outlive it, and the next start then says a trace may still be running. A start that timed
    out is cancelled too.
 5. Gives the tray's user read on the trace and the result, waits for the tray
    to copy the trace to `%LOCALAPPDATA%\Earshot\traces` (not Documents, which
@@ -1456,7 +1463,10 @@ request to start its tray. At start it says when run folders of earlier
 recordings are still there. The three events it makes for a run grant the
 signed-in user full control and Administrators wait and set, because the
 helper may be another account. Its read and delete failures go to the machine
-log. A trace changes no device, service or pairing, and nothing in the trace
+log. Like install and fix-apply, the helper refuses to run when its environment
+(the user's, since it is raised from the user's session) sets a variable that
+makes the runtime load other code, use another runtime or write a file where it
+says. A trace changes no device, service or pairing, and nothing in the trace
 code touches the network.
 
 ### Send to
@@ -1721,7 +1731,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe gate <verb> <nonce> [address]` / `Earshot.exe gate-protect <verb> <nonce>` | The elevated workers: one for the device nodes, one for the Bluetooth services. Started by Earshot's own scheduled tasks, not by hand. |
 | `Earshot.exe diag <target>` | Single live actions for testing on real hardware: connect, disconnect, a raw driver request, a gate run, the unelevated service call, and the battery sweep. **All but the battery sweep and `gate status` change the state of the device**; those two only read. They exist for the live tests in `tools\live-tests` and are not part of normal use. |
 | `Earshot.exe fix [--out <path>]` | Fix connection, run unelevated in the person's session. Plans from reads, asks two questions on the screen, runs `fix-apply` after one administrator prompt, and may remove the AirPods from Windows and pair them again. Takes no option that says yes. Exit code 75 when nobody was at the screen (plan only), 76 when the person declined the first question, 79 when they declined the second after the first one's changes were made, 70 when a step failed. See [Fix connection](#fix-connection). |
-| `Earshot.exe trace <trayPid> <nonce>` | The elevated half of Record a Bluetooth trace, started by the tray through one administrator prompt from the installed copy, never by hand. Records the Bluetooth stack's profile with Windows Performance Recorder for at most 10 minutes into an administrators-only folder, and hands the file to the tray. Refused in safe mode, with a redirected data folder, and unelevated. See [Record a Bluetooth trace](#record-a-bluetooth-trace). |
+| `Earshot.exe trace <trayPid> <nonce>` | The elevated half of Record a Bluetooth trace, meant to be started by the tray through one administrator prompt from the installed copy, not by hand. Records the Bluetooth stack's profile with Windows Performance Recorder for at most 10 minutes into an administrators-only folder, and hands the file to the tray. Refused in safe mode, with a redirected data folder, and unelevated. See [Record a Bluetooth trace](#record-a-bluetooth-trace). |
 | `Earshot.exe fix-apply <planFile> <sha256>` | The elevated half of Fix connection, started by `fix` after the first question, never by hand. It re-derives the plan and applies only what both agree on. |
 | `Earshot.exe doctor [--out <path>]` | A read-only report of the install, the AirPods and Bluetooth, as a short summary and a JSON block, with names, addresses, ids, serial numbers, the user name and the PC name removed. Needs no administrator rights and touches no device. |
 | `Earshot.exe settings list` / `get <name>` / `set <name> <value>` [`--out <path>`] | Lists every setting that can be changed here with its value and what it accepts, reads one, or changes one. A running Earshot picks a change up when it sees the file change; the code allows a 250 ms settle and up to 8 retries, a limit in the code rather than a measurement. An unknown name or a value out of range is refused with a non-zero exit code. |
