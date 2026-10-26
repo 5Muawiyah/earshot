@@ -1321,7 +1321,11 @@ user, through the same pairing session Fix connection's re-pair uses
 3. A scan for headphones in pairing mode, a pick the person makes (always
    asked, so nothing is paired without a choice), and Windows' pairing with
    the kind of confirmation Windows asks for.
-4. The model check on the new device's nodes. A pair that passes is pinned,
+4. The model check on the new device's nodes. When another pinned pair is still
+   in the device tree (or the tree could not be read), the person is asked
+   "Use these AirPods instead?" first; a no keeps the pinned pair, adopts
+   nothing, says the new pair is not protected, clears the recovery marker and
+   records a `replace` step. A pair that passes, and is agreed to, is pinned,
    given to the gate when Earshot is set up, and the previous pair's readings
    and link are dropped; then set-up runs when Earshot is not set up yet. A
    device whose nodes were read and fail is left paired and not adopted:
@@ -1337,7 +1341,9 @@ Every run goes in the connect history as one entry, whether it paired, failed,
 was cancelled or stopped before the scan, and no device name. Each step has its
 `DevicePairingResultStatus` or Win32 code, and the `-ms` step after it holds how
 long it took (`radio-check-ms`, `scan-ms`, `pair-ms`, `model-check-ms`,
-`adopt-ms`, `setup-ms`). Cancel in the Pair AirPods window ends the run as a
+`adopt-ms`, `setup-ms`); a `replace` step holds the answer when the question was
+asked. Codes that are Earshot's own (the lock, a question not answered, the
+pairing's own time limit) are named as such. Cancel in the Pair AirPods window ends the run as a
 cancel; when Windows had already paired the AirPods, or a pairing that timed out
 had, the new pair is offered through the device picker and the recovery marker
 stays. While the run is under way the coordinator's checks for AirPods Earshot
@@ -1362,9 +1368,14 @@ device) before the pairing, and starts no pairing when it cannot be written; it
 clears it once a pair is adopted or the pairing left no AirPods to adopt. A marker found at the tray's start runs the stale-pin
 check and then offers the device picker ("Choose AirPods") for a paired set
 that is not the pinned one; choosing it pins it and, once Earshot is set up,
-gives it to the gate, which blocks it through the usual path. The marker stays
-until a pair is chosen or no such set is left. It adopts, unpairs and blocks
-nothing itself.
+gives it to the gate, which blocks it through the usual path. When the device
+list cannot be read, the card says so and offers the same picker. The marker
+stays until a pair is chosen or no such set is left. When the recovery showed
+nothing (no other set was left), the coordinator's check for AirPods Earshot
+does not protect, which waited for it, runs straight after: it compares the
+paired AirPods with the gate's own device, so a pin the tray saved without the
+gate (the block status unread at the adoption) still leads to the card. It
+adopts, unpairs and blocks nothing itself.
 
 ### The radio check
 
@@ -1381,12 +1392,15 @@ https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
 | Switched off | Bluetooth is turned off by a switch or setting on this PC. | Bluetooth settings |
 | Problem | Bluetooth on this PC isn't working. Windows reports problem code N. | Bluetooth settings |
 | No adapter | Windows finds no Bluetooth on this PC. | Bluetooth settings |
+| No Classic Bluetooth | Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound. | None |
 | Unreachable | This PC found the AirPods but couldn't reach them. | Record a Bluetooth trace |
 
 Each line claims only what was read. In these states the card offers nothing
 for the AirPods: no Fix connection, no Connect in Windows, no reset advice,
 because the fault is this PC's. An Ok or unread radio leaves the failure's own
-offers. Unreachable comes from a pairing, never from these reads: the AirPods
+offers, and so does a read of the default adapter that threw or that this
+Windows cannot make: it is Unknown, with its code in the history, not "no
+Bluetooth". Unreachable comes from a pairing, never from these reads: the AirPods
 were found with no name read and the pairing then failed. That is what a
 driver that cannot page devices looks like (see [verification.md](verification.md)).
 
@@ -1397,7 +1411,8 @@ result that could not reach the AirPods. The tray first shows a note: a trace
 holds the Bluetooth addresses of the person's devices and may hold pairing
 keys, Earshot never sends it anywhere, share it only with someone trusted and
 delete it when done. Only the note's Record button goes on. With no installed
-copy the row says to set up Earshot first and the card offers no button.
+copy, pressing the row's button says to set up Earshot first, the card offers
+no button, and a Fix result's button gets the same answer from the tray.
 
 The tray makes three named events for the run and starts `Earshot.exe trace
 <tray pid> <nonce>` from `%ProgramFiles%\Earshot` through one administrator
@@ -1413,7 +1428,7 @@ prompt. The helper:
    see `THIRD-PARTY-NOTICES.txt`) into it, reads it back and checks its hash.
 3. Runs `wpr.exe` from System32: `-cancel`, `-start <profile>!BluetoothStack.Verbose
    -filemode -recordtempto <run folder>`, and `-stop <file>`, each ending
-   `-instancename EarshotBluetoothTrace`, so the recording in progress stays in
+   `-instancename EarshotBluetoothTraceS<session id>`, so the recording in progress stays in
    the run folder and a stop or cancel reaches only Earshot's own session.
    https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options
 4. Stops and saves when the tray asks or after 10 minutes. When the tray

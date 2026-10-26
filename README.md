@@ -141,16 +141,21 @@ Startup on is not covered.
   AirPods, lists the headphones in pairing mode nearby, and pairs the ones you
   pick. A pair that passes Earshot's AirPods check is the one Earshot uses from
   then on, and Earshot sets itself up if it was not set up yet; the previous
-  pair's readings are dropped, and Earshot always asks before it takes on a
-  different pair. A device that is not AirPods is left paired and not used.
-  Every step goes in the connect history with Windows' own result code and its
-  time. It has not had a live run yet (test 24 is pending).
+  pair's readings are dropped. Earshot always asks before it takes on a
+  different pair: when the AirPods it uses are still paired, it asks whether to
+  use the new ones instead, and if you say no it keeps the old pair and says the
+  new one is not protected. A device that is not AirPods is left paired and not
+  used. Every step goes in the connect history with its result code (Windows'
+  own where Windows gave one) and its time. It has not had a live run yet (test
+  24 is pending).
 - **Says when this PC's Bluetooth is the problem.** After a Connect or a
   pairing fails, Earshot reads this PC's Bluetooth once and, when it is the
   cause, says only what it saw: "Bluetooth is off.", "Bluetooth is turned off
   by a switch or setting on this PC.", "Bluetooth on this PC isn't working.
   Windows reports problem code N." or "Windows finds no Bluetooth on this PC.",
-  each with a Bluetooth settings button, and no fix for the AirPods. When the
+  each with a Bluetooth settings button, or "Bluetooth on this PC can't do
+  Classic Bluetooth, which AirPods need for sound.", with no button, and no fix
+  for the AirPods. A read of the Bluetooth adapter that fails says nothing. When the
   AirPods were found and could not be reached it says "This PC found the
   AirPods but couldn't reach them." with a Record a Bluetooth trace button.
   `Earshot.exe doctor` reports the driver's version and date, the problem code,
@@ -161,11 +166,13 @@ Startup on is not covered.
   sends it anywhere, so share it only with someone you trust and delete it when
   you are done. Then one administrator prompt starts Windows Performance
   Recorder, which is part of Windows, from the installed copy of Earshot only.
-  It records for at most 10 minutes and saves the trace when you press Stop, in
+  It records for at most 10 minutes and saves the trace when you press Stop, or
+  when the 10 minutes are up, in
   `%LOCALAPPDATA%\Earshot\traces`. That folder is not Documents or another
   folder OneDrive's PC folder backup covers. If Earshot exits while it records,
   the recording is thrown away. Before Earshot is set up, or with an older
-  installed copy, the row says to set up or update it first. It changes no
+  installed copy, pressing the row's button says to set up or update it first.
+  It changes no
   device and no pairing, and it has not had a live run yet (test 24).
 - **Send to**, a small picker with This PC, the iPhone and Other speakers. This
   PC and the iPhone use the same paths as Connect and Disconnect, and Other
