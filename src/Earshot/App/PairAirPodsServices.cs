@@ -98,12 +98,8 @@ internal static class PairAirPodsText
 
     // The first question, before anything is scanned: the iPhone line, then each kind of case with its picture.
     public static FixPrompt FirstQuestion => new(
-        Title, Title, FirstQuestionBody, [], [], LookButton,
-        [new PromptPicture(PromptPictures.CaseFront, PairingText.CaseFront), new PromptPicture(PromptPictures.CaseBack, PairingText.CaseBack)]);
+        Title, Title, FirstQuestionBody, [], [], LookButton, PromptPictures.PairingMode);
 
     // Its words, three lines, each its own step; the two case lines are also the pictures' captions.
-    public static string FirstQuestionBody =>
-        PairingText.TurnOffIPhoneBluetooth + Environment.NewLine + Environment.NewLine +
-        PairingText.CaseFront + Environment.NewLine + Environment.NewLine +
-        PairingText.CaseBack;
+    public static string FirstQuestionBody => PromptPictures.PairingModeSteps;
 }

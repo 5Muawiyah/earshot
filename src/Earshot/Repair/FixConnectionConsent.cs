@@ -172,19 +172,25 @@ internal static class FixPromptText
             return new FixPrompt(
                 Title,
                 "Remove the AirPods from Windows and pair them again",
-                "Windows will forget " + names + ", then Earshot will look for them so you can pair them again. They stop working with this PC until they are paired. This has not yet been proved on real AirPods.",
+                "Windows will forget " + names + ", then Earshot will look for them so you can pair them again. They stop working with this PC until they are paired. This has not yet been proved on real AirPods." +
+                    Environment.NewLine + Environment.NewLine + PromptPictures.PairingModeSteps,
                 [],
                 [],
-                "Remove and pair again");
+                "Remove and pair again",
+                PromptPictures.PairingMode);
         }
 
+        // The pairing-mode steps with their pictures, as in Pair AirPods' first question: this is the question asked just before
+        // the scan.
         return new FixPrompt(
             Title,
             "Pair the AirPods again",
-            "Earshot will look for Bluetooth audio devices nearby so you can pair your AirPods.",
+            "Earshot will look for Bluetooth audio devices nearby so you can pair your AirPods." +
+                Environment.NewLine + Environment.NewLine + PromptPictures.PairingModeSteps,
             [],
             [],
-            "Look for them");
+            "Look for them",
+            PromptPictures.PairingMode);
     }
 }
 

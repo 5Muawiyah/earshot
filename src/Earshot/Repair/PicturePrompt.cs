@@ -8,6 +8,17 @@ namespace Earshot.Repair;
 // prompt then shows its caption alone.
 internal static class PromptPictures
 {
+    // The two ways into pairing mode, each with its line: Pair AirPods' first question and Fix's pairing question.
+    public static IReadOnlyList<PromptPicture> PairingMode =>
+        [new PromptPicture(CaseFront, Earshot.Pairing.PairingText.CaseFront), new PromptPicture(CaseBack, Earshot.Pairing.PairingText.CaseBack)];
+
+    // The paragraphs under a question's own words that the pictures' window shows: the iPhone line, then each case line (which
+    // that window puts under its picture instead).
+    public static string PairingModeSteps =>
+        Earshot.Pairing.PairingText.TurnOffIPhoneBluetooth + Environment.NewLine + Environment.NewLine +
+        Earshot.Pairing.PairingText.CaseFront + Environment.NewLine + Environment.NewLine +
+        Earshot.Pairing.PairingText.CaseBack;
+
     public const string CaseFront = "airpods-case-front-tap";
     public const string CaseBack = "airpods-case-back-button";
 

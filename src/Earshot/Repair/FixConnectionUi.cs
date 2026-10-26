@@ -93,7 +93,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         return new FixPrompt(
             title,
             PairingText.Choose,
-            "These Bluetooth headphones are in pairing mode nearby. Choose your AirPods, then press Pair. If none is yours, cancel.",
+            "These Bluetooth headphones are nearby and can be paired. Choose your AirPods, then press Pair. If none is yours, cancel.",
             [],
             candidates.Select(c => string.IsNullOrWhiteSpace(c.Name) ? PairingText.NoName : c.Name).ToList(),
             PairingText.PairButton);

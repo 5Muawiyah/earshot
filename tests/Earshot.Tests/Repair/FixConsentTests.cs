@@ -313,6 +313,26 @@ public sealed class FixConsentTests
         Assert.IsFalse(page.RadioButtons.Any(r => r.Checked));
     }
 
+    private static readonly string[] CasePictureNames = [PromptPictures.CaseFront, PromptPictures.CaseBack];
+
+    private static readonly string[] CasePictureCaptions = [Earshot.Pairing.PairingText.CaseFront, Earshot.Pairing.PairingText.CaseBack];
+
+    // Fix pairs the AirPods again too, so its pairing question shows the same pictures of each kind of case as Pair AirPods'
+    // first question, with the iPhone line. Before, Fix gave only two lines of text in the window during the scan.
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void TheRePairQuestionShowsEachKindOfCaseWithItsPicture(bool removeFirst)
+    {
+        FixPrompt rePair = FixPromptText.RePair(["AirPods"], removeFirst);
+
+        Assert.IsNotNull(rePair.Pictures);
+        CollectionAssert.AreEqual(CasePictureNames, rePair.Pictures.Select(p => p.Name).ToArray());
+        CollectionAssert.AreEqual(CasePictureCaptions, rePair.Pictures.Select(p => p.Caption).ToArray());
+        StringAssert.Contains(rePair.Body, Earshot.Pairing.PairingText.TurnOffIPhoneBluetooth);
+        Assert.IsEmpty(rePair.Lines, "The picture window shows the body and the pictures; a list would not be shown.");
+    }
+
     [TestMethod]
     public void ThePromptTextNamesTheDevicesAndLeavesOutIdentifiers()
     {

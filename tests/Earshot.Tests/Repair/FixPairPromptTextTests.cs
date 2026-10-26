@@ -9,6 +9,16 @@ public sealed class FixPairPromptTextTests
 {
     private static readonly string[] Rows = ["AirPods Pro", "Headphones with no name", "Headphones with no name"];
 
+    // The scan shows headphones that can be paired and are in range; it cannot see pairing mode, so the line does not claim it.
+    [TestMethod]
+    public void ThePickSaysOnlyWhatTheScanSaw()
+    {
+        FixPrompt prompt = FixRePairWindow.PickPrompt([new UnpairedDevice("a", "AirPods Pro", "AABBCCDDEE01", true, 6, true)]);
+
+        Assert.AreEqual("These Bluetooth headphones are nearby and can be paired. Choose your AirPods, then press Pair. If none is yours, cancel.", prompt.Body);
+        Assert.IsFalse(prompt.Body.Contains("pairing mode", StringComparison.Ordinal));
+    }
+
     [TestMethod]
     public void ThePickListsEveryCandidateByNameOrAsHeadphonesWithNoNameAndChoosesNone()
     {
