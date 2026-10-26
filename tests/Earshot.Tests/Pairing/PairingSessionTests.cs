@@ -222,6 +222,69 @@ public sealed class PairingSessionTests
         Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "name-unread" && s.Code == 1));
     }
 
+    // Only a status that does not say the device answered is read as this PC not reaching it. The device turning the
+    // connection down, being busy, failing the check both sides make, refusing access or being set up with something else are
+    // its answers, so they get their own line and say nothing about the PC.
+    [TestMethod]
+    [DataRow(PairReasons.ConnectionRejected)]
+    [DataRow(PairReasons.TooManyConnections)]
+    [DataRow(PairReasons.AuthenticationNotAllowed)]
+    [DataRow(PairReasons.AuthenticationFailure)]
+    [DataRow(PairReasons.NoSupportedProfiles)]
+    [DataRow(PairReasons.ProtectionLevelCouldNotBeMet)]
+    [DataRow(PairReasons.AccessDenied)]
+    [DataRow(PairReasons.InvalidCeremonyData)]
+    [DataRow(PairReasons.OperationAlreadyInProgress)]
+    [DataRow(PairReasons.RequiredHandlerNotRegistered)]
+    [DataRow(PairReasons.RemoteDeviceHasAssociation)]
+    public async Task AnUnreadNameWithAStatusThatSaysTheDeviceAnsweredIsNotUnreachable(int status)
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig, name: "");
+        var answer = new PairingCallResult("status", status, false, null);
+        rig.Pairing.PairResult = answer;
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.IsTrue(result.NameUnread);
+        Assert.IsFalse(result.Unreachable, status.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.AreEqual(PairReasons.LineFor(answer), result.CardLine);
+        Assert.AreNotEqual(FailureClass.PcSide.ToString(), result.ToHistoryEntry(DateTimeOffset.UnixEpoch).FailureClass);
+    }
+
+    [TestMethod]
+    [DataRow(PairReasons.NotPaired)]
+    [DataRow(PairReasons.HardwareFailure)]
+    [DataRow(PairReasons.AuthenticationTimeout)]
+    [DataRow(PairReasons.Failed)]
+    public async Task AnUnreadNameWithAStatusThatSaysNoAnswerIsUnreachable(int status)
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig, name: "");
+        rig.Pairing.PairResult = new PairingCallResult("status", status, false, null);
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.IsTrue(result.Unreachable, status.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        Assert.AreEqual(RadioLines.Unreachable, result.CardLine);
+    }
+
+    // A code that is not a pairing status (no status was returned) says nothing either way, so it is not read as the PC.
+    [TestMethod]
+    public async Task AnUnreadNameWithACodeThatIsNotAStatusIsNotUnreachable()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig, name: "");
+        rig.Pairing.PairResult = new PairingCallResult("other", unchecked((int)0x80004005), false, null);
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.IsFalse(result.Unreachable);
+    }
+
     // Nodes a removed pairing left behind, not present, are not the new pair: matching them read "AirPods" before the new nodes
     // were there. With only those, the pair could not be looked at, which is what it says.
     [TestMethod]
