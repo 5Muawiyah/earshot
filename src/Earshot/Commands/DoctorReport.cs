@@ -42,6 +42,25 @@ internal static class DoctorReport
 {
     internal const string HistoryPath = @"%LOCALAPPDATA%\Earshot\logs\connect-history.jsonl";
 
+    // What stands for the folders of a path outside the profile and Program Files.
+    internal const string OtherFolder = @"(another folder)\";
+
+    private static readonly Environment.SpecialFolder[] ProgramFolders = [Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86];
+
+    private static bool InProgramFiles(string path)
+    {
+        foreach (Environment.SpecialFolder known in ProgramFolders)
+        {
+            string root = Environment.GetFolderPath(known);
+            if (root.Length > 0 && path.StartsWith(root.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // Windows' own Bluetooth enumerator is a lower filter on the RFCOMM node of a stock PC (read on a PC without any other
     // Bluetooth program), so it is not a filter from another program and the report leaves it out.
     private static readonly string[] InboxFilters = ["BthEnum"];
@@ -101,7 +120,9 @@ internal static class DoctorReport
         known.Add(computer);
         string Safe(string? text) => DiagnosticsRedactor.Redact(text, known, user);
 
-        // A path with the profile or the local app data folder in it is written with the variable in its place.
+        // A path with the profile or the local app data folder in it is written with the variable in its place, and one in Program
+        // Files as it is. Any other path keeps only its last part: the folders around it are the person's own and say nothing
+        // the report needs.
         string Shorten(string path)
         {
             string localApp = f.Identity?.LocalAppData ?? "";
@@ -113,6 +134,10 @@ internal static class DoctorReport
             else if (profile.Length > 0 && path.StartsWith(profile, StringComparison.OrdinalIgnoreCase))
             {
                 path = "%USERPROFILE%" + path[profile.Length..];
+            }
+            else if (!InProgramFiles(path))
+            {
+                path = OtherFolder + Path.GetFileName(path.TrimEnd('\\', '/'));
             }
 
             return Safe(path);

@@ -334,6 +334,17 @@ public sealed class DoctorTests
         Assert.DoesNotContain("Last pairing", Run(new FakeDoctorSource(new DoctorFacts())), StringComparison.Ordinal);
     }
 
+    // A Run value on another drive keeps only its file name: the folders around it are the person's own.
+    [TestMethod]
+    public void ARunValueTargetOutsideTheProfileAndProgramFilesKeepsOnlyItsFileName()
+    {
+        DoctorFacts facts = DoctorFixture.Facts();
+        facts.Startup!.RunCommand = "\"D:\\Tools\\Mine\\Earshot.exe\" --startup";
+        using JsonDocument report = JsonDocument.Parse(Fenced(Run(new FakeDoctorSource(facts))));
+
+        Assert.AreEqual(@"(another folder)\Earshot.exe", report.RootElement.GetProperty("startup").GetProperty("target").GetString());
+    }
+
     [TestMethod]
     public void TheRunValueTargetAndItsPresenceAreReported()
     {

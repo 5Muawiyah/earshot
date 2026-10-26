@@ -228,6 +228,16 @@ internal sealed class ConnectHistory
 
     private StepOutcome AppendLocked(ConnectHistoryEntry entry)
     {
+        // A Fix started by an elevated Setup.exe appends from a high-integrity process into this user's own folder. A junction or
+        // link there would send the write somewhere else, so a reparse point on the history file, its folder or the folder above
+        // refuses the write. The user can only redirect their own folder, so the window between this look and the write is theirs
+        // alone.
+        if (ReparsePointOnTheWay() is { } redirected)
+        {
+            _log.Warn("The connect history was not written, because " + redirected + " is a reparse point.");
+            return StepOutcomes.NotAttempted("connect-history", redirected + " is a reparse point.");
+        }
+
         string temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -276,6 +286,43 @@ internal sealed class ConnectHistory
             _log.Warn("The connect history's temp file could not be deleted (" + ex.GetType().Name + ", HRESULT 0x" +
                 ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ").");
         }
+    }
+
+    // The first of the history file, its folder and the folder above that is a reparse point, or null. One that is not there
+    // is not a reparse point; a look that fails counts as one, so nothing is written through what could not be looked at.
+    private string? ReparsePointOnTheWay()
+    {
+        string? folder = System.IO.Path.GetDirectoryName(_path);
+        string? parent = folder is null ? null : System.IO.Path.GetDirectoryName(folder);
+        foreach (string? path in new[] { parent, folder, _path })
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                FileSystemInfo info = new FileInfo(path);
+                if (!info.Exists)
+                {
+                    info = new DirectoryInfo(path);
+                }
+
+                if (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return path;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _log.Warn("The connect history's folder could not be looked at (" + ex.GetType().Name + ", HRESULT 0x" +
+                    ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ").");
+                return path;
+            }
+        }
+
+        return null;
     }
 
     private StepOutcome Failed(Exception ex)

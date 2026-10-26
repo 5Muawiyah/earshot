@@ -144,6 +144,27 @@ public sealed class ConnectHistoryTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "could not be written"));
     }
 
+    // A junction where the history's folder should be would send an elevated Fix run's write somewhere else, so the append is
+    // refused and nothing is written through it.
+    [TestMethod]
+    public void AJunctionForTheHistorysFolderRefusesTheWrite()
+    {
+        using var temp = new TempFolder();
+        string elsewhere = Path.Combine(temp.Path, "elsewhere");
+        Directory.CreateDirectory(elsewhere);
+        string logs = Path.Combine(temp.Path, "Earshot", "logs");
+        Directory.CreateDirectory(Path.GetDirectoryName(logs)!);
+        using IDisposable junction = TestLinks.CreateJunction(logs, elsewhere);
+        var log = new CapturingLog();
+        var history = new ConnectHistory(Path.Combine(logs, "connect-history.jsonl"), new ManualTime(), log);
+
+        StepOutcome written = history.Append(Entry(DateTimeOffset.UtcNow));
+
+        Assert.IsFalse(written.Ok);
+        Assert.IsEmpty(Directory.GetFiles(elsewhere), "Nothing was written through the junction.");
+        Assert.IsTrue(log.Has(LogLevel.Warn, "is a reparse point"));
+    }
+
     // An append whose temp file was written but could not take the history's place (here a read-only history file) removes the
     // temp file, so failed appends leave nothing beside the history.
     [TestMethod]

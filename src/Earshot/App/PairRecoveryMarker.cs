@@ -64,14 +64,34 @@ internal sealed class PairRecoveryMarker : IPairRecoveryMarker
                 Directory.CreateDirectory(folder);
             }
 
-            string temp = _file + ".tmp";
-            File.WriteAllBytes(temp, Encoding.UTF8.GetBytes(text));
-            File.Move(temp, _file, overwrite: true);
+            File.WriteAllBytes(Temp, Encoding.UTF8.GetBytes(text));
+            File.Move(Temp, _file, overwrite: true);
             return new StepOutcome("pair-marker-write", true, 0, "ERROR_SUCCESS", null);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return StepOutcomes.FromHResult("pair-marker-write", ex.HResult, ex.GetType().Name + ": " + ex.Message);
+            string? left = DeleteTemp();
+            return StepOutcomes.FromHResult("pair-marker-write", ex.HResult, ex.GetType().Name + ": " + ex.Message + (left is null ? "" : " The temp file was left: " + left));
+        }
+    }
+
+    private string Temp => _file + ".tmp";
+
+    // A temp file a failed write left is removed. When that fails too, what stopped it goes with the write's own failure.
+    private string? DeleteTemp()
+    {
+        try
+        {
+            if (File.Exists(Temp))
+            {
+                File.Delete(Temp);
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return ex.GetType().Name + ", HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ".";
         }
     }
 
