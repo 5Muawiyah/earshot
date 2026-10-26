@@ -1420,7 +1420,7 @@ public sealed class PairAirPodsTests
 
             // The lock cannot tell a run from another program that holds its name, so the card says a run may be open. Before,
             // it said one was, also when nothing was.
-            Assert.AreEqual("Fix connection or Pair AirPods may already be running. Try again in a moment.", tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual("Fix connection or Pair AirPods may already be running. If neither is, restart the PC, then try again.", tray.Cards.Shown[^1].Content.Status);
         });
     }
 

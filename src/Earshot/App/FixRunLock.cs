@@ -31,7 +31,7 @@ internal sealed class FixRunLock : IDisposable
 {
     public const string BaseName = @"Global\Earshot.Fix.Run";
     // What a refusal by the lock can say: the name is held, by a run or by whatever else holds it, which cannot be told apart.
-    public const string LockHeldMessage = "Fix connection or Pair AirPods may already be running. Try again in a moment.";
+    public const string LockHeldMessage = "Fix connection or Pair AirPods may already be running. If neither is, restart the PC, then try again.";
 
     // The tray's own Pair AirPods is running, which the tray knows.
     public const string PairAlreadyRunningMessage = "Earshot is already pairing the AirPods.";
