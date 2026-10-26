@@ -409,6 +409,22 @@ public sealed class PairingSessionTests
         Assert.AreEqual(PairingText.TimedOut, result.CardLine);
     }
 
+    // A request Windows sends after the attempt ended (Cancel, Exit or the time limit; its cancel is cooperative) is not
+    // accepted: before, a bare confirmation was accepted whatever the attempt's token said.
+    [TestMethod]
+    public async Task ARequestAfterTheAttemptEndedIsNotAccepted()
+    {
+        using var rig = new FixRig();
+        using var ended = new CancellationTokenSource();
+        await ended.CancelAsync();
+        var prompt = new PairingSession.Prompt(rig.Ui, ended.Token);
+
+        Assert.IsFalse(await prompt.ConfirmAsync(FixPairKind.ConfirmOnly, null));
+        Assert.IsFalse(await prompt.ConfirmAsync(FixPairKind.ConfirmPinMatch, "123456"));
+        Assert.IsEmpty(rig.Ui.PinsShown, "No number question is shown for an attempt that has ended.");
+        Assert.IsTrue(await new PairingSession.Prompt(rig.Ui, CancellationToken.None).ConfirmAsync(FixPairKind.ConfirmOnly, null));
+    }
+
     // A PairAsync that ignores Cancel still ends at the time limit: the wait is given up, not left to Windows.
     [TestMethod]
     public async Task APairingThatIgnoresCancelStillEndsAtTheTimeout()

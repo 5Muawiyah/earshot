@@ -527,14 +527,24 @@ internal sealed class PairingSession
 
     // The pairing request is answered after the person has pressed "Pair" on this one device, which is what a bare confirmation
     // asks. A number to compare or to enter is shown and asked.
-    // The attempt's token goes with the number, so the question closes when the attempt ends.
-    private sealed class Prompt(IFixRePairUi ui, CancellationToken attempt) : IPairingPrompt
+    // The attempt's token goes with the number, so the question closes when the attempt ends. A request that comes after the
+    // attempt ended (Cancel, Exit or the time limit; Windows' cancel is cooperative) is never accepted.
+    internal sealed class Prompt(IFixRePairUi ui, CancellationToken attempt) : IPairingPrompt
     {
-        public Task<bool> ConfirmAsync(FixPairKind kind, string? pin) => kind switch
+        public async Task<bool> ConfirmAsync(FixPairKind kind, string? pin)
         {
-            FixPairKind.ConfirmOnly => Task.FromResult(true),
-            FixPairKind.ConfirmPinMatch or FixPairKind.DisplayPin => ui.ConfirmPinAsync(kind, pin, attempt),
-            _ => Task.FromResult(false),
-        };
+            if (attempt.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            bool yes = kind switch
+            {
+                FixPairKind.ConfirmOnly => true,
+                FixPairKind.ConfirmPinMatch or FixPairKind.DisplayPin => await ui.ConfirmPinAsync(kind, pin, attempt).ConfigureAwait(false),
+                _ => false,
+            };
+            return yes && !attempt.IsCancellationRequested;
+        }
     }
 }
