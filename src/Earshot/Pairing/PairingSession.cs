@@ -221,9 +221,11 @@ internal sealed class PairingSession
             {
                 // The one PC-side signal of the debug run: the name request is the page that timed out, so Windows listed the
                 // AirPods with no name, and the pairing then failed. A failed pairing of a device whose name was read, a timeout
-                // of this build's own and a pairing the person or a handler stopped say nothing about the PC.
+                // of this build's own and a pairing the person or a handler stopped say nothing about the PC, and neither does a device
+                // Windows says is not ready to pair (not in pairing mode). The PC-side reading rests on one sitting (25 October).
                 bool timedOut = pair.Name == CancelledTimeout;
-                bool unreachable = nameUnread && !timedOut && !pair.Threw && !PairReasons.IsStoppedOnPurpose(pair);
+                bool unreachable = nameUnread && !timedOut && !pair.Threw && !PairReasons.IsStoppedOnPurpose(pair) &&
+                    PairReasons.StatusOf(pair) != PairReasons.NotReadyToPair;
                 string line = unreachable ? RadioLines.Unreachable : timedOut ? PairingText.TimedOut : PairReasons.LineFor(pair);
                 lines.Add(line);
                 PairFailureReason reason = timedOut ? PairFailureReason.TimedOut : PairFailureReason.PairFailed;

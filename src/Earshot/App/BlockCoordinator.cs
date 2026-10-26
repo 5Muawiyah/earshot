@@ -452,7 +452,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         // would race it.
         if (_services.TrayPairing.Active)
         {
-            _log.Info("The tray is looking at a pairing that did not finish, so the check for AirPods that Earshot does not protect waits for the next start.");
+            _log.Info("The tray is looking at a pairing that did not finish, so the check for AirPods that Earshot does not protect waits for that look.");
             return;
         }
 

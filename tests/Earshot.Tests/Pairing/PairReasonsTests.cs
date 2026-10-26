@@ -19,8 +19,8 @@ public sealed class PairReasonsTests
         var expected = new Dictionary<int, string>
         {
             [0] = "Paired.",
-            [1] = "Windows says the AirPods aren't ready to pair. Put the case in pairing mode and try again.",
-            [2] = "Windows didn't pair the AirPods.",
+            [1] = "Windows says the device isn't ready to pair. Put the case in pairing mode and try again.",
+            [2] = "Windows didn't pair the device.",
             [3] = "Paired.",
             [4] = "The device turned down the connection.",
             [5] = "The device can't take another connection right now.",
@@ -37,7 +37,7 @@ public sealed class PairReasonsTests
             [16] = "Windows couldn't complete the pairing (code 16).",
             [17] = "Pairing was cancelled.",
             [18] = "Windows says the device is already set up with something else.",
-            [19] = "Windows couldn't pair the AirPods (code 19).",
+            [19] = "Windows couldn't pair the device (code 19).",
         };
 
         foreach ((int code, string line) in expected)
@@ -49,7 +49,7 @@ public sealed class PairReasonsTests
     [TestMethod]
     public void AValueTheTableDoesNotKnowIsReportedAsItsHexCode()
     {
-        Assert.AreEqual("Windows couldn't pair the AirPods (code 0x00000040).", PairReasons.LineFor(Status(64)));
+        Assert.AreEqual("Windows couldn't pair the device (code 0x00000040).", PairReasons.LineFor(Status(64)));
     }
 
     [TestMethod]
@@ -59,8 +59,8 @@ public sealed class PairReasonsTests
         var denied = new PairingCallResult("COMException", unchecked((int)0x80070005), false, "HRESULT 0x80070005", Threw: true);
         var small = new PairingCallResult("InvalidOperationException", 5, false, null, Threw: true);
 
-        Assert.AreEqual("Windows couldn't pair the AirPods (code 0x80070005).", PairReasons.LineFor(denied));
-        Assert.AreEqual("Windows couldn't pair the AirPods (code 0x00000005).", PairReasons.LineFor(small));
+        Assert.AreEqual("Windows couldn't pair the device (code 0x80070005).", PairReasons.LineFor(denied));
+        Assert.AreEqual("Windows couldn't pair the device (code 0x00000005).", PairReasons.LineFor(small));
         Assert.IsNull(PairReasons.StatusOf(small));
         Assert.IsFalse(PairReasons.IsSuccess(new PairingCallResult("x", 0, true, null, Threw: true)), "A thrown call never counts as paired.");
     }

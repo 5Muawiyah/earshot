@@ -129,8 +129,10 @@ internal static class TrayStatus
             _ => CardDisconnected,
         };
 
-    // Nothing to connect: no AirPods are paired with this PC. The card that says it offers Pair AirPods.
-    public const string NotFoundMessage = "No AirPods are paired with this PC.";
+    // Nothing to connect: nothing is pinned and no device group's name holds the match string. That is not a reading of what is
+    // paired (AirPods renamed in Windows are not found this way), so the line says only that Earshot can't find them. The card
+    // that says it offers Pair AirPods.
+    public const string NotFoundMessage = "Earshot can't find your AirPods on this PC.";
 
     // The container a left click acts on: the pinned container when there is one, otherwise the
     // resolved target's. Null when neither is a valid device container.

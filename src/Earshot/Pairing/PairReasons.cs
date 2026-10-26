@@ -53,15 +53,15 @@ internal static class PairReasons
         int? status = StatusOf(result);
         if (status is not int value)
         {
-            return "Windows couldn't pair the AirPods (code 0x" + unchecked((uint)result.Code).ToString("X8", CultureInfo.InvariantCulture) + ").";
+            return "Windows couldn't pair the device (code 0x" + unchecked((uint)result.Code).ToString("X8", CultureInfo.InvariantCulture) + ").";
         }
 
         string number = value.ToString(CultureInfo.InvariantCulture);
         return value switch
         {
             Paired or AlreadyPaired => PairedLine,
-            NotReadyToPair => "Windows says the AirPods aren't ready to pair. Put the case in pairing mode and try again.",
-            NotPaired => "Windows didn't pair the AirPods.",
+            NotReadyToPair => "Windows says the device isn't ready to pair. Put the case in pairing mode and try again.",
+            NotPaired => "Windows didn't pair the device.",
             ConnectionRejected => "The device turned down the connection.",
             TooManyConnections => "The device can't take another connection right now.",
             HardwareFailure => "Windows reports a hardware failure.",
@@ -74,7 +74,7 @@ internal static class PairReasons
             PairingCanceled or RejectedByHandler => "Pairing was cancelled.",
             OperationAlreadyInProgress => "Windows is already pairing a device. Try again in a moment.",
             RemoteDeviceHasAssociation => "Windows says the device is already set up with something else.",
-            _ => "Windows couldn't pair the AirPods (code " + number + ").",
+            _ => "Windows couldn't pair the device (code " + number + ").",
         };
     }
 }
@@ -104,11 +104,11 @@ internal static class PairingText
 
     public const string Pairing = "Pairing";
 
-    public const string SetsItselfUp = "Paired. Earshot sets itself up next, and Windows asks for permission once.";
+    public const string SetsItselfUp = "Paired. Earshot sets itself up next, and Windows asks for permission.";
 
     public const string NothingFound = "No AirPods turned up. Check the lid is open and the light flashes white, then try again.";
 
-    public const string NotAirPods = "That was not AirPods, so Earshot adopted nothing. It is still paired in Windows; remove it there if you don't want it.";
+    public const string NotAirPods = "That device didn't pass Earshot's AirPods check, so Earshot adopted nothing. It is still paired in Windows; remove it there if you don't want it.";
 
     public const string Unverified = "Paired, but Earshot couldn't check that these are AirPods. If they are yours, choose them.";
 

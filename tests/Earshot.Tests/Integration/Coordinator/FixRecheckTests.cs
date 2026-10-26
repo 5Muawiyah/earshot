@@ -147,12 +147,12 @@ public sealed class FixRecheckTests
         Assert.AreEqual(0, h.ProtectionScan.Reads, "The start check waited for the tray's recovery.");
         Assert.AreEqual(0, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
 
-        h.Coordinator.CheckProtectionAfterPairRecovery();
+        h.Coordinator.CheckProtectionAfterTrayPairing("a test");
         h.Pump();
         Assert.AreEqual(0, h.ProtectionScan.Reads, "Not while the flag is still up.");
 
         h.TrayPairing.Active = false;
-        h.Coordinator.CheckProtectionAfterPairRecovery();
+        h.Coordinator.CheckProtectionAfterTrayPairing("a test");
         h.Pump();
 
         Assert.AreEqual(1, h.ProtectionScan.Reads);

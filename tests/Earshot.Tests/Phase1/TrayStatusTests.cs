@@ -179,8 +179,8 @@ public sealed class TrayStatusTests
         Assert.AreEqual("Connected", TrayStatus.CardStatus(Target(ConnectionState.Connected), null, Settings()));
         Assert.AreEqual("Disconnected", TrayStatus.CardStatus(Target(ConnectionState.Disconnected), null, Settings()));
         Assert.AreEqual("Blocked at boot", TrayStatus.CardStatus(NoDevice(), Block(BlockState.Blocked), Settings()));
-        Assert.AreEqual("No AirPods are paired with this PC.", TrayStatus.CardStatus(NotFound(), null, Settings()));
-        Assert.AreEqual("No AirPods are paired with this PC.", TrayStatus.CardStatus(NotFound(), null, Settings(s => s.DeviceMatch = "Buds")));
+        Assert.AreEqual("Earshot can't find your AirPods on this PC.", TrayStatus.CardStatus(NotFound(), null, Settings()));
+        Assert.AreEqual("Earshot can't find your AirPods on this PC.", TrayStatus.CardStatus(NotFound(), null, Settings(s => s.DeviceMatch = "Buds")));
         Assert.AreEqual(TrayStatus.CardNotKnown, TrayStatus.CardStatus(NoDevice(), null, Settings()),
             "Nothing has been read yet, so the card does not say the AirPods are missing.");
     }

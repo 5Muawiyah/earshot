@@ -225,7 +225,7 @@ try
         $pairingCriteria = @(
             @{ Id = 'listed-with-name'; Text = 'The list showed the AirPods with a name.' }
             @{ Id = 'pair-paired'; Text = 'Pair AirPods paired the AirPods from the tray and logged that it did.' }
-            @{ Id = 'pair-radio-checked'; Text = 'Pair AirPods read the radio first and found it Ok.' }
+            @{ Id = 'pair-radio-checked'; Text = 'Pair AirPods read the radio and found it Ok.' }
             @{ Id = 'model-check'; Text = 'The model check found the new pair to be AirPods.' }
             @{ Id = 'pair-adopted'; Text = 'Earshot took the new pair as the one it uses.' }
             @{ Id = 'setup-one-prompt'; Text = 'Earshot is still set up after the pairing, with at most one Windows permission prompt.' }
@@ -319,7 +319,7 @@ try
             Add-Criterion -Run $run -Id 'pair-paired' -Criterion 'Pair AirPods paired the AirPods from the tray and logged that it did.' -Outcome $o -Detail ([string]$w + '.')
 
             # pair-radio-checked
-            Add-Criterion -Run $run -Id 'pair-radio-checked' -Criterion 'Pair AirPods read the radio first and found it Ok.' `
+            Add-Criterion -Run $run -Id 'pair-radio-checked' -Criterion 'Pair AirPods read the radio and found it Ok.' `
                 -Outcome $(if (@($radioOk).Count -gt 0) { 'pass' } else { 'fail' }) `
                 -Detail $(if (@($radioOk).Count -gt 0) { 'a "radio check: Ok" line was logged after Pair AirPods was chosen.' } else { 'no "radio check: Ok" line was logged after Pair AirPods was chosen.' })
 

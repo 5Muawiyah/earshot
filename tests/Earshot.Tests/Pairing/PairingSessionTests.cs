@@ -201,9 +201,26 @@ public sealed class PairingSessionTests
         Assert.IsTrue(result.NameUnread);
         Assert.IsTrue(result.Unreachable);
         Assert.AreEqual(RadioLines.Unreachable, result.CardLine);
-        Assert.AreEqual("This PC found the AirPods but couldn't reach them.", result.CardLine);
+        Assert.AreEqual("This PC found the headphones but couldn't reach them.", result.CardLine);
         Assert.AreEqual(FailureClass.PcSide.ToString(), result.ToHistoryEntry(DateTimeOffset.UnixEpoch).FailureClass);
         Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "name-unread" && s.Code == 1));
+    }
+
+    // NotReadyToPair is the device not in pairing mode: with no name read it is still not the PC that could not reach it.
+    [TestMethod]
+    public async Task AnUnreadNameWithADeviceNotReadyToPairIsNotUnreachable()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig, name: "");
+        rig.Pairing.PairResult = new PairingCallResult("NotReadyToPair", 1, false, null);
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.IsTrue(result.NameUnread);
+        Assert.IsFalse(result.Unreachable);
+        Assert.AreNotEqual(RadioLines.Unreachable, result.CardLine);
+        Assert.AreNotEqual(FailureClass.PcSide.ToString(), result.ToHistoryEntry(DateTimeOffset.UnixEpoch).FailureClass);
     }
 
     [TestMethod]

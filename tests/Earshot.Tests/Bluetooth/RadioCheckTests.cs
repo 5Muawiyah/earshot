@@ -68,7 +68,7 @@ public sealed class RadioCheckTests
         RadioCheckResult r = await Check(Adapter(RadioStateValues.Disabled), Node()).CheckAsync(CancellationToken.None);
 
         Assert.AreEqual(RadioCheckState.SwitchedOff, r.State);
-        Assert.AreEqual("Bluetooth is turned off by a switch or setting on this PC.", r.Line);
+        Assert.AreEqual("Bluetooth is turned off by a switch on this PC or by its firmware.", r.Line);
         Assert.AreEqual(RadioAction.BluetoothSettings, r.Action);
         Assert.AreEqual(3, r.HistoryCode);
     }

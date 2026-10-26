@@ -233,7 +233,7 @@ public sealed class PairAirPodsTests
 
             Assert.AreEqual(AirPodsContainer, tray.Settings.Current.PinnedContainerId);
             Assert.IsTrue(marker.Exists(), "Kept: the question was not answered.");
-            Assert.AreEqual(PairAirPodsText.LeftPaired, tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual(PairAirPodsText.ReplaceNotAnswered, tray.Cards.Shown[^1].Content.Status);
             Assert.AreEqual(PairAirPodsText.ChooseButton, tray.Cards.Shown[^1].Content.Action?.Label);
         });
     }
@@ -432,9 +432,11 @@ public sealed class PairAirPodsTests
             var marker = new FakePairRecoveryMarker { WriteThrows = thrown };
             using var folder = new TempFolder();
             var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            var protection = new FakeProtectionCheck();
             using var tray = new TrayHarness(
                 snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig, marker: marker),
-                coordinatorServices: new CoordinatorServices { History = history });
+                coordinatorServices: new CoordinatorServices { History = history, Protection = protection });
+            int readsBefore = protection.Reads;
 
             Click(tray);
 
@@ -442,6 +444,8 @@ public sealed class PairAirPodsTests
             Assert.AreEqual(ConnectHistoryOutcomes.Failed, entry.Outcome);
             Assert.AreEqual("unexpected", entry.Steps[0].Name);
             Assert.AreEqual(thrown.HResult, entry.Steps[0].Code);
+            // Windows may have paired before the throw, so the check against the gate's own device runs once the run has let go.
+            Assert.AreEqual(readsBefore + 1, protection.Reads, string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
         });
     }
 
@@ -573,7 +577,7 @@ public sealed class PairAirPodsTests
     }
 
     [TestMethod]
-    public void AClickWithNothingPairedSaysSoWithAPairAirPodsButtonThatStartsPairing()
+    public void AClickWithNothingFoundSaysSoWithAPairAirPodsButtonThatStartsPairing()
     {
         StaThread.Run(() =>
         {
@@ -592,7 +596,7 @@ public sealed class PairAirPodsTests
             tray.PumpUntilIdle();
 
             CardContent card = tray.Cards.Shown[^1].Content;
-            Assert.AreEqual("No AirPods are paired with this PC.", card.Status);
+            Assert.AreEqual("Earshot can't find your AirPods on this PC.", card.Status, "The click reads names, not what is paired, so it claims only that.");
             Assert.AreEqual("Pair AirPods", card.Action?.Label);
             card.Action!.OnClick();
             tray.PumpUntilIdle();
@@ -757,7 +761,7 @@ public sealed class PairAirPodsTests
                 });
 
             Assert.IsFalse(marker.Exists(), "No other pair was left to offer.");
-            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("showed nothing, so the check for AirPods that Earshot does not protect runs now", StringComparison.Ordinal)),
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("The check for AirPods that Earshot does not protect runs now: the look at a pairing that did not finish showed nothing", StringComparison.Ordinal)),
                 string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
             Assert.AreEqual(BlockCoordinator.NotProtectedMessage, tray.Cards.Shown[^1].Content.Status);
         });
@@ -995,6 +999,20 @@ public sealed class PairAirPodsTests
             Assert.IsTrue(upDuringTheQuestion);
             Assert.IsFalse(services.RunFlag.Active);
         });
+    }
+
+    // A write whose temp file could not take the marker's place (here a folder stands where the marker goes) leaves no temp file.
+    [TestMethod]
+    public void AFailedMarkerWriteLeavesNoTempFile()
+    {
+        using var folder = new TempFolder();
+        Directory.CreateDirectory(Path.Combine(folder.Path, PairRecoveryMarker.FileName));
+        var marker = new PairRecoveryMarker(folder.Path, TimeProvider.System);
+
+        StepOutcome written = marker.Write();
+
+        Assert.IsFalse(written.Ok);
+        Assert.IsFalse(File.Exists(Path.Combine(folder.Path, PairRecoveryMarker.FileName + ".tmp")));
     }
 
     [TestMethod]

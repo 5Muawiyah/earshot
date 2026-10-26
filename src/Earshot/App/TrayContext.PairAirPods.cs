@@ -92,7 +92,7 @@ internal sealed partial class TrayContext
                 // block status unread at the adoption) does not change.
                 if (!answered && !_closing && !services.RunFlag.Active)
                 {
-                    _coordinator.CheckProtectionAfterPairRecovery();
+                    _coordinator.CheckProtectionAfterTrayPairing("the look at a pairing that did not finish showed nothing");
                 }
             }, CardPlace.NearTray);
             return;
@@ -402,6 +402,7 @@ internal sealed partial class TrayContext
 
         PairRunEnd end;
         var setupSteps = new List<StepOutcome>();
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo? unexpected = null;
         services.RunFlag.Active = true;
         try
         {
@@ -422,16 +423,27 @@ internal sealed partial class TrayContext
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // The run still leaves its one history entry, with the type and code of what stopped it; the caller logs it.
+            // The run still leaves its one history entry, with the type and code of what stopped it; the caller logs it, once the
+            // run has let go and the check below has been asked for.
             _coordinator.WriteHistory(EndedEarly(
                 StepOutcomes.FromHResult("unexpected", ex.HResult, ex.GetType().Name, ok: false), ConnectHistoryOutcomes.Failed, 0).Early!);
-            throw;
+            unexpected = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
+            end = PairRunEnd.Nothing;
         }
         finally
         {
             EndElevatedRun(PairRun);
             EndElevatedRun(SetupRun);
             services.RunFlag.Active = _recoveringPair;
+        }
+
+        // Windows may have paired before the run stopped on something unexpected: a new pair may be paired and not protected, and
+        // the checks for that waited while the run went on, so the one against the gate's own device runs now. (A person who kept
+        // the pinned pair has just been told the new one is not protected, so that card is not replaced by this one.)
+        if (unexpected is not null)
+        {
+            _coordinator.CheckProtectionAfterTrayPairing("a pairing stopped on something unexpected");
+            unexpected.Throw();
         }
 
         if (end.Early is { } early)
@@ -606,7 +618,7 @@ internal sealed partial class TrayContext
                     // Not answered (the question timed out, or Earshot is closing): nobody decided, so the new pair is offered and
                     // the marker stays for the next start.
                     _log.Warn("Pair AirPods: whether to use the new pair was not answered (" + (_closing ? "closing" : kept.ToString()) + "), so the marker is kept.");
-                    OfferChooseLeftPair(PairAirPodsText.LeftPaired, place);
+                    OfferChooseLeftPair(PairAirPodsText.ReplaceNotAnswered, place);
                 }
 
                 return new PairRunEnd(result, false, false)

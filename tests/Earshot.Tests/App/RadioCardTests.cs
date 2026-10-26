@@ -41,7 +41,7 @@ public sealed class RadioCardTests
 
     [TestMethod]
     [DataRow((int)RadioCheckState.Off, "Bluetooth is off.")]
-    [DataRow((int)RadioCheckState.SwitchedOff, "Bluetooth is turned off by a switch or setting on this PC.")]
+    [DataRow((int)RadioCheckState.SwitchedOff, "Bluetooth is turned off by a switch on this PC or by its firmware.")]
     [DataRow((int)RadioCheckState.NoAdapter, "Windows finds no Bluetooth on this PC.")]
     public void AFailedConnectWithABlockedRadioShowsItsLineAndOpensBluetoothSettings(int radioState, string line)
     {

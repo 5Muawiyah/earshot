@@ -68,7 +68,8 @@ internal static class PairAirPodsText
 
     public const string PairedNotAdopted = "Paired, but Earshot could not switch to these AirPods, so they are not protected yet. Choose them from the menu.";
 
-    public const string NoAirPodsPaired = Tray.TrayStatus.NotFoundMessage;
+    // Said only from a read of the device tree that found no paired AirPods.
+    public const string NoAirPodsPaired = "No AirPods are paired with this PC.";
 
     public const string ChooseButton = "Choose AirPods";
 
@@ -79,9 +80,11 @@ internal static class PairAirPodsText
 
     public const string LeftPaired = "The pairing stopped, but Windows paired these AirPods. Choose them if they are yours.";
 
+    public const string ReplaceNotAnswered = "Earshot didn't get an answer, so it isn't using the new AirPods yet. Choose them if they are yours.";
+
     public const string LeftUnread = "The pairing stopped, and Earshot can't see your devices now. Choose your AirPods if Windows paired them.";
 
-    public const string RecoverChoose = "Earshot closed while pairing. Choose the AirPods it should use.";
+    public const string RecoverChoose = "A pairing didn't finish. Choose the AirPods Earshot should use.";
 
     public const string ReplaceHeading = "Use these AirPods instead?";
 
@@ -89,9 +92,9 @@ internal static class PairAirPodsText
 
     public const string ReplaceButton = "Use these";
 
-    public const string KeptOtherPair = "Earshot still uses your other AirPods. The new ones stay paired, and Earshot doesn't protect them.";
+    public const string KeptOtherPair = "Earshot keeps the AirPods it was set to use. The new ones stay paired, and Earshot doesn't protect them.";
 
-    public const string RecoverUnread = "Earshot closed while pairing and can't see your devices now. Choose your AirPods to finish.";
+    public const string RecoverUnread = "A pairing didn't finish, and Earshot can't see your devices now. Choose your AirPods to finish.";
 
     // The first question, before anything is scanned: three lines, each its own step.
     public static string FirstQuestionBody =>

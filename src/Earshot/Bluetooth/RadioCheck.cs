@@ -110,10 +110,10 @@ internal sealed record RadioCheckResult(
 internal static class RadioLines
 {
     public const string Off = "Bluetooth is off.";
-    public const string SwitchedOff = "Bluetooth is turned off by a switch or setting on this PC.";
+    public const string SwitchedOff = "Bluetooth is turned off by a switch on this PC or by its firmware.";
     public const string NoAdapter = "Windows finds no Bluetooth on this PC.";
     public const string NoClassic = "Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound.";
-    public const string Unreachable = "This PC found the AirPods but couldn't reach them.";
+    public const string Unreachable = "This PC found the headphones but couldn't reach them.";
     public const string BluetoothSettingsButton = "Bluetooth settings";
     public const string RecordTraceButton = "Record a Bluetooth trace";
 
