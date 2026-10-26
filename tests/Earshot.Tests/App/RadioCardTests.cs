@@ -47,7 +47,7 @@ public sealed class RadioCardTests
         StaThread.Run(() =>
         {
             using var rig = new FixRig();
-            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok)) { Wait = TimeSpan.FromSeconds(2) };
+            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok));
             PairAirPodsServices services = Services(rig, RadioCheckState.Ok);
             var slow = new PairAirPodsServices
             {
@@ -59,8 +59,14 @@ public sealed class RadioCardTests
             tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
                 ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
 
+            // The read after the failed connect lasts until the second click ends it, so the click always lands during the look.
+            // Run 124 found a two-second read that could end first on a busy runner; then the click was a plain new connect.
+            // Any other read (the start's own look) answers at once.
+            tray.PumpUntilIdle();
+            int failureRead = radio.Checks + 1;
+            radio.OnCheck = n => radio.Wait = n == failureRead ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
-            TrayHarness.PumpUntil(() => radio.Checks == 1, "The radio was not read after the failed connect.");
+            TrayHarness.PumpUntil(() => radio.Checks == failureRead, "The radio was not read after the failed connect.");
             now += 5000;
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             tray.PumpUntilIdle();
@@ -78,7 +84,7 @@ public sealed class RadioCardTests
         StaThread.Run(() =>
         {
             using var rig = new FixRig();
-            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok)) { Wait = TimeSpan.FromSeconds(2) };
+            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok));
             PairAirPodsServices services = Services(rig, RadioCheckState.Ok);
             var slow = new PairAirPodsServices
             {
@@ -90,8 +96,14 @@ public sealed class RadioCardTests
             tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
                 ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
 
+            // The read after the failed connect lasts until the second click ends it, so the click always lands during the look.
+            // Run 124 found a two-second read that could end first on a busy runner; then the click was a plain new connect.
+            // Any other read (the start's own look) answers at once.
+            tray.PumpUntilIdle();
+            int failureRead = radio.Checks + 1;
+            radio.OnCheck = n => radio.Wait = n == failureRead ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
-            TrayHarness.PumpUntil(() => radio.Checks == 1, "The radio was not read after the failed connect.");
+            TrayHarness.PumpUntil(() => radio.Checks == failureRead, "The radio was not read after the failed connect.");
             now += 5000;
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             now += 5000;
