@@ -334,12 +334,14 @@ internal static partial class Program
         {
             var store = new GateStore(paths.MachineFolder);
             var records = new StoreFixRecords(store, FixFootprint.For(paths));
-            var marker = new FixRecovery(Path.Combine(paths.LocalFolder, "fix-window.json"), time, ProcessIsAlive);
-            rePair = new FixMarkerRePairWindow(marker);
+            var marker = new FixRecovery(Path.Combine(paths.LocalFolder, FixWindowFileName), time, ProcessIsAlive);
+            // A Fix run started as administrator keeps its marker in the machine folder (FixWindowFile).
+            var administrators = new FixRecovery(Path.Combine(paths.MachineFolder, FixWindowFileName), time, ProcessIsAlive);
+            rePair = new FixMarkerRePairWindow(marker, administrators);
             protection = new AirPodsProtectionCheck(nodes, records);
             if (worker is not null)
             {
-                recovery = new FixRecoveryAtStart(marker, records, new TaskGateFixGate(worker, CreateTaskGate(paths, store, log), store, nodes, log), log);
+                recovery = new FixRecoveryAtStart(marker, records, new TaskGateFixGate(worker, CreateTaskGate(paths, store, log), store, nodes, log), log, administrators);
             }
         }
 

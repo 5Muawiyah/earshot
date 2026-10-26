@@ -80,6 +80,8 @@ internal sealed class FixRecovery
         _processAlive = processAlive;
     }
 
+    internal string FilePath => _file;
+
     public StepOutcome Begin(string stage)
     {
         ArgumentNullException.ThrowIfNull(stage);

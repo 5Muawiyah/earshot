@@ -228,10 +228,10 @@ internal sealed class ConnectHistory
 
     private StepOutcome AppendLocked(ConnectHistoryEntry entry)
     {
-        // A Fix started by an elevated Setup.exe appends from a high-integrity process into this user's own folder. A junction or
-        // link there would send the write somewhere else, so a reparse point on the history file, its folder or the folder above
-        // refuses the write. The user can only redirect their own folder, so the window between this look and the write is theirs
-        // alone.
+        // A run as administrator writes no history (Program.OpenFixHistory), so this appends as the person. A junction or link
+        // on the history file, its folder or the folder above still refuses the write, so an entry never lands somewhere else.
+        // The look is not held through the write: a program of the person's could make the junction just after it, and the
+        // write would then go only where that person could write anyway.
         if (ReparsePointOnTheWay() is { } redirected)
         {
             _log.Warn("The connect history was not written, because " + redirected + " is a reparse point.");

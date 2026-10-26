@@ -25,11 +25,35 @@ internal static partial class Program
 {
     internal const string FixOutputLogPrefix = "fix output: ";
 
+    internal const string FixWindowFileName = "fix-window.json";
+
     static partial void TryRunFix(RunContext ctx)
     {
         Paths paths = Paths.Current;
-        var log = new FileLog(paths.LogFolder);
+        IProcessToken token = WindowsProcessToken.Current();
 
+        // Already an elevated administrator (Setup.exe starts this verb that way), the run writes nothing under the person's
+        // profile, where a junction or link a program of theirs planted could steer an elevated write: the log is held and
+        // written to the machine folder's log once the run has ended, as the trace helper's is.
+        HeldLog? held = HoldsFixLog(token) ? new HeldLog("fix") : null;
+        try
+        {
+            TryRunFix(ctx, paths, token, held ?? (ILog)new FileLog(paths.LogFolder));
+        }
+        finally
+        {
+            held?.FlushTo(MachineLog(paths, new NtfsFolderSecurity(), out string whyNot), whyNot);
+        }
+    }
+
+    internal static bool HoldsFixLog(IProcessToken token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        return token.IsElevatedAdministrator && !token.IsLocalSystem;
+    }
+
+    private static void TryRunFix(RunContext ctx, Paths paths, IProcessToken token, ILog log)
+    {
         string? outPath = null;
         for (int i = 1; i + 1 < ctx.Args.Length; i++)
         {
@@ -70,7 +94,7 @@ internal static partial class Program
 
             try
             {
-                ctx.ExitCode = RunFix(ctx.Args, paths, log, output.Writer);
+                ctx.ExitCode = RunFix(ctx.Args, paths, token, log, output.Writer);
             }
             finally
             {
@@ -83,7 +107,7 @@ internal static partial class Program
 
     // The message loop is the UI thread's, because the dialogs are TaskDialogs and the re-pair has a window. The flow itself
     // is async and continues on that thread after each await.
-    private static int RunFix(IReadOnlyList<string> args, Paths paths, ILog log, TextWriter output)
+    private static int RunFix(IReadOnlyList<string> args, Paths paths, IProcessToken token, ILog log, TextWriter output)
     {
         // The context is in place before the re-pair window is made, so the window knows the thread to send its calls to.
         Application.EnableVisualStyles();
@@ -91,7 +115,6 @@ internal static partial class Program
         using var cancel = new CancellationTokenSource();
         using var ui = new FixRePairWindow(cancel);
         using var worker = new SystemWorker(log);
-        IProcessToken token = WindowsProcessToken.Current();
         FixElevation elevation = ChooseFixElevation(paths, token, log);
         if (elevation.Refusal is { } refusal)
         {
@@ -173,6 +196,30 @@ internal static partial class Program
     internal static ConnectHistory? OpenConnectHistory(Paths paths, ILog log) =>
         paths.IsSafeMode && !paths.IsRedirected ? null : new ConnectHistory(paths.ConnectHistoryFile, TimeProvider.System, log);
 
+    // The history of a Fix run. A run that applies its plan in this process is an elevated administrator, and writes no entry
+    // under the person's profile; its steps are in the machine folder's log.
+    internal static ConnectHistory? OpenFixHistory(Paths paths, ILog log, FixElevation elevation)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(elevation);
+        if (elevation.InProcess)
+        {
+            log.Info("fix: this run is an elevated administrator, so it writes no connect history entry under the person's profile; its steps are in this log.");
+            return null;
+        }
+
+        return OpenConnectHistory(paths, log);
+    }
+
+    // The marker the tray reads while a re-pair runs. A run that applies its plan in this process keeps it in the machine
+    // folder, whose check its plan folder passed (FixPlanRoot.CreateAdminOnly); the tray reads it there too.
+    internal static string FixWindowFile(Paths paths, FixElevation elevation)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(elevation);
+        return Path.Combine(elevation.InProcess && elevation.PlanRoot is not null ? paths.MachineFolder : paths.LocalFolder, FixWindowFileName);
+    }
+
     internal static FixHost CreateFixHost(Paths paths, ILog log, TextWriter output, FixRePairWindow ui, SystemWorker worker, FixElevation elevation)
     {
         var nodes = new CfgMgr32NodeReader();
@@ -198,9 +245,9 @@ internal static partial class Program
             Pairing = new WinRtPairingApi(),
             RePairUi = ui,
             Gate = gate,
-            Recovery = new FixRecovery(Path.Combine(paths.LocalFolder, "fix-window.json"), TimeProvider.System, ProcessIsAlive),
+            Recovery = new FixRecovery(FixWindowFile(paths, elevation), TimeProvider.System, ProcessIsAlive),
             Radio = RadioCheck.CreateReal(log),
-            History = OpenConnectHistory(paths, log),
+            History = OpenFixHistory(paths, log, elevation),
             Output = output,
             Log = log,
             MachineFolder = paths.MachineFolder,

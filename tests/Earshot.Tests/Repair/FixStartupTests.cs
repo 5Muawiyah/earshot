@@ -82,6 +82,50 @@ public sealed class FixStartupTests
         Assert.IsFalse(window.IsOpen, "a damaged marker is not an open window");
     }
 
+    // A Fix run started as administrator keeps its marker in the machine folder, which the tray reads too: its window holds
+    // the automatic blocks like the person's own, and a stale one is answered with the block.
+    [TestMethod]
+    public void TheAdministratorsMarkerOpensTheRePairWindowToo()
+    {
+        using var temp = new TempFolder();
+        var time = new ManualTime();
+        var own = new FixRecovery(temp.File("own.json"), time, _ => true);
+        var administrators = new FixRecovery(temp.File("admin.json"), time, _ => true);
+        var window = new FixMarkerRePairWindow(own, administrators);
+
+        Assert.IsFalse(window.IsOpen);
+        administrators.Begin("repairing");
+        Assert.IsTrue(window.IsOpen);
+    }
+
+    // The tray cannot remove a marker in the machine folder; it answers it with the block and says the next administrator run
+    // removes it, rather than claim it was cleared.
+    [TestMethod]
+    public async Task AStaleAdministratorsMarkerIsAnsweredWithTheBlockAndSaysWhenItStays()
+    {
+        using var rig = new FixRig();
+        using var temp = new TempFolder();
+        bool alive = true;
+        var administrators = new FixRecovery(temp.File("admin.json"), rig.Gate.Time, _ => alive);
+        administrators.Begin("repairing");
+        alive = false;
+        File.SetAttributes(temp.File("admin.json"), FileAttributes.ReadOnly);
+        try
+        {
+            var own = new FixRecovery(temp.File("own.json"), rig.Gate.Time, _ => alive);
+
+            bool changed = await new FixRecoveryAtStart(own, rig.Records, rig.GateFake, rig.Log, administrators).RunAsync(CancellationToken.None);
+
+            Assert.IsTrue(changed);
+            Expect.Same(rig.GateFake.Calls, "block");
+            Assert.IsTrue(rig.Log.Entries.Any(e => e.Message.Contains("could not be removed", StringComparison.Ordinal)), "It says the marker stays.");
+        }
+        finally
+        {
+            File.SetAttributes(temp.File("admin.json"), FileAttributes.Normal);
+        }
+    }
+
     [TestMethod]
     public async Task APairedContainerThatIsNotThePinnedOneIsCountedAndNothingIsChanged()
     {

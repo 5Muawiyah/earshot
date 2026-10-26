@@ -13,17 +13,21 @@ namespace Earshot.Repair;
 internal sealed class FixRecoveryAtStart : IStartRecovery
 {
     private readonly FixRecovery _recovery;
+    private readonly FixRecovery? _administrators;
     private readonly IFixRecords _records;
     private readonly IFixGate _gate;
     private readonly ILog _log;
 
-    public FixRecoveryAtStart(FixRecovery recovery, IFixRecords records, IFixGate gate, ILog log)
+    // administrators: the marker a Fix run started as administrator keeps in the machine folder (Program.FixWindowFile). The
+    // tray can read it but not remove it.
+    public FixRecoveryAtStart(FixRecovery recovery, IFixRecords records, IFixGate gate, ILog log, FixRecovery? administrators = null)
     {
         ArgumentNullException.ThrowIfNull(recovery);
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(gate);
         ArgumentNullException.ThrowIfNull(log);
         _recovery = recovery;
+        _administrators = administrators;
         _records = records;
         _gate = gate;
         _log = log;
@@ -31,7 +35,20 @@ internal sealed class FixRecoveryAtStart : IStartRecovery
 
     public async Task<bool> RunAsync(CancellationToken ct)
     {
-        FixRecoveryOutcome outcome = await _recovery.RecoverAsync(_records, _gate, ct).ConfigureAwait(false);
+        bool changed = await RunAsync(_recovery, ct).ConfigureAwait(false);
+        if (_administrators is not null)
+        {
+            changed |= await RunAsync(_administrators, ct).ConfigureAwait(false);
+        }
+
+        return changed;
+    }
+
+    private async Task<bool> RunAsync(FixRecovery recovery, CancellationToken ct)
+    {
+        FixRecoveryOutcome outcome = await recovery.RecoverAsync(_records, _gate, ct).ConfigureAwait(false);
+        bool stays = outcome is FixRecoveryOutcome.Blocked or FixRecoveryOutcome.NothingToBlock && recovery.Read().State != FixRecoveryState.None;
+
         switch (outcome)
         {
             case FixRecoveryOutcome.NoMarker:
@@ -43,11 +60,16 @@ internal sealed class FixRecoveryAtStart : IStartRecovery
                 _log.Info("fix: a Fix connection run that did not finish was answered with the block.");
                 break;
             case FixRecoveryOutcome.NothingToBlock:
-                _log.Info("fix: a Fix connection run left a marker and Earshot has nothing to block, so the marker was cleared.");
+                _log.Info("fix: a Fix connection run left a marker and Earshot has nothing to block" + (stays ? "." : ", so the marker was cleared."));
                 break;
             default:
                 _log.Warn("fix: a Fix connection run that did not finish could not be answered with the block. It is tried again at the next start.");
                 break;
+        }
+
+        if (stays)
+        {
+            _log.Warn("fix: the marker could not be removed, so it is answered again at the next start. A Fix connection run started as administrator removes it.");
         }
 
         return outcome == FixRecoveryOutcome.Blocked;
@@ -59,14 +81,17 @@ internal sealed class FixRecoveryAtStart : IStartRecovery
 internal sealed class FixMarkerRePairWindow : IRePairWindow
 {
     private readonly FixRecovery _recovery;
+    private readonly FixRecovery? _administrators;
 
-    public FixMarkerRePairWindow(FixRecovery recovery)
+    // administrators: the marker of a Fix run started as administrator, in the machine folder.
+    public FixMarkerRePairWindow(FixRecovery recovery, FixRecovery? administrators = null)
     {
         ArgumentNullException.ThrowIfNull(recovery);
         _recovery = recovery;
+        _administrators = administrators;
     }
 
-    public bool IsOpen => _recovery.Read().State == FixRecoveryState.WindowOpen;
+    public bool IsOpen => _recovery.Read().State == FixRecoveryState.WindowOpen || _administrators?.Read().State == FixRecoveryState.WindowOpen;
 }
 
 // Paired AirPods that are not the pinned ones, from the identity rule and the pin record. Reads only.
