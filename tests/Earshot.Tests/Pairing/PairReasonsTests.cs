@@ -23,7 +23,7 @@ public sealed class PairReasonsTests
             [2] = "Windows didn't pair the device.",
             [3] = "Paired.",
             [4] = "The device turned down the connection.",
-            [5] = "The device can't take another connection right now.",
+            [5] = "The device can't accept any more connections.",
             [6] = "The device reported a hardware failure.",
             [7] = "Pairing took too long and stopped.",
             [8] = "Windows couldn't complete the pairing (code 8).",

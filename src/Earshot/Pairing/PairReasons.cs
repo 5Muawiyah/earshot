@@ -68,7 +68,7 @@ internal static class PairReasons
             NotReadyToPair => "The device isn't in a state where it can be paired.",
             NotPaired => "Windows didn't pair the device.",
             ConnectionRejected => "The device turned down the connection.",
-            TooManyConnections => "The device can't take another connection right now.",
+            TooManyConnections => "The device can't accept any more connections.",
             HardwareFailure => "The device reported a hardware failure.",
             AuthenticationTimeout => "Pairing took too long and stopped.",
             AuthenticationNotAllowed or ProtectionLevelCouldNotBeMet or InvalidCeremonyData or RequiredHandlerNotRegistered =>
