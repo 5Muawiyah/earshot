@@ -397,7 +397,7 @@ public sealed class DoctorTests
         Assert.AreEqual(JsonValueKind.False, startup.GetProperty("targetExists").ValueKind);
         Assert.AreEqual("02", startup.GetProperty("approvedFlag").GetString());
         Assert.AreEqual(JsonValueKind.False, startup.GetProperty("turnedOffInWindows").ValueKind);
-        StringAssert.Contains(output, "Open on startup: the Run value points at a file that is not there.");
+        StringAssert.Contains(output, "Open on startup: the Run value points at a file Earshot can't find.");
     }
 
     [TestMethod]
@@ -410,7 +410,7 @@ public sealed class DoctorTests
         using JsonDocument report = JsonDocument.Parse(Fenced(output));
         Assert.AreEqual(JsonValueKind.True, report.RootElement.GetProperty("startup").GetProperty("turnedOffInWindows").ValueKind);
         StringAssert.Contains(output, "Open on startup: turned off in Windows' startup settings.");
-        Assert.DoesNotContain("points at a file that is not there", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("points at a file Earshot can't find", output, StringComparison.Ordinal);
 
         using JsonDocument none = JsonDocument.Parse(Fenced(Run(new FakeDoctorSource(new DoctorFacts()))));
         JsonElement startup = none.RootElement.GetProperty("startup");

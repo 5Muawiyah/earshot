@@ -568,7 +568,7 @@ internal static class DoctorReport
         JsonElement startup = report.GetProperty("startup");
         if (startup.GetProperty("runValue").GetBoolean() && startup.GetProperty("targetExists").ValueKind == JsonValueKind.False)
         {
-            sb.AppendLine("Open on startup: the Run value points at a file that is not there.");
+            sb.AppendLine("Open on startup: the Run value points at a file Earshot can't find.");
         }
 
         if (startup.GetProperty("turnedOffInWindows").ValueKind == JsonValueKind.True)
