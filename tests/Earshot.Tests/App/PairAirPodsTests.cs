@@ -773,7 +773,8 @@ public sealed class PairAirPodsTests
     }
 
     // Choose device while Pair AirPods runs says the pairing is running and opens no picker, whose choice would race the
-    // pairing's adoption. Before, the picker opened.
+    // pairing's adoption. Before, the picker opened. The menu's click is posted to the UI thread, so it is run here while the
+    // pick is still up: run 118 found it run after the pairing had ended, which opened the real picker on the runner's desktop.
     [TestMethod]
     public void ChooseDeviceIsRefusedWhileAPairingRuns()
     {
@@ -784,7 +785,16 @@ public sealed class PairAirPodsTests
             rig.Prompter.SayOk();
             rig.Prompter.SayOk();
             TrayHarness? running = null;
-            rig.Ui.OnPick = () => running!.ClickMenu(MenuModel.ChooseDevice);
+            rig.Ui.OnPick = () =>
+            {
+                running!.ClickMenu(MenuModel.ChooseDevice);
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                while (!running.Log.Has(LogLevel.Info, "Choose device: not opened, because Pair AirPods is running.") && watch.Elapsed < TimeSpan.FromSeconds(10))
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(1);
+                }
+            };
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
             running = tray;
 
