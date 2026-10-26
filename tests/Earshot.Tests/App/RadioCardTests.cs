@@ -67,6 +67,26 @@ public sealed class RadioCardTests
         });
     }
 
+    // A connect that was accepted and never connected, with nothing heard from the air, is the Unknown class: it may be either
+    // side, so it never leads to Fix. The radio is still read after it, and a radio that is off is still the whole story.
+    [TestMethod]
+    public void AnUnknownClassFailureStillShowsTheRadiosLine()
+    {
+        var timedOut = new ConnectResult(ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]);
+        Assert.AreEqual(FailureClass.Unknown, ConnectFailureClassifier.Classify(timedOut, DeviceHint.Unknown, retried: false).Class);
+
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, RadioCheckState.Off));
+
+            FailTheConnect(tray);
+
+            Assert.AreEqual(RadioLines.Off, tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual(RadioLines.BluetoothSettingsButton, tray.Cards.Shown[^1].Content.Action?.Label);
+        });
+    }
+
     [TestMethod]
     public void AProblemCodeIsNamedInTheLine()
     {
