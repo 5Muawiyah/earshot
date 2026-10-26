@@ -51,7 +51,7 @@ public sealed class PairAirPodsTests
         rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
     }
 
-    private static PairAirPodsServices Services(FixRig rig, RadioCheckState radio = RadioCheckState.Ok, string? lockName = null, IPairRecoveryMarker? marker = null, TimeSpan? stalePinBudget = null) => new()
+    private static PairAirPodsServices Services(FixRig rig, RadioCheckState radio = RadioCheckState.Ok, string? lockName = null, IPairRecoveryMarker? marker = null, TimeSpan? stalePinBudget = null, TimeSpan? radioWait = null) => new()
     {
         Marker = marker ?? NoPairRecoveryMarker.Instance,
         StalePinBudget = stalePinBudget ?? StalePin.DefaultBudget,
@@ -59,7 +59,7 @@ public sealed class PairAirPodsTests
         Nodes = rig.Nodes,
         Prompter = rig.Prompter,
         UiFactory = _ => rig.Ui,
-        Radio = new FakeRadioCheck(PairingSessionTests.Radio(radio)),
+        Radio = new FakeRadioCheck(PairingSessionTests.Radio(radio)) { Wait = radioWait ?? TimeSpan.Zero },
         Options = rig.Host().Options,
         LockName = lockName ?? @"Local\Earshot.Tests.Pair." + Guid.NewGuid().ToString("N"),
     };
@@ -581,6 +581,28 @@ public sealed class PairAirPodsTests
 
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "stops, because a pairing has started"), "The recovery was still looking when the pairing started.");
             Assert.IsFalse(atQuestion, "The flag stayed up for a pairing that had only asked its first question.");
+        });
+    }
+
+    // look-ms is how long the first question was up, not the radio read before it.
+    [TestMethod]
+    public void TheLookTimeIsTheQuestionsAloneNotTheRadioReadBeforeIt()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayCancel();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig, radioWait: TimeSpan.FromMilliseconds(1500)),
+                coordinatorServices: new CoordinatorServices { History = history });
+
+            Click(tray);
+
+            HistoryStep look = history.Read().Single().Steps.Single(s => s.Name == "look-ms");
+            Assert.IsLessThan(1000, look.Code, "The radio's 1.5 seconds were counted as the question's.");
         });
     }
 

@@ -272,6 +272,9 @@ internal sealed class PairingSession
             }
 
             steps.AddRange(now.Steps);
+
+            // A list that failed or timed out goes in the history too, so a model check that could not read the device says why.
+            history.AddRange(now.Steps.Where(s => s.Step == "pair-list" && !s.Ok));
             PairedDevice? newPaired = chosen.Address12.Length == 12 && now.Devices.Count(d => d.Address12 == chosen.Address12) == 1
                 ? now.Devices.Single(d => d.Address12 == chosen.Address12)
                 : null;

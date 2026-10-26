@@ -306,6 +306,8 @@ public sealed class PairingSessionTests
         Assert.AreEqual(PairOutcome.Unverified, result.Outcome);
         Assert.IsTrue(result.Steps.Any(s => s.Step == "pair-list" && s.Code == 1460 && s.CodeName == "earshot-timeout"), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code)));
         Assert.IsLessThan(10_000L, watch.ElapsedMilliseconds);
+        // The history says why the model check could not read the device: the list's own timeout, ahead of the not-read step.
+        Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "pair-list" && s.Code == 1460), string.Join(", ", result.HistorySteps.Select(s => s.Step + " " + s.Code)));
     }
 
     // Windows stopped the scan (the watcher aborted): that is said with its status, not as "nothing turned up", which blames the

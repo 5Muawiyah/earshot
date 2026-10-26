@@ -1597,7 +1597,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _linkMemoryStore?.Save(memoryToSave.Memory, memoryToSave.Sequence);
         }
 
-        _log.Info("Widget: a different pair was adopted, so the previous pair's last readings and link were dropped.");
+        _log.Info("Widget: " + reason + ", so the previous pair's last readings and link were dropped.");
         PublishAndNotify();
     }
 

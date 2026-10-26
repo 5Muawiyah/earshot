@@ -682,12 +682,13 @@ internal sealed partial class TrayContext
 
     // The one history entry of a run that ended before the session gave one: the step it stopped at, with its code and the time.
     // A run that ended before its session's own entry: the steps it had taken (Look for AirPods, the marker, and those of a
-    // session that was cut off), then the step it stopped at and how long the run had taken by then.
-    private PairRunEnd EndedEarly(StepOutcome stoppedAt, string outcome, long ms, IReadOnlyList<StepOutcome>? sessionSteps = null) => new(null, null, false)
+    // session that was cut off), then the step it stopped at and how long the run had taken by then (or, given stepMs, how long
+    // that step took).
+    private PairRunEnd EndedEarly(StepOutcome stoppedAt, string outcome, long ms, IReadOnlyList<StepOutcome>? sessionSteps = null, long? stepMs = null) => new(null, null, false)
     {
         Early = new ConnectHistoryEntry(
             _time.GetUtcNow(), ConnectHistoryActions.Pair, "none", "custom-pairing",
-            ConnectHistory.FromSteps([.. _pairRunSteps, .. sessionSteps ?? [], stoppedAt, Milliseconds(stoppedAt.Step + "-ms", ms)]),
+            ConnectHistory.FromSteps([.. _pairRunSteps, .. sessionSteps ?? [], stoppedAt, Milliseconds(stoppedAt.Step + "-ms", stepMs ?? ms)]),
             false, outcome, FailureClass.None.ToString(), ms),
     };
 
@@ -759,6 +760,8 @@ internal sealed partial class TrayContext
             RadioCheckResult? radio = await session.CheckRadioAsync(cancel.Token);
             if (radio is not { BlocksRepair: true })
             {
+                // look-ms is the question's time alone, after the radio read.
+                var question = System.Diagnostics.Stopwatch.StartNew();
                 FixPromptAnswer answer = services.Prompter.Ask(PairAirPodsText.FirstQuestion, _lifetime.Token);
 
                 // Exit closed the question: that is Earshot closing, not the person saying no.
@@ -771,11 +774,11 @@ internal sealed partial class TrayContext
                 if (answer.Answer != FixAnswer.Ok)
                 {
                     _log.Info("Pair AirPods: the person did not press Look for AirPods, so nothing was scanned.");
-                    return EndedEarly(new StepOutcome("look", false, NativeCodes.NotAttempted, answer.Answer.ToString(), null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds);
+                    return EndedEarly(new StepOutcome("look", false, NativeCodes.NotAttempted, answer.Answer.ToString(), null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds, stepMs: question.ElapsedMilliseconds);
                 }
 
                 _pairRunSteps.Add(new StepOutcome("look", true, 0, answer.Answer.ToString(), null));
-                _pairRunSteps.Add(Milliseconds("look-ms", watch.ElapsedMilliseconds));
+                _pairRunSteps.Add(Milliseconds("look-ms", question.ElapsedMilliseconds));
 
                 // Earshot may have begun closing as the button was pressed: nothing is written or scanned then.
                 _lifetime.Token.ThrowIfCancellationRequested();

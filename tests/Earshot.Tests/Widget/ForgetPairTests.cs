@@ -116,6 +116,20 @@ public sealed class ForgetPairTests : IDisposable
         Assert.IsNull(LinkFile().Load(), "The remembered link was dropped with the pair.");
     }
 
+    // The log says why the readings went: a removed pair is not a different pair adopted.
+    [TestMethod]
+    public void TheLogLineSaysTheReasonItWasGiven()
+    {
+        using WidgetStatusService service = NewService();
+        OwnerCaseOpen(3, budLevel: 0x7, caseLevel: 0x9);
+
+        service.ForgetPair("the pinned AirPods are no longer paired");
+
+        Assert.IsTrue(_log.Entries.Any(e => e.Message == "Widget: the pinned AirPods are no longer paired, so the previous pair's last readings and link were dropped."),
+            string.Join(" | ", _log.Entries.Select(e => e.Message)));
+        Assert.IsFalse(_log.Entries.Any(e => e.Message.Contains("a different pair was adopted", StringComparison.Ordinal)));
+    }
+
     [TestMethod]
     public void ANewPairsFirstCaseOpeningShowsOnlyItsOwnReading()
     {
