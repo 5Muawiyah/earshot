@@ -12,13 +12,18 @@ namespace Earshot.App;
 // install script are three programs, so the answer cannot live in any one of them: it is a named mutex in the Global namespace,
 // taken by the fix verb for the whole run and by Pair AirPods in the tray.
 //
-// A mutex belongs to the thread that took it, so the run that takes it releases it from the same thread (Dispose).
+// A mutex belongs to the thread that took it, and only that thread can release it. The tray takes the lock on its UI thread and
+// lets it go after awaits, which need not come back to the same thread; a release from another thread throws, and the mutex then
+// stays held for as long as the taking thread lives, which in the tray is until Earshot exits. So the mutex is taken, held and
+// released by a thread of the lock's own, which does nothing else, and Dispose asks that thread to release it from whichever
+// thread Dispose is called on. Each acquire is its own thread, so the same caller asking twice is refused the second time.
 //
 // The name is open to every user of the PC (Everyone may wait on it), because a Setup.exe run is elevated and under
 // Administrator protection that is another account than the signed-in one. Anything on the PC can therefore take the name and
 // stop a Fix from starting. That is accepted: a program of the same user could do worse, and the refusal is logged with its
 // code, so it is seen rather than mistaken for a fault in Fix.
 // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutexacl.create
+// https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutex.releasemutex
 // https://learn.microsoft.com/en-us/windows/win32/termserv/kernel-object-namespaces
 internal sealed class FixRunLock : IDisposable
 {
@@ -26,12 +31,22 @@ internal sealed class FixRunLock : IDisposable
     public const string FixAlreadyRunningMessage = "Fix connection is already running.";
     public const string PairAlreadyRunningMessage = "Earshot is already pairing or fixing the AirPods.";
 
-    private readonly Mutex _mutex;
+    // How long Dispose waits for the holding thread to let the mutex go. It does nothing but release, so this is never reached
+    // in practice; if it is, the wait is logged and the thread is left to finish on its own.
+    private static readonly TimeSpan ReleaseWait = TimeSpan.FromSeconds(10);
+
+    private readonly Thread _holder;
+    private readonly ManualResetEventSlim _release;
+    private readonly string _name;
+    private readonly ILog _log;
     private bool _released;
 
-    private FixRunLock(Mutex mutex)
+    private FixRunLock(Thread holder, ManualResetEventSlim release, string name, ILog log)
     {
-        _mutex = mutex;
+        _holder = holder;
+        _release = release;
+        _name = name;
+        _log = log;
     }
 
     // The mutex name for these folders. A run against a redirected data folder (a test or a smoke run) has a name of its own, so
@@ -55,6 +70,27 @@ internal sealed class FixRunLock : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(log);
+        var taken = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new ManualResetEventSlim(false);
+
+        // A background thread, so a lock that is still held never keeps the process alive; when the process ends the system
+        // frees the mutex as abandoned, and the next run takes it over.
+        var holder = new Thread(() => Hold(name, log, taken, release)) { IsBackground = true, Name = "Earshot fix lock" };
+        holder.Start();
+        if (taken.Task.GetAwaiter().GetResult())
+        {
+            return new FixRunLock(holder, release, name, log);
+        }
+
+        holder.Join();
+        release.Dispose();
+        return null;
+    }
+
+    // The holding thread: takes the mutex without waiting, says whether it did, and when it did, holds it until Dispose asks for
+    // it back, then releases it from this same thread.
+    private static void Hold(string name, ILog log, TaskCompletionSource<bool> taken, ManualResetEventSlim release)
+    {
         Mutex mutex;
         try
         {
@@ -65,27 +101,46 @@ internal sealed class FixRunLock : IDisposable
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException or IOException)
         {
-            log.Warn("Fix lock: " + name + " could not be opened (" + ex.GetType().Name + ", HRESULT 0x" +
-                ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + "), so it is counted as held.", ex);
-            return null;
+            log.Warn("Fix lock: " + name + " could not be opened (" + Describe(ex) + "), so it is counted as held.", ex);
+            taken.SetResult(false);
+            return;
         }
 
-        try
+        using (mutex)
         {
-            if (mutex.WaitOne(0))
+            bool owned;
+            try
             {
-                return new FixRunLock(mutex);
+                owned = mutex.WaitOne(0);
+            }
+            catch (AbandonedMutexException)
+            {
+                log.Warn("Fix lock: the run that held " + name + " ended without releasing it. This run takes it over.");
+                owned = true;
+            }
+
+            taken.SetResult(owned);
+            if (!owned)
+            {
+                return;
+            }
+
+            release.Wait();
+            try
+            {
+                mutex.ReleaseMutex();
+            }
+            catch (ApplicationException ex)
+            {
+                // Only the owning thread releases, so this is not expected; if it happens the code is in the log, and the system
+                // frees the mutex as abandoned when this thread ends, which it does now.
+                log.Warn("Fix lock: " + name + " could not be released (" + Describe(ex) + ").", ex);
             }
         }
-        catch (AbandonedMutexException)
-        {
-            log.Warn("Fix lock: the run that held " + name + " ended without releasing it. This run takes it over.");
-            return new FixRunLock(mutex);
-        }
-
-        mutex.Dispose();
-        return null;
     }
+
+    private static string Describe(Exception ex) =>
+        ex.GetType().Name + ", HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture);
 
     public void Dispose()
     {
@@ -95,16 +150,13 @@ internal sealed class FixRunLock : IDisposable
         }
 
         _released = true;
-        try
+        _release.Set();
+        if (!_holder.Join(ReleaseWait))
         {
-            _mutex.ReleaseMutex();
-        }
-        catch (ApplicationException)
-        {
-            // Not released from the thread that took it: the process is ending the run anyway, and the system frees the
-            // mutex with the process.
+            _log.Warn("Fix lock: " + _name + " was not let go within " + ReleaseWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s.");
+            return;
         }
 
-        _mutex.Dispose();
+        _release.Dispose();
     }
 }

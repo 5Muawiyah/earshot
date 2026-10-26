@@ -42,6 +42,57 @@ public sealed class FixRunLockTests
         Assert.IsNotNull(again);
     }
 
+    // The tray takes the lock on one thread and may let it go from another after an await. The lock must still be free for the
+    // next run: before, the release threw on the wrong thread, the throw was swallowed, and the mutex stayed held for as long as
+    // the taking thread lived, so every later Fix and pairing in that tray was refused.
+    [TestMethod]
+    public void ALockLetGoFromAnotherThreadThanTheOneThatTookItIsFreeForTheNextRun()
+    {
+        string name = UniqueName();
+        var log = new CapturingLog();
+        FixRunLock? taken = null;
+        using var takenEvent = new ManualResetEventSlim();
+        using var finish = new ManualResetEventSlim();
+        var taker = new Thread(() =>
+        {
+            taken = FixRunLock.TryAcquire(name, log);
+            takenEvent.Set();
+            finish.Wait();
+        });
+        taker.Start();
+        try
+        {
+            Assert.IsTrue(takenEvent.Wait(TimeSpan.FromSeconds(10)));
+            Assert.IsNotNull(taken);
+
+            taken.Dispose();
+
+            FixRunLock? next = null;
+            Task.Run(() => next = FixRunLock.TryAcquire(name, log)).GetAwaiter().GetResult();
+            Assert.IsNotNull(next, "The lock stayed held after it was let go: " + string.Join(" | ", log.Entries.Select(e => e.Message)));
+            next.Dispose();
+        }
+        finally
+        {
+            finish.Set();
+            taker.Join();
+        }
+    }
+
+    // The same thread asking twice is a second run, not a re-entry of the first: the tray's UI thread starts both.
+    [TestMethod]
+    public void TheSameThreadAskingTwiceIsRefusedTheSecondTime()
+    {
+        string name = UniqueName();
+        var log = new CapturingLog();
+
+        using FixRunLock? first = FixRunLock.TryAcquire(name, log);
+        using FixRunLock? second = FixRunLock.TryAcquire(name, log);
+
+        Assert.IsNotNull(first);
+        Assert.IsNull(second);
+    }
+
     [TestMethod]
     public void ARunAgainstARedirectedDataFolderHasANameOfItsOwn()
     {
