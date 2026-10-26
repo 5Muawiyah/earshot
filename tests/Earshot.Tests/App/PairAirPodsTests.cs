@@ -1642,9 +1642,11 @@ public sealed class PairAirPodsTests
             {
                 Api = services.Api, Nodes = services.Nodes, Prompter = services.Prompter, Radio = services.Radio, Options = services.Options,
                 LockName = services.LockName, Marker = marker,
+                // Cancel the moment Windows is asked to pair. Run 121 found a cancel 300 ms after the pick racing the rig's own
+                // 300 ms pairing limit, which then ended the run as a timeout.
                 UiFactory = c =>
                 {
-                    rig.Ui.OnPick = () => _ = Task.Delay(300).ContinueWith(_ => c.Cancel(), TaskScheduler.Default);
+                    rig.Pairing.OnPair = c.Cancel;
                     return rig.Ui;
                 },
             };

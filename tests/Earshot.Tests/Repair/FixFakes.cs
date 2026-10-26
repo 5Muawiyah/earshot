@@ -278,9 +278,13 @@ internal sealed class FakePairing : IPairingApi
         return new ScriptedWatch(Events);
     }
 
+    // Runs as PairAsync is called, before anything else it does.
+    public Action? OnPair { get; set; }
+
     public async Task<PairingCallResult> PairAsync(string deviceId, IPairingPrompt prompt, CancellationToken ct)
     {
         Calls.Add("pair:" + deviceId);
+        OnPair?.Invoke();
         if (ThrowOnPair is not null)
         {
             throw ThrowOnPair;
