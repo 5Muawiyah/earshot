@@ -70,6 +70,41 @@ public sealed class RadioCardTests
         });
     }
 
+    // Exit pressed while such a click waits for the looks to end: the click ends with them, and nothing is sent after Exit began.
+    // A second click meanwhile is logged and adds nothing. Before, the request reached the coordinator after its shutdown.
+    [TestMethod]
+    public void ExitWhileAClickWaitsForTheFailuresLooksSendsNoNewRequest()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok)) { Wait = TimeSpan.FromSeconds(2) };
+            PairAirPodsServices services = Services(rig, RadioCheckState.Ok);
+            var slow = new PairAirPodsServices
+            {
+                Api = services.Api, Nodes = services.Nodes, Prompter = services.Prompter, UiFactory = services.UiFactory, Radio = radio,
+                Options = services.Options, LockName = services.LockName,
+            };
+            long now = 0;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: slow, tickCount: () => now);
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            TrayHarness.PumpUntil(() => radio.Checks == 1, "The radio was not read after the failed connect.");
+            now += 5000;
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            now += 5000;
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.Context.ExitFromSignal();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(1, tray.Connection.Calls.Count(c => c.Connect), string.Join(", ", tray.Connection.Calls));
+            Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.Contains("connect (cancelled", StringComparison.Ordinal)), "A request was sent after Exit began.");
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("so this one adds nothing", StringComparison.Ordinal)), "The second click was dropped without a word.");
+        });
+    }
+
     [TestMethod]
     [DataRow((int)RadioCheckState.Off, "Bluetooth is off.")]
     [DataRow((int)RadioCheckState.SwitchedOff, "Bluetooth is turned off by a switch, the firmware or a policy on this PC.")]

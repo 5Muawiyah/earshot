@@ -820,6 +820,9 @@ internal sealed partial class TrayContext : ApplicationContext
         }
     }
 
+    // A click waits for the looks after a failed switch to end before its own request runs.
+    private bool _requestAfterLooks;
+
     // Toggles the connection of the pinned (or resolved) device through the coordinator, which owns the
     // block, allow and protection order around it and shows its cards.
     private async Task ToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, bool? wanted = null)
@@ -828,10 +831,32 @@ internal sealed partial class TrayContext : ApplicationContext
         // new request, not the opposite of a switch in flight. Those looks are ended and the request runs as one of its own.
         if (_toggleInFlight && _toggleReported && _toggleDone is { } ending)
         {
-            _log.Info("Click: the looks after the failed " + (_toggleConnect ? "connect" : "disconnect") + " are ended for a new request.");
+            string failed = _toggleConnect ? "connect" : "disconnect";
+            if (_requestAfterLooks)
+            {
+                _log.Info("Click: a request already waits for the looks after the failed " + failed + " to end, so this one adds nothing.");
+                return;
+            }
+
+            _log.Info("Click: the looks after the failed " + failed + " are ended for a new request.");
             _toggleCancelReason = "a new click came while the failure was looked at";
-            _toggle?.Cancel();
-            await ending.Task;
+            _requestAfterLooks = true;
+            try
+            {
+                _toggle?.Cancel();
+                await ending.Task;
+            }
+            finally
+            {
+                _requestAfterLooks = false;
+            }
+
+            if (_closing)
+            {
+                _log.Info("Click: Exit began while the looks after the failed " + failed + " ended, so no new request is sent.");
+                return;
+            }
+
             await RunToggleAsync(place, clickedAt, connect: wanted, viaHotkey, trigger);
             return;
         }
