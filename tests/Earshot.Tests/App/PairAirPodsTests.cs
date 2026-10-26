@@ -1608,6 +1608,39 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // Cancel pressed while Windows is pairing: the bond may still form and its nodes arrive later, so the marker stays for the next
+    // start's look. Before, one look straight after the cancel cleared it.
+    [TestMethod]
+    public void CancelWhileWindowsIsPairingKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Pairing.HangOnPair = true;
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var cancelling = new PairAirPodsServices
+            {
+                Api = services.Api, Nodes = services.Nodes, Prompter = services.Prompter, Radio = services.Radio, Options = services.Options,
+                LockName = services.LockName, Marker = marker,
+                UiFactory = c =>
+                {
+                    rig.Ui.OnPick = () => _ = Task.Delay(300).ContinueWith(_ => c.Cancel(), TaskScheduler.Default);
+                    return rig.Ui;
+                },
+            };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: cancelling);
+
+            Click(tray);
+
+            Assert.IsTrue(rig.Pairing.Calls.Any(c => c.StartsWith("pair:", StringComparison.Ordinal)), "Windows was asked to pair.");
+            Assert.AreEqual(PairingText.Cancelled, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsTrue(marker.Exists(), "Kept for the next start's look.");
+        });
+    }
+
     // Cancel pressed when Windows had already paired the AirPods: they are offered, and the marker stays.
     [TestMethod]
     public void CancelAfterWindowsPairedOffersThePairAndKeepsTheMarker()

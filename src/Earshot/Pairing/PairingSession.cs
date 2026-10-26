@@ -138,12 +138,18 @@ internal sealed class PairingSession
 
     private List<StepOutcome>? _stepsSoFar;
 
+    // Set once the last run asked Windows to pair, so a caller whose run was cancelled knows Windows may still finish the bond.
+    internal bool PairCallStarted => Volatile.Read(ref _pairCallStarted);
+
+    private bool _pairCallStarted;
+
     public async Task<PairingSessionResult> RunAsync(bool excludeAlreadyListed, CancellationToken ct, RadioCheckResult? checkedRadio = null)
     {
         var watch = Stopwatch.StartNew();
         var lines = new List<string>();
         var history = new List<StepOutcome>();
         Volatile.Write(ref _stepsSoFar, history);
+        Volatile.Write(ref _pairCallStarted, false);
         var steps = new List<StepOutcome>();
 
         RadioCheckResult? radio = checkedRadio ?? await CheckRadioAsync(ct).ConfigureAwait(false);
@@ -232,6 +238,7 @@ internal sealed class PairingSession
             // The scan has done its job; stop it before pairing starts.
             await pumpCts.CancelAsync().ConfigureAwait(false);
             var pairTime = Stopwatch.StartNew();
+            Volatile.Write(ref _pairCallStarted, true);
             PairingCallResult pair = await PairWithTimeoutAsync(chosen.Id, ct).ConfigureAwait(false);
             long pairMs = pairTime.ElapsedMilliseconds;
             string shown = nameUnread ? PairingText.NoName : chosen.Name;

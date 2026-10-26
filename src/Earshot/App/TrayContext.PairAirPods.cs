@@ -995,6 +995,13 @@ internal sealed partial class TrayContext
             {
                 OfferLeftPair(left, place);
             }
+            else if (session?.PairCallStarted == true)
+            {
+                // Windows was asked to pair, and a cancel does not stop a bond already forming: its nodes can arrive seconds
+                // later, so one look now proves nothing. The marker stays and the next start looks again.
+                _log.Info("Pair AirPods: cancelled after Windows was asked to pair, so the recovery marker is kept for the next start.");
+                ShowCard(TrayStatus.AppName, PairingText.Cancelled, place);
+            }
             else
             {
                 ClearOwnMarker(marked, earlierMarker, "the pairing was cancelled and left no new AirPods");
