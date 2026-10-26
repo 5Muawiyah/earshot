@@ -142,9 +142,9 @@ Startup on is not covered.
   pick. A pair that passes Earshot's AirPods check is the one Earshot uses from
   then on, and Earshot sets itself up if it was not set up yet; the previous
   pair's readings are dropped. Earshot always asks before it takes on a
-  different pair: when the AirPods it uses are still paired, it asks whether to
-  use the new ones instead, and if you say no it keeps the old pair and says the
-  new one is not protected. A device that is not AirPods is left paired and not
+  different pair: when it is set to use other AirPods, it asks whether to use
+  the new ones instead, and if you say no it keeps the old pair and says the new
+  one is not protected. A device that is not AirPods is left paired and not
   used. Every step goes in the connect history with its result code (Windows'
   own where Windows gave one) and its time. It has not had a live run yet (test
   24 is pending).

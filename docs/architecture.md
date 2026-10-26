@@ -1321,13 +1321,16 @@ user, through the same pairing session Fix connection's re-pair uses
 3. A scan for headphones in pairing mode, a pick the person makes (always
    asked, so nothing is paired without a choice), and Windows' pairing with
    the kind of confirmation Windows asks for.
-4. The model check on the new device's nodes. When another pinned pair is still
-   in the device tree (or the tree could not be read), the person is asked
-   "Use these AirPods instead?" first; a no keeps the pinned pair, adopts
-   nothing, says the new pair is not protected, clears the recovery marker and
-   records a `replace` step. A pair that passes, and is agreed to, is pinned,
-   given to the gate when Earshot is set up, and the previous pair's readings
-   and link are dropped; then set-up runs when Earshot is not set up yet. A
+4. The model check on the new device's nodes. When Earshot is set to use other
+   AirPods (whether or not they are still paired), the person is asked "Use
+   these AirPods instead?" first; a no keeps the pinned pair, adopts nothing,
+   says the new pair is not protected, clears the recovery marker and records a
+   `replace` step, and a question that timed out or was cut off by Exit offers
+   the pair and keeps the marker. A pair that passes, and is agreed to, is
+   pinned, given to the gate when Earshot is set up, and the previous pair's
+   readings and link are dropped; then set-up runs when Earshot is not set up
+   yet, handed the run straight from the pairing so nothing else can start in
+   between. A
    device whose nodes were read and fail is left paired and not adopted:
    Earshot never unpairs on its own. A device that could not be looked at (the
    paired list did not hold it, or its nodes were not there by the end of the
@@ -1346,7 +1349,12 @@ asked. Codes that are Earshot's own (the lock, a question not answered, the
 pairing's own time limit) are named as such. Cancel in the Pair AirPods window ends the run as a
 cancel; when Windows had already paired the AirPods, or a pairing that timed out
 had, the new pair is offered through the device picker and the recovery marker
-stays. While the run is under way the coordinator's checks for AirPods Earshot
+stays, and when what is paired cannot be read the card says only that. Exit
+during a run leaves its entry (a `closing` step) and keeps the marker, and an
+unexpected throw leaves one with its type and code. A radio that stops the
+pairing pairs nothing, so no marker is written. A marker an earlier run left is
+cleared only by the start-time look at what that run left, never by a later
+run that paired nothing. While the run is under way the coordinator's checks for AirPods Earshot
 does not protect, and the tray's own stale-pin check, wait for it, and a Fix
 pressed then says a pairing is running. The pairing window's calls are sent to
 the thread that made it.
