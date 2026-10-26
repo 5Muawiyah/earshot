@@ -1313,8 +1313,9 @@ Record button as its settings row. The paired-list read and the removal come
 before the pairing window, so the person has no Cancel yet: they are given 5
 and 30 seconds (waiting budgets), and past either the run stops with
 earshot-timeout; a removal that did not answer says it is not known whether
-the pair was removed. A re-pair cut off by Cancel, the window's close or a fault
-once it has begun still writes its connect-history entry.
+the pair was removed. The removal's status and time lead the re-pair's
+connect-history entry, and a removal that failed, or a re-pair cut off by
+Cancel, the window's close or a fault once it has begun, still writes one.
 
 ### Pair AirPods
 

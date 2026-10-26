@@ -158,6 +158,48 @@ public sealed class FixConnectionTests
         Assert.IsEmpty(history.Read());
     }
 
+    // The removal is a step of the pairing too: its status and time lead the entry, and a removal Windows refused, which ends
+    // the run before any scan, still leaves an entry.
+    [TestMethod]
+    public async Task TheRemovalLeadsTheEntryWithItsStatusAndTime()
+    {
+        using var rig = new FixRig();
+        using var temp = new TempFolder();
+        ConnectHistory history = HistoryIn(temp, new ManualTime());
+        rig.History = history;
+        FixRePairTests.ArrangeHappyPairing(rig);
+        rig.Prompter.SayOk();
+        rig.Prompter.SayOk();
+
+        await RunAsync(rig);
+
+        string[] names = history.Read().Single().Steps.Select(s => s.Name).ToArray();
+        CollectionAssert.AreEqual(RemovalSteps, names.Take(2).ToArray(), string.Join(", ", names));
+    }
+
+    private static readonly string[] RemovalSteps = ["unpair", "unpair-ms"];
+
+    [TestMethod]
+    public async Task ARemovalWindowsRefusedLeavesAnEntryWithItsStatus()
+    {
+        using var rig = new FixRig();
+        using var temp = new TempFolder();
+        ConnectHistory history = HistoryIn(temp, new ManualTime());
+        rig.History = history;
+        FixRePairTests.ArrangeHappyPairing(rig);
+        rig.Pairing.UnpairResult = new PairingCallResult("Failed", 19, false, null);
+        rig.Prompter.SayOk();
+        rig.Prompter.SayOk();
+
+        await RunAsync(rig);
+
+        ConnectHistoryEntry entry = history.Read().Single();
+        Assert.AreEqual("failed", entry.Outcome);
+        HistoryStep unpair = entry.Steps.Single(s => s.Name == "unpair");
+        Assert.AreEqual(19, unpair.Code);
+        Assert.IsTrue(entry.Steps.Any(s => s.Name == "unpair-ms"));
+    }
+
     // The pair was already removed when the person cancels in the pairing window: the run still leaves its entry, with the
     // steps taken so far and where it stopped, as Pair AirPods does.
     [TestMethod]

@@ -309,7 +309,7 @@ internal static class FixConnection
         {
             // Cut off by the person's Cancel or the window's close, or by a fault, after the pair was removed or the scan began:
             // the run still leaves its one entry, and the result and the closing block follow as before.
-            RecordCutOff(host, steps, repairer.SessionStepsSoFar, ex, ex is OperationCanceledException && ct.IsCancellationRequested, pairWatch.ElapsedMilliseconds);
+            RecordCutOff(host, steps, [.. repairer.StepsBeforeTheSession, .. repairer.SessionStepsSoFar], ex, ex is OperationCanceledException && ct.IsCancellationRequested, pairWatch.ElapsedMilliseconds);
             throw;
         }
 
@@ -352,16 +352,17 @@ internal static class FixConnection
             }
         }
 
-        RecordPairing(host, steps, repaired, adoptStep, adoptMs);
+        RecordPairing(host, steps, repaired, repairer, adoptStep, adoptMs, pairWatch.ElapsedMilliseconds);
 
         return repaired.Paired && repaired.Failure == RePairFailure.None && (state.Adopted || !state.Installed) ? FixOutcome.Done : FixOutcome.Failed;
     }
 
     // The one connect-history entry of this run's pairing, when the run has a history to write to and a pairing session ran (or
-    // was refused by the radio check). Nothing in it names a device. A failed write is a step with its raw code.
-    private static void RecordPairing(FixHost host, List<StepOutcome> steps, RePairResult repaired, StepOutcome? adoptStep, long? adoptMs)
+    // was refused by the radio check), or the old pair's removal was tried: the removal's steps lead it, with their codes and
+    // time. Nothing in it names a device. A failed write is a step with its raw code.
+    private static void RecordPairing(FixHost host, List<StepOutcome> steps, RePairResult repaired, RePairer repairer, StepOutcome? adoptStep, long? adoptMs, long runMs)
     {
-        if (host.History is null || repaired.Session is null)
+        if (host.History is null || (repaired.Session is null && !repairer.Began))
         {
             return;
         }
@@ -372,7 +373,12 @@ internal static class FixConnection
             later.Add(new StepOutcome("adopt-ms", true, (int)Math.Min(ms, int.MaxValue), "ms", null));
         }
 
-        ConnectHistoryEntry entry = repaired.Session.ToHistoryEntry(host.Time.GetUtcNow(), later);
+        // A removal that failed or was not answered ends the run before any session: its entry is the removal alone.
+        ConnectHistoryEntry entry = repaired.Session is { } session
+            ? session.ToHistoryEntry(host.Time.GetUtcNow(), later, repairer.StepsBeforeTheSession)
+            : new ConnectHistoryEntry(
+                host.Time.GetUtcNow(), ConnectHistoryActions.Pair, "none", "custom-pairing",
+                ConnectHistory.FromSteps(repairer.StepsBeforeTheSession), false, ConnectHistoryOutcomes.Failed, FailureClass.None.ToString(), runMs);
         steps.Add(host.History.Append(entry));
     }
 

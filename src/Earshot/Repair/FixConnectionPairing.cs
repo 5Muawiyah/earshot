@@ -494,6 +494,12 @@ internal sealed class RePairer
     // The history steps of the pairing session so far, for that cut-off run's entry.
     internal IReadOnlyList<StepOutcome> SessionStepsSoFar => _session?.StepsSoFar ?? [];
 
+    // The history steps this run took before the session: the removal of the old pair, with its status and time. Read only once
+    // RunAsync has ended.
+    internal IReadOnlyList<StepOutcome> StepsBeforeTheSession => [.. _before];
+
+    private readonly List<StepOutcome> _before = [];
+
     private PairingSession? _session;
 
     public async Task<RePairResult> RunAsync(FixConsent consent, RePairTarget? target, CancellationToken ct)
@@ -563,6 +569,7 @@ internal sealed class RePairer
             Began = true;
             PairingCallResult unpair;
             bool unanswered = false;
+            var unpairWatch = System.Diagnostics.Stopwatch.StartNew();
             using (var unpairWait = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 unpairWait.CancelAfter(_options.UnpairWait);
@@ -578,6 +585,8 @@ internal sealed class RePairer
             }
 
             statuses.Add(unpair);
+            _before.Add(new StepOutcome("unpair", unpair.Success, unpair.Code, unpair.Name, null));
+            _before.Add(new StepOutcome("unpair-ms", true, (int)Math.Min(unpairWatch.ElapsedMilliseconds, int.MaxValue), "ms", null));
             lines.Add("Remove " + target.Name + ": " + unpair.Name + " (" + unpair.Code.ToString(CultureInfo.InvariantCulture) + ").");
             if (unanswered)
             {
