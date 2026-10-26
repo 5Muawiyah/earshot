@@ -507,7 +507,8 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         // A tray pairing that started while this was read answers for the pairs; the card would show over it and its button
-        // would be refused by the lock. The tray asks for the check again when the pairing ends.
+        // would be refused by the lock. Nothing asks again for this one: the pairing ends with its own card about the pairs, and
+        // the next start or new device group checks again.
         if (_services.TrayPairing.Active)
         {
             _log.Info("The tray's Pair AirPods started while the check for AirPods that Earshot does not protect read, so it says nothing now.");

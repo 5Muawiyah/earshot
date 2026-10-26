@@ -584,6 +584,63 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // The check a recovery owes once a pairing it gave way to ends is not run while that pairing's first question is still up
+    // (the flag is down then): it runs when the pairing ends. Before, the recovery's own end ran it at once, and the card about
+    // unprotected AirPods, with a Fix button the lock refuses, showed over the question.
+    [TestMethod]
+    public void TheCheckARecoveryOwesWaitsForThePairingItGaveWayToToEnd()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayCancel();
+            var marker = new FakePairRecoveryMarker();
+            PairAirPodsServices services = Services(rig, marker: marker, stalePinBudget: TimeSpan.FromSeconds(1));
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            TrayHarness? running = null;
+            int? readsAtQuestion = null;
+            rig.Prompter.OnAsk = q =>
+            {
+                if (q.Heading != PairAirPodsText.FirstQuestion.Heading || running is null)
+                {
+                    return;
+                }
+
+                var watch = System.Diagnostics.Stopwatch.StartNew();
+                while (!running.Log.Has(LogLevel.Info, "stops, because a pairing has started") && watch.Elapsed < TimeSpan.FromSeconds(10))
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(5);
+                }
+
+                // The recovery's own end, and anything it starts, has time to run while the question is up.
+                watch.Restart();
+                while (watch.Elapsed < TimeSpan.FromMilliseconds(500))
+                {
+                    Application.DoEvents();
+                    Thread.Sleep(5);
+                }
+
+                readsAtQuestion = protection.Reads;
+            };
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), pairAirPods: services,
+                coordinatorServices: new CoordinatorServices { Protection = protection, TrayPairing = services.RunFlag });
+            running = tray;
+            int readsBefore = protection.Reads;
+
+            marker.Present = true;
+            rig.Pairing.HangOnList = true;
+            tray.Context.StartPinnedPairCheck("start");
+            Click(tray);
+            TrayHarness.PumpUntil(() => protection.Reads > readsBefore, "The owed check did not run once the pairing ended.");
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "stops, because a pairing has started"), "The recovery was still looking when the pairing started.");
+            Assert.AreEqual(readsBefore, readsAtQuestion, "The owed check ran while the pairing's first question was up.");
+        });
+    }
+
     // look-ms is how long the first question was up, not the radio read before it.
     [TestMethod]
     public void TheLookTimeIsTheQuestionsAloneNotTheRadioReadBeforeIt()

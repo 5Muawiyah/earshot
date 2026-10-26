@@ -51,7 +51,10 @@ internal sealed partial class TrayContext
         }
 
         _coordinator.TrayPairingEnded();
-        if (_protectionCheckOwed)
+
+        // Owed to a Pair AirPods that is still running (its first question up, its flag not yet raised): it runs when that run
+        // ends and drops the flag itself.
+        if (_protectionCheckOwed && _elevatedRun != PairRun)
         {
             _protectionCheckOwed = false;
             if (!KeptThePinnedPairJustNow())
