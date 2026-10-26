@@ -117,6 +117,47 @@ public sealed class RadioCardTests
         });
     }
 
+    // A click landing as the read after the failure answers Off: the old connect shows no radio card, so only the new one's
+    // shows. Before, both did.
+    [TestMethod]
+    public void AClickAsTheFailuresRadioReadAnswersShowsOnlyTheNewRequestsCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Off));
+            PairAirPodsServices services = Services(rig, RadioCheckState.Off);
+            var watched = new PairAirPodsServices
+            {
+                Api = services.Api, Nodes = services.Nodes, Prompter = services.Prompter, UiFactory = services.UiFactory, Radio = radio,
+                Options = services.Options, LockName = services.LockName,
+            };
+            long now = 0;
+            TrayHarness? running = null;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: watched, tickCount: () => now);
+            running = tray;
+            tray.PumpUntilIdle();
+            tray.Cards.Shown.Clear();
+            int failureRead = radio.Checks + 1;
+            radio.OnCheck = n =>
+            {
+                if (n == failureRead)
+                {
+                    now += 5000;
+                    running.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+                }
+            };
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(2, tray.Connection.Calls.Count(c => c.Connect), string.Join(", ", tray.Connection.Calls));
+            Assert.AreEqual(1, tray.Cards.Shown.Count(c => c.Content.Status == RadioLines.Off), string.Join(" | ", tray.Cards.Statuses));
+        });
+    }
+
     [TestMethod]
     [DataRow((int)RadioCheckState.Off, "Bluetooth is off.")]
     [DataRow((int)RadioCheckState.SwitchedOff, "Bluetooth is turned off by a switch, the firmware or a policy on this PC.")]

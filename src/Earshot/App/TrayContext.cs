@@ -1060,7 +1060,11 @@ internal sealed partial class TrayContext : ApplicationContext
             bool fixOffered = !radioBlocks && FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);
             if (radioBlocks)
             {
-                ShowRadioCard(radio!, place);
+                // A read that answered as a new click superseded this connect shows nothing for it; the new request has its own.
+                if (!cts.IsCancellationRequested)
+                {
+                    ShowRadioCard(radio!, place);
+                }
             }
             else if (fixOffered)
             {
