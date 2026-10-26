@@ -1398,7 +1398,11 @@ https://learn.microsoft.com/en-us/uwp/api/windows.devices.enumeration.devicepair
 
 One run at a time with a Fix connection, through a named mutex
 (`FixRunLock`, `Global\Earshot.Fix.Run`) held by a thread of its own, so the
-tray can let it go from any thread. A pinned pair that Windows no longer holds
+tray can let it go from any thread. The name is machine-wide because pairing is:
+two signed-in users must not pair at once. The cost is accepted and logged:
+another account on the PC can make the name first and keep every Fix and Pair
+AirPods refused for as long as it holds it, a restart included if it makes it
+again at sign-in. A pinned pair that Windows no longer holds
 (`StalePin`) is said at start and when a device appears, and the device picker
 or Pair AirPods is offered; nothing is adopted by itself. Either card stays up
 until it is used. The paired list is given 5 seconds (a waiting budget), after
