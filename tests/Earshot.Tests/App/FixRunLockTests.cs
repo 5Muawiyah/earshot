@@ -202,6 +202,7 @@ public sealed class FixRunLockTests
             Assert.Inconclusive("The test build has no Earshot.exe beside the tests: " + exe);
         }
 
+        using var runtime = new RuntimeVariablesCleared();
         using var temp = new TempFolder();
         string root = temp.File("data");
         using var safe = new EnvironmentVariableScope(Paths.SafeModeVariable, "1");

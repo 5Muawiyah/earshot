@@ -216,6 +216,7 @@ public sealed class FixOfferTests
             Assert.Inconclusive("The test build has no Earshot.exe beside the tests: " + exe);
         }
 
+        using var runtime = new RuntimeVariablesCleared();
         using var temp = new TempFolder();
         using var ended = new ManualResetEventSlim();
         var launcher = new OwnProgramFixLauncher(() => ended.Set(), () => exe);

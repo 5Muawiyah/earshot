@@ -238,6 +238,7 @@ public sealed class FixRecheckTests
             Assert.Inconclusive("The test build has no Earshot.exe beside the tests: " + exe);
         }
 
+        using var runtime = new RuntimeVariablesCleared();
         using var temp = new TempFolder();
         using var safe = new EnvironmentVariableScope(Paths.SafeModeVariable, "1");
         using var root = new EnvironmentVariableScope(Paths.DataRootVariable, temp.File("data"));

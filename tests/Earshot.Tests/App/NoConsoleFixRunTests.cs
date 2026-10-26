@@ -26,6 +26,7 @@ public sealed class NoConsoleFixRunTests
             Assert.Inconclusive("The test build has no Earshot.exe beside the tests: " + exe);
         }
 
+        using var runtime = new RuntimeVariablesCleared();
         using var temp = new TempFolder();
         string personsLog = Path.Combine(temp.File("data"), "Local", "Earshot", "logs", "earshot.log");
         string logFile = personsLog;
