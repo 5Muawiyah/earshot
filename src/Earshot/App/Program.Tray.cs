@@ -351,22 +351,31 @@ internal static partial class Program
     }
 
     // The recorder for a Bluetooth trace. Not in safe mode or against a redirected data folder, where the elevated helper would
-    // refuse; and not when there is no program to elevate or no Documents folder to copy the trace to. Making it starts nothing.
-    // The installed copy is the one elevated when there is one, otherwise the running copy.
+    // refuse. Making it starts nothing. Only the installed copy is ever raised; with none, the recorder says to set up Earshot
+    // first and the trace is not offered. The trace is copied to %LOCALAPPDATA%\Earshot\traces, which folder backup does not
+    // upload, unlike Documents.
     internal static Tracing.ITraceRecorder? CreateTraceRecorder(Paths paths, ILog log)
     {
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(log);
-        string? executable = File.Exists(paths.InstalledExe) ? paths.InstalledExe : Environment.ProcessPath;
-        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        if (paths.IsSafeMode || paths.IsRedirected || string.IsNullOrEmpty(executable) || string.IsNullOrEmpty(documents))
+        if (paths.IsSafeMode || paths.IsRedirected)
         {
             return null;
         }
 
         return new Tracing.TraceRecorder(
-            new Tracing.TraceRecorderOptions(false, executable, documents, Environment.ProcessId, NewTraceNonce),
+            new Tracing.TraceRecorderOptions(false, InstalledCopy(paths, File.Exists), paths.UserTraceFolder, Environment.ProcessId, NewTraceNonce),
             new ShellRunasLauncher(), new Tracing.TrayTraceSignalsFactory(), new Tracing.TraceUserFiles(Path.Combine(paths.MachineFolder, "trace")), log);
+    }
+
+    // The one copy of Earshot an administrator prompt may raise: %ProgramFiles%\Earshot\Earshot.exe, read each time it is asked
+    // for, or null when it is not there. Never the running copy, which may sit in a folder a standard user can change.
+    internal static Func<string?> InstalledCopy(Paths paths, Func<string, bool> fileExists)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(fileExists);
+        string installed = paths.InstalledExe;
+        return () => fileExists(installed) ? installed : null;
     }
 
     // 32 lower-case hex characters, from a random source: the name the tray's signals and the helper's folder share.

@@ -15,6 +15,7 @@ internal sealed class FakeTraceMachine : ITraceMachine
     public string WprPath => @"C:\Windows\System32\wpr.exe";
     public string TraceFolder => @"C:\ProgramData\Earshot\trace";
     public bool FolderDeleted { get; private set; }
+    public string? DeleteFolderProblem { get; set; }
 
     public bool FileExists(string path) => path == WprPath ? WprThere : Files.ContainsKey(path);
 
@@ -42,16 +43,18 @@ internal sealed class FakeTraceMachine : ITraceMachine
         return Files.TryGetValue(path, out byte[]? b) ? b : null;
     }
 
-    public void DeleteFile(string path)
+    public string? DeleteFile(string path)
     {
         Calls.Add("delete " + Path.GetFileName(path));
         Files.Remove(path);
+        return null;
     }
 
-    public void DeleteRunFolder(string runFolder)
+    public string? DeleteRunFolder(string runFolder)
     {
         Calls.Add("delete folder");
-        FolderDeleted = true;
+        FolderDeleted = DeleteFolderProblem is null;
+        return DeleteFolderProblem;
     }
 
     public string? GrantRead(string path, int trayPid)
@@ -134,10 +137,10 @@ public sealed class TraceHelperTests
 
         Assert.AreEqual(TraceOutcome.Saved, outcome);
         Assert.AreEqual(3, runner.Calls.Count);
-        Assert.AreEqual("-cancel", runner.Calls[0]);
+        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[0]);
         StringAssert.StartsWith(runner.Calls[1], "-start ");
-        StringAssert.EndsWith(runner.Calls[1], @"BluetoothStack.wprp!BluetoothStack.Verbose -filemode");
-        Assert.AreEqual(@"-stop C:\ProgramData\Earshot\trace\" + Nonce + @"\bluetooth-20261025T143005Z.etl", runner.Calls[2]);
+        StringAssert.EndsWith(runner.Calls[1], @"BluetoothStack.wprp!BluetoothStack.Verbose -filemode -recordtempto C:\ProgramData\Earshot\trace\" + Nonce + " -instancename EarshotBluetoothTrace");
+        Assert.AreEqual(@"-stop C:\ProgramData\Earshot\trace\" + Nonce + @"\bluetooth-20261025T143005Z.etl -instancename EarshotBluetoothTrace", runner.Calls[2]);
         CollectionAssert.AreEqual(ExpectedSignalOrder, signals.Calls);
         Assert.IsTrue(machine.FolderDeleted);
     }
@@ -288,7 +291,7 @@ public sealed class TraceHelperTests
             : new ProcessRun(true, 0, false, "", null));
 
         Assert.AreEqual(TraceOutcome.StopFailed, outcome);
-        Assert.AreEqual("-cancel", runner.Calls[^1]);
+        Assert.AreEqual("-cancel -instancename EarshotBluetoothTrace", runner.Calls[^1]);
         CollectionAssert.Contains(signals.Calls, "done");
     }
 
@@ -328,6 +331,29 @@ public sealed class TraceHelperTests
         Assert.AreEqual(TraceOutcome.SavedInPlace, outcome);
         Assert.IsFalse(machine.FolderDeleted);
         Assert.IsTrue(log.Has(LogLevel.Warn, "access denied"));
+    }
+
+    [TestMethod]
+    public void AHelperCopyThatCouldNotBeDeletedIsReportedInTheResultAndTheLog()
+    {
+        var (outcome, _, _, _, log) = Run((m, _, _) => m.DeleteFolderProblem = "in use");
+
+        Assert.AreEqual(TraceOutcome.CopyKept, outcome);
+        Assert.AreEqual(ExitCodes.IoError, TraceHelper.ExitCodeFor(outcome));
+        Assert.IsTrue(log.Has(LogLevel.Warn, "in use"));
+    }
+
+    [TestMethod]
+    public void ARunFolderWithNoTraceInItThatStaysIsLoggedButIsNotACopyKept()
+    {
+        var (outcome, _, _, _, log) = Run((m, _, _) =>
+        {
+            m.WprThere = false;
+            m.DeleteFolderProblem = "in use";
+        });
+
+        Assert.AreEqual(TraceOutcome.WprMissing, outcome);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "in use"));
     }
 
     [TestMethod]

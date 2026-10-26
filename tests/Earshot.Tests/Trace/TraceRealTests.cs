@@ -40,7 +40,7 @@ public sealed class TraceRealTests
         using var folder = new TempFolder();
         string file = folder.File("x.etl");
         File.WriteAllText(file, "x");
-        var machine = new TraceMachine(Paths.FromEnvironment(n => n == Paths.DataRootVariable ? folder.Path : null), new Boot.Gate.NtfsFolderSecurity());
+        var machine = new TraceMachine(Paths.FromEnvironment(n => n == Paths.DataRootVariable ? folder.Path : null), new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
         string? problem = machine.GrantRead(file, Environment.ProcessId);
 
@@ -57,7 +57,7 @@ public sealed class TraceRealTests
         using var folder = new TempFolder();
         string outside = Path.Combine(folder.Path, "outside");
         Directory.CreateDirectory(outside);
-        var machine = new TraceMachine(Paths.FromEnvironment(n => n == Paths.DataRootVariable ? folder.Path : null), new Boot.Gate.NtfsFolderSecurity());
+        var machine = new TraceMachine(Paths.FromEnvironment(n => n == Paths.DataRootVariable ? folder.Path : null), new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
         machine.DeleteRunFolder(outside);
         machine.DeleteRunFolder(machine.TraceFolder);
@@ -176,7 +176,7 @@ public sealed class TraceRealTests
         var files = new TraceUserFiles(root.Path);
 
         Assert.IsTrue(TraceResultFile.TryParse(files.ReadResult(nonce), out _));
-        string destination = Path.Combine(root.Path, "Documents", "Earshot", "Bluetooth traces");
+        string destination = Path.Combine(root.Path, "Local", "Earshot", "traces");
         Assert.IsNull(files.Copy(nonce, "bluetooth-20261025T143005Z.etl", destination, out string copied));
         Assert.AreEqual("trace", File.ReadAllText(copied));
         Assert.IsNotNull(files.Copy(nonce, "bluetooth-20261025T143005Z.etl", destination, out _), "An existing file is not overwritten.");

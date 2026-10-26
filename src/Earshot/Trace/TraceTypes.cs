@@ -11,6 +11,10 @@ internal enum TraceOutcome
     // The trace is saved but stays in the administrators-only folder: the tray was gone, or the file could not be made readable.
     SavedInPlace,
 
+    // Helper side only, after the tray copied the trace: the helper's own copy in the administrators-only folder could not be
+    // deleted. The helper exits with ExitCodes.IoError and the tray says where that copy is.
+    CopyKept,
+
     Refused,
     WprMissing,
     ProfileChanged,
@@ -189,7 +193,13 @@ internal static class TraceCopy
     public const string StartButton = "Record a Bluetooth trace";
     public const string StopButton = "Stop";
     public const string Running = "Recording a Bluetooth trace. Try pairing now.";
-    public const string Saved = "Trace saved in Documents\\Earshot\\Bluetooth traces. It holds Bluetooth addresses and may hold pairing keys, so share it only with someone you trust. Earshot never sends it anywhere.";
+    // Shown before anything is asked or recorded, with the button that starts the recording.
+    public const string Note = "A Bluetooth trace holds the Bluetooth addresses of your devices and may hold pairing keys. Earshot never sends it anywhere. Share it only with someone you trust, and delete it when you're done.";
+    public const string NoteButton = "Record";
+    public const string SetUpFirst = "Set up Earshot first, then record a Bluetooth trace.";
+    public const string AdminCopyKept = "Earshot's own copy could not be deleted. It is in the Earshot\\trace folder under ProgramData, which only administrators can open.";
+
+    public static string SavedIn(string folder) => "Trace saved in " + folder + ". Delete it when you're done.";
     public const string WprMissing = "Windows Performance Recorder isn't on this PC.";
     public const string Declined = "The Windows prompt was declined, so no trace was recorded.";
     public const string SafeMode = "A Bluetooth trace can't be recorded in safe mode.";

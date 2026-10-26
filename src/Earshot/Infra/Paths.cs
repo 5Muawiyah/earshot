@@ -5,7 +5,7 @@ namespace Earshot.Infra;
 // Every folder and file Earshot reads or writes.
 //
 //   RoamingFolder   %APPDATA%\Earshot                user settings (tray only)
-//   LocalFolder     %LOCALAPPDATA%\Earshot           logs and live-test evidence
+//   LocalFolder     %LOCALAPPDATA%\Earshot           logs, live-test evidence and saved Bluetooth traces
 //   MachineFolder   %ProgramData%\Earshot            gate config, device identity, status files
 //   InstallFolder   %ProgramFiles%\Earshot           installed binaries
 //
@@ -68,6 +68,10 @@ internal sealed class Paths
     public string ProtectionRecordFile => Path.Combine(MachineFolder, "protection.json");
 
     public string InstalledExe => Path.Combine(InstallFolder, "Earshot.exe");
+
+    // Where Record a Bluetooth trace leaves the person's copy of a trace: %LOCALAPPDATA%\Earshot\traces. Local, so no folder
+    // backup uploads it (Documents can be uploaded), and per user.
+    public string UserTraceFolder => Path.Combine(LocalFolder, "traces");
 
     // The widget's folder, %LOCALAPPDATA%\Earshot\widget, or under EARSHOT_DATA_ROOT when redirected. What an older
     // build kept there (a claim, a proof and set-up records) is no longer read or written by anything; Repair and an

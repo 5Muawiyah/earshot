@@ -152,6 +152,17 @@ public sealed class PathsTests
         }
     }
 
+    // A saved Bluetooth trace stays in the local profile, which folder backup does not upload, never in Documents.
+    [TestMethod]
+    public void ASavedTraceGoesToTheLocalFolderNotDocuments()
+    {
+        Paths paths = Paths.FromEnvironment(Env());
+        string documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments, Environment.SpecialFolderOption.DoNotVerify);
+
+        Assert.AreEqual(Path.Combine(paths.LocalFolder, "traces"), paths.UserTraceFolder);
+        Assert.IsFalse(paths.UserTraceFolder.StartsWith(documents, StringComparison.OrdinalIgnoreCase));
+    }
+
     // A folder Windows reports that is not fully qualified would put a path under the working directory.
     [TestMethod]
     [DataRow("Users\\me\\AppData")]

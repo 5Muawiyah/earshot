@@ -34,7 +34,7 @@ internal static partial class Program
             ctx.ExitCode = RunTrace(ctx.Args, log, request =>
             {
                 using var signals = new TraceSignals(request);
-                return TraceHelper.Run(request, new TraceMachine(paths, new NtfsFolderSecurity()), signals, new WindowsProcessRunner(), log, () => DateTime.UtcNow);
+                return TraceHelper.Run(request, new TraceMachine(paths, new NtfsFolderSecurity(), log), signals, new WindowsProcessRunner(), log, () => DateTime.UtcNow);
             }, WindowsProcessToken.Current());
         }
         finally

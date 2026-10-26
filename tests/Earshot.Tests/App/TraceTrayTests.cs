@@ -28,6 +28,8 @@ internal sealed class FakeTraceRecorder : ITraceRecorder
 
     public string? Notice { get; set; }
 
+    public bool NeedsSetUp { get; set; }
+
     public Task<TraceResult> RecordAsync(CancellationToken ct)
     {
         Recorded++;
@@ -79,7 +81,18 @@ public sealed class TraceTrayTests
         }
     }
 
-    private static readonly TraceResult Saved = new(TraceOutcome.Saved, TraceCopy.Saved, @"C:\Users\Someone\Documents\Earshot\Bluetooth traces", null);
+    private const string Folder = @"C:\Users\Someone\AppData\Local\Earshot\traces";
+    private static readonly TraceResult Saved = new(TraceOutcome.Saved, TraceCopy.SavedIn(Folder), Folder, null);
+
+    // The note every way in shows first. Nothing is asked of the recorder until its Record button is pressed.
+    private static void PressRecordOnTheNote(TrayHarness tray, FakeTraceRecorder recorder)
+    {
+        WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Note), "the note");
+        CardContent note = tray.Cards.Shown.Last(c => c.Content.Status == TraceCopy.Note).Content;
+        Assert.AreEqual(TraceCopy.NoteButton, note.Action?.Label);
+        Assert.AreEqual(0, recorder.Recorded, "Nothing is recorded before the note's button is pressed.");
+        note.Action!.OnClick();
+    }
 
     [TestMethod]
     public void TheSettingsRowStartsARecordingShowsStopWhileItRunsAndTheSavedLineAtTheEnd()
@@ -90,6 +103,7 @@ public sealed class TraceTrayTests
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
 
             tray.Context.RecordTraceFromSettings();
+            PressRecordOnTheNote(tray, recorder);
             Assert.AreEqual(1, recorder.Recorded);
 
             recorder.BeginRecording();
@@ -102,7 +116,7 @@ public sealed class TraceTrayTests
             Assert.AreEqual(1, recorder.Stopped);
 
             recorder.Finish(Saved);
-            WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Saved), "the saved card");
+            WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.SavedIn(Folder)), "the saved card");
         });
     }
 
@@ -114,6 +128,7 @@ public sealed class TraceTrayTests
             var recorder = new FakeTraceRecorder();
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
             tray.Context.RecordTraceFromSettings();
+            PressRecordOnTheNote(tray, recorder);
             recorder.BeginRecording();
             WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Running), "the running card");
 
@@ -200,8 +215,97 @@ public sealed class TraceTrayTests
 
             card.Action!.OnClick();
             tray.PumpUntilIdle();
+            PressRecordOnTheNote(tray, recorder);
+            tray.PumpUntilIdle();
 
             Assert.AreEqual(1, recorder.Recorded);
+        });
+    }
+
+    [TestMethod]
+    public void TheNoteIsShownFirstAndClosingItRecordsNothing()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+
+            tray.Context.RecordTraceFromSettings();
+            tray.PumpUntilIdle();
+
+            CardContent note = tray.Cards.Shown[^1].Content;
+            Assert.AreEqual(TraceCopy.Note, note.Status);
+            StringAssert.Contains(note.Status, "Bluetooth addresses");
+            StringAssert.Contains(note.Status, "pairing keys");
+            StringAssert.Contains(note.Status, "never sends it");
+            StringAssert.Contains(note.Status, "delete it");
+            Assert.AreEqual(0, recorder.Recorded);
+        });
+    }
+
+    [TestMethod]
+    public void WithNoInstalledCopyTheRowSaysToSetUpFirstAndNothingIsAsked()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder { NeedsSetUp = true };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+
+            tray.Context.RecordTraceFromSettings();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(TraceCopy.SetUpFirst, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Note));
+            Assert.AreEqual(0, recorder.Recorded);
+        });
+    }
+
+    [TestMethod]
+    public void AFixResultThatAsksForATraceShowsTheSameNote()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+
+            tray.Context.RecordTraceFromFixResult();
+            PressRecordOnTheNote(tray, recorder);
+
+            Assert.AreEqual(1, recorder.Recorded);
+        });
+    }
+
+    // With no installed copy the unreachable card says its line and offers no trace button.
+    [TestMethod]
+    public void ThePairingCardOffersNoTraceButtonWithoutAnInstalledCopy()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("no-name", "", FixRig.NewAirPodsAddress, true, 6, null)));
+            rig.Pairing.PairResult = new PairingCallResult("HardwareFailure", PairReasons.HardwareFailure, false, null);
+            rig.Prompter.SayOk();
+            var recorder = new FakeTraceRecorder { NeedsSetUp = true };
+            var services = new PairAirPodsServices
+            {
+                Api = rig.Pairing,
+                Nodes = rig.Nodes,
+                Prompter = rig.Prompter,
+                UiFactory = _ => rig.Ui,
+                Radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok)),
+                Options = rig.Host().Options,
+                LockName = @"Local\Earshot.Tests.Trace." + Guid.NewGuid().ToString("N"),
+            };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: services, traceRecorder: recorder);
+            tray.Cards.Shown.Clear();
+
+            tray.Context.Menu.Refresh();
+            tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            tray.PumpUntilIdle();
+
+            CardContent card = tray.Cards.Shown[^1].Content;
+            Assert.AreEqual(RadioLines.Unreachable, card.Status);
+            Assert.IsNull(card.Action);
         });
     }
 }

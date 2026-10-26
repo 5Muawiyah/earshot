@@ -5,10 +5,12 @@ using Earshot.Tray;
 
 namespace Earshot.App;
 
-// Record a Bluetooth trace, from the settings page and from the card that says the AirPods could not be reached. The recorder
-// (package: Trace) asks for one administrator prompt, records until Stop, copies the trace to Documents and opens the folder; the
-// tray only asks for it, shows that it is running with a Stop button, and says how it ended. Nothing is sent anywhere. Not
-// offered in safe mode. A trace changes no device, service or pairing.
+// Record a Bluetooth trace, from the settings page, from the card that says the AirPods could not be reached, and from a Fix
+// connection result that points at this PC's Bluetooth (TraceRequestSignal). Each starts the same way: the note about what a
+// trace holds is shown first, and only its Record button goes on. The recorder (package: Trace) then asks for one administrator
+// prompt, raising only the installed copy, records until Stop, copies the trace to %LOCALAPPDATA%\Earshot\traces and opens the
+// folder; the tray shows that it is running with a Stop button, and says how it ended. Nothing is sent anywhere. Not offered in
+// safe mode, and with no installed copy the row says to set up Earshot first. A trace changes no device, service or pairing.
 internal sealed partial class TrayContext
 {
     private ITraceRecorder? _traceRecorder;
@@ -66,7 +68,18 @@ internal sealed partial class TrayContext
         StartTrace(CardPlace.NearTray);
     }
 
-    // Asking while a recording runs stops it: the row and the button are the same switch.
+    // A Fix connection run's result window asked for a trace. The same note and button as the row.
+    internal void RecordTraceFromFixResult()
+    {
+        _log.Info("Bluetooth trace: asked for from a Fix connection result.");
+        StartTrace(CardPlace.NearTray);
+    }
+
+    // Whether the card may offer the trace button: a recorder, not safe mode, and an installed copy to raise.
+    private bool TraceOffered => _traceRecorder is { NeedsSetUp: false } && !_registry.SafeMode;
+
+    // Asking while a recording runs stops it: the row and the button are the same switch. Otherwise the note is shown, and the
+    // recording starts only from its button.
     private void StartTrace(CardPlace place)
     {
         if (_closing)
@@ -95,6 +108,26 @@ internal sealed partial class TrayContext
             return;
         }
 
+        if (recorder.NeedsSetUp)
+        {
+            _log.Info("Bluetooth trace: Earshot is not set up, so there is no installed copy to raise.");
+            ShowCard(TrayStatus.AppName, TraceCopy.SetUpFirst, place);
+            return;
+        }
+
+        ShowCardWithButton(TrayStatus.AppName, TraceCopy.Note, TraceCopy.NoteButton, () => BeginTrace(place), place);
+    }
+
+    // The note's Record button. Everything is asked again, because the card may have stayed up while things changed.
+    private void BeginTrace(CardPlace place)
+    {
+        if (_closing || _registry.SafeMode || _traceRecorder is not { State: TraceState.Idle, NeedsSetUp: false } recorder)
+        {
+            _log.Info("Bluetooth trace: the note's button was pressed when a recording could not start, so nothing was asked.");
+            return;
+        }
+
+        _log.Info("Bluetooth trace: the note was read and Record pressed.");
         _tracePlace = place;
 
         // Not through Launch: a recording runs for as long as the person likes (ten minutes at most) and Exit must not wait for it.

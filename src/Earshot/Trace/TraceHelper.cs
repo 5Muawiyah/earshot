@@ -15,17 +15,21 @@ internal interface ITraceMachine
     bool FileExists(string path);
 
     // Makes the trace folder (administrators and SYSTEM write, others read) and, inside it, a new folder for this run that
-    // only administrators and SYSTEM can open. Null when both exist; otherwise why not.
+    // only administrators and SYSTEM can open. The machine folder and the trace folder are read back and must pass the
+    // machine folder's check, and no folder on the way may be a reparse point. Null when all hold; otherwise why not.
     string? PrepareRunFolder(string nonce, out string runFolder);
 
     // Null when written; otherwise why not.
     string? WriteFile(string path, byte[] bytes);
 
+    // Null when read; a failure is logged with its code.
     byte[]? ReadFile(string path);
 
-    void DeleteFile(string path);
+    // Null when deleted; otherwise why not, which is logged too.
+    string? DeleteFile(string path);
 
-    void DeleteRunFolder(string runFolder);
+    // Null when deleted; otherwise why not, which is logged too. Only a folder inside the trace folder is ever deleted.
+    string? DeleteRunFolder(string runFolder);
 
     // Gives the user who runs the tray read access to one file. Null when done; otherwise why not.
     string? GrantRead(string path, int trayPid);
@@ -125,10 +129,16 @@ internal static class TraceHelper
             return outcome;
         }
 
-        // The tray reads the result, copies the file if there is one, and says so. Only then is the run folder deleted.
+        // The tray reads the result, copies the file if there is one, and says so. Only then is the run folder deleted. A folder
+        // that stays holds a copy of the trace, so the run ends with its own exit code and the tray tells the person.
         if (signals.WaitCopied(CopyWait))
         {
-            machine.DeleteRunFolder(runFolder);
+            string? deleteProblem = machine.DeleteRunFolder(runFolder);
+            if (deleteProblem is not null)
+            {
+                log.Warn("trace: the run folder was not deleted: " + deleteProblem);
+                return fileName.Length > 0 ? TraceOutcome.CopyKept : outcome;
+            }
         }
         else
         {
@@ -175,8 +185,9 @@ internal static class TraceHelper
             return TraceOutcome.WprMissing;
         }
 
-        // A session an earlier helper left behind would make -start fail. "No trace running" is the normal answer, so the
-        // code is recorded and nothing is concluded from it.
+        // A session an earlier helper left behind would make -start fail. The cancel names Earshot's own instance, so it cannot
+        // end another program's recording. "No trace running" is the normal answer, so the code is recorded and nothing is
+        // concluded from it.
         ProcessRun cancel = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
         log.Info("trace: wpr -cancel " + Describe(cancel));
 
@@ -187,12 +198,12 @@ internal static class TraceHelper
             log.Warn("trace: the marker could not be written: " + marker);
         }
 
-        ProcessRun start = runner.Run(machine.WprPath, WprCommand.Start(profilePath), StartLimit);
+        ProcessRun start = runner.Run(machine.WprPath, WprCommand.Start(profilePath, runFolder), StartLimit);
         if (!Succeeded(start))
         {
             wprCode = start.ExitCode;
             log.Warn("trace: wpr -start failed: " + Describe(start));
-            machine.DeleteFile(markerPath);
+            _ = machine.DeleteFile(markerPath);
             return TraceOutcome.StartFailed;
         }
 
@@ -211,13 +222,13 @@ internal static class TraceHelper
             // A session that would not save must not be left recording.
             ProcessRun cancelAfter = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
             log.Info("trace: wpr -cancel after the failed stop " + Describe(cancelAfter));
-            machine.DeleteFile(markerPath);
+            _ = machine.DeleteFile(markerPath);
             fileName = "";
             return TraceOutcome.StopFailed;
         }
 
         wprCode = stop.ExitCode;
-        machine.DeleteFile(markerPath);
+        _ = machine.DeleteFile(markerPath);
         log.Info("trace: wpr -stop " + Describe(stop));
 
         string? grant = machine.GrantRead(etlPath, request.TrayPid);
@@ -240,6 +251,7 @@ internal static class TraceHelper
     public static int ExitCodeFor(TraceOutcome outcome) => outcome switch
     {
         TraceOutcome.Saved or TraceOutcome.SavedInPlace => ExitCodes.Ok,
+        TraceOutcome.CopyKept => ExitCodes.IoError,
         TraceOutcome.Refused => ExitCodes.Refused,
         TraceOutcome.WprMissing => ExitCodes.Unavailable,
         _ => ExitCodes.Software,

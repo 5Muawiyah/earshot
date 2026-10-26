@@ -174,7 +174,7 @@ internal sealed partial class TrayContext
             case RadioAction.BluetoothSettings:
                 ShowCardWithButton(TrayStatus.AppName, line, RadioLines.BluetoothSettingsButton, () => Launch("open bluetooth settings", () => OpenBluetoothSettingsAsync(place), place), place);
                 break;
-            case RadioAction.RecordTrace when _traceRecorder is not null && !_registry.SafeMode:
+            case RadioAction.RecordTrace when TraceOffered:
                 ShowCardWithButton(TrayStatus.AppName, line, RadioLines.RecordTraceButton, () => StartTrace(place), place);
                 break;
             default:

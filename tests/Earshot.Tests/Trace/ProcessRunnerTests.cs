@@ -25,6 +25,25 @@ public sealed class ProcessRunnerTests
         Assert.IsTrue(run.Output.Contains("wpr", StringComparison.OrdinalIgnoreCase), "Output was: " + run.Output);
     }
 
+    // The two options the helper's command lines rely on, read from this Windows's own wpr.exe: the start help names both.
+    // https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options
+    [TestMethod]
+    public void ThisWindowsWprKnowsTheRecordFolderAndInstanceNameOptions()
+    {
+        string wpr = System32("wpr.exe");
+        if (!File.Exists(wpr))
+        {
+            Assert.Inconclusive("wpr.exe is not on this PC.");
+        }
+
+        ProcessRun run = new WindowsProcessRunner().Run(wpr, ["-help", "start"], TimeSpan.FromSeconds(30));
+
+        Assert.IsTrue(run.Started, run.Problem);
+        Assert.IsFalse(run.TimedOut);
+        StringAssert.Contains(run.Output, "-recordtempto", "Output was: " + run.Output);
+        StringAssert.Contains(run.Output, "-instancename", "Output was: " + run.Output);
+    }
+
     [TestMethod]
     public void TheRealLauncherReturnsAProgramsExitCode()
     {
