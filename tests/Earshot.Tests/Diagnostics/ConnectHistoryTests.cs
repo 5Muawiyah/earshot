@@ -144,6 +144,30 @@ public sealed class ConnectHistoryTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "could not be written"));
     }
 
+    // An append whose temp file was written but could not take the history's place (here a read-only history file) removes the
+    // temp file, so failed appends leave nothing beside the history.
+    [TestMethod]
+    public void AFailedAppendLeavesNoTempFileBehind()
+    {
+        using var temp = new TempFolder();
+        var time = new ManualTime();
+        string path = Path.Combine(temp.Path, "connect-history.jsonl");
+        var history = new ConnectHistory(path, time, new CapturingLog());
+        Assert.IsTrue(history.Append(Entry(time.GetUtcNow())).Ok);
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+        try
+        {
+            StepOutcome written = history.Append(Entry(time.GetUtcNow()));
+
+            Assert.IsFalse(written.Ok);
+            Assert.IsEmpty(Directory.GetFiles(temp.Path, "*.tmp"));
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+    }
+
     [TestMethod]
     public void ALineThatIsNotValidIsSkippedAndLogged()
     {

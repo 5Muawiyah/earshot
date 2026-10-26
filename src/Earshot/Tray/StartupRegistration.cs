@@ -98,10 +98,12 @@ internal sealed class StartupRegistration
     private readonly string? _installedExePath;
     private readonly Func<string, bool> _fileExists;
     private readonly Func<string, bool> _folderExists;
+    private readonly Func<bool> _isElevated;
 
     public StartupRegistration(
         IStartupRegistry registry, ILog log, bool safeMode, string? exePath, bool redirected = false,
-        string? installedExePath = null, Func<string, bool>? fileExists = null, Func<string, bool>? folderExists = null)
+        string? installedExePath = null, Func<string, bool>? fileExists = null, Func<string, bool>? folderExists = null,
+        Func<bool>? isElevated = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(log);
@@ -113,6 +115,7 @@ internal sealed class StartupRegistration
         _installedExePath = installedExePath;
         _fileExists = fileExists ?? File.Exists;
         _folderExists = folderExists ?? Directory.Exists;
+        _isElevated = isElevated ?? (() => Environment.IsPrivilegedProcess);
     }
 
     // The file the Run value starts: the installed copy when there is one, otherwise this copy, and nothing at all when
@@ -361,7 +364,7 @@ internal sealed class StartupRegistration
             "; " + WriterLine + ".");
     }
 
-    internal static string WriterLine => Environment.IsPrivilegedProcess ? "written by an elevated process" : "written by a process that is not elevated";
+    private string WriterLine => _isElevated() ? "written by an elevated process" : "written by a process that is not elevated";
 
     private ControllerResult Failed(string action, Exception ex)
     {

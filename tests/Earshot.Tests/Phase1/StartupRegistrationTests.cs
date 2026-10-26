@@ -29,9 +29,20 @@ public sealed class StartupRegistrationTests
         Assert.IsTrue(Create(registry, log).Apply(true).IsSuccess);
 
         Assert.IsTrue(log.Has(LogLevel.Info, "read back after the write: " + Command), string.Join(" | ", log.Entries.Select(e => e.Message)));
-        // Whether the writer was elevated, the one thing that tells a write into another account's HKCU apart.
-        string writer = Environment.IsPrivilegedProcess ? "written by an elevated process" : "written by a process that is not elevated";
-        Assert.IsTrue(log.Has(LogLevel.Info, Command + "; " + writer + "."), string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
+    // Whether the writer was elevated, the one thing that tells a write into another account's HKCU apart, is on the line.
+    [TestMethod]
+    [DataRow(true, "written by an elevated process")]
+    [DataRow(false, "written by a process that is not elevated")]
+    public void TheReadBackLineSaysWhetherTheWriterWasElevated(bool elevated, string words)
+    {
+        var registry = new FakeStartupRegistry();
+        var log = new CapturingLog();
+
+        Assert.IsTrue(new StartupRegistration(registry, log, false, ExePath, isElevated: () => elevated).Apply(true).IsSuccess);
+
+        Assert.IsTrue(log.Has(LogLevel.Info, "read back after the write: " + Command + "; " + words + "."), string.Join(" | ", log.Entries.Select(e => e.Message)));
     }
 
     [TestMethod]

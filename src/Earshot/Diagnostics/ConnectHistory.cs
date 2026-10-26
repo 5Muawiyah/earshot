@@ -228,6 +228,7 @@ internal sealed class ConnectHistory
 
     private StepOutcome AppendLocked(ConnectHistoryEntry entry)
     {
+        string temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             string? folder = System.IO.Path.GetDirectoryName(_path);
@@ -243,18 +244,37 @@ internal sealed class ConnectHistory
                 lines.RemoveAt(0);
             }
 
-            string temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllLines(temp, lines, new UTF8Encoding(false));
             File.Move(temp, _path, overwrite: true);
             return StepOutcomes.FromWin32("connect-history", 0, "written");
         }
         catch (IOException ex)
         {
+            DeleteTemp(temp);
             return Failed(ex);
         }
         catch (UnauthorizedAccessException ex)
         {
+            DeleteTemp(temp);
             return Failed(ex);
+        }
+    }
+
+    // A temp file a failed append left is removed, so failures do not pile files up beside the history. A delete that fails is
+    // logged with its code; the append's own failure is what is returned.
+    private void DeleteTemp(string temp)
+    {
+        try
+        {
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.Warn("The connect history's temp file could not be deleted (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ").");
         }
     }
 

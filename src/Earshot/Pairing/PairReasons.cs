@@ -62,8 +62,8 @@ internal static class PairReasons
             Paired or AlreadyPaired => PairedLine,
             NotReadyToPair => "Windows says the AirPods aren't ready to pair. Put the case in pairing mode and try again.",
             NotPaired => "Windows didn't pair the AirPods.",
-            ConnectionRejected => "The AirPods turned down the connection.",
-            TooManyConnections => "The AirPods can't take another connection right now.",
+            ConnectionRejected => "The device turned down the connection.",
+            TooManyConnections => "The device can't take another connection right now.",
             HardwareFailure => "Windows reports a hardware failure.",
             AuthenticationTimeout => "Pairing took too long and stopped.",
             AuthenticationNotAllowed or ProtectionLevelCouldNotBeMet or InvalidCeremonyData or RequiredHandlerNotRegistered =>
@@ -73,7 +73,7 @@ internal static class PairReasons
             AccessDenied => "Windows didn't allow Earshot to pair.",
             PairingCanceled or RejectedByHandler => "Pairing was cancelled.",
             OperationAlreadyInProgress => "Windows is already pairing a device. Try again in a moment.",
-            RemoteDeviceHasAssociation => "Windows says the AirPods are already set up with something else.",
+            RemoteDeviceHasAssociation => "Windows says the device is already set up with something else.",
             _ => "Windows couldn't pair the AirPods (code " + number + ").",
         };
     }

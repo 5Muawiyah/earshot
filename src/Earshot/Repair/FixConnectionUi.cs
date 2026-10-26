@@ -17,7 +17,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     private Label? _label;
 
     // Runs work on the window's own thread, waiting for it; at once when already there or when there is no context to send to.
-    private T OnUi<T>(Func<T> work)
+    internal T OnUi<T>(Func<T> work)
     {
         if (_ui is null || Environment.CurrentManagedThreadId == _uiThread)
         {

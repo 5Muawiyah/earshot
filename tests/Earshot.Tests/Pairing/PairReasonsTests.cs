@@ -22,8 +22,8 @@ public sealed class PairReasonsTests
             [1] = "Windows says the AirPods aren't ready to pair. Put the case in pairing mode and try again.",
             [2] = "Windows didn't pair the AirPods.",
             [3] = "Paired.",
-            [4] = "The AirPods turned down the connection.",
-            [5] = "The AirPods can't take another connection right now.",
+            [4] = "The device turned down the connection.",
+            [5] = "The device can't take another connection right now.",
             [6] = "Windows reports a hardware failure.",
             [7] = "Pairing took too long and stopped.",
             [8] = "Windows couldn't complete the pairing (code 8).",
@@ -36,7 +36,7 @@ public sealed class PairReasonsTests
             [15] = "Windows is already pairing a device. Try again in a moment.",
             [16] = "Windows couldn't complete the pairing (code 16).",
             [17] = "Pairing was cancelled.",
-            [18] = "Windows says the AirPods are already set up with something else.",
+            [18] = "Windows says the device is already set up with something else.",
             [19] = "Windows couldn't pair the AirPods (code 19).",
         };
 
