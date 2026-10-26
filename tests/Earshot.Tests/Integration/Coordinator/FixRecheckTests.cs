@@ -86,6 +86,29 @@ public sealed class FixRecheckTests
         Assert.AreEqual(2, h.ProtectionScan.Reads);
     }
 
+    // A "not protected" card Windows held back (quiet time at sign-in) was not seen, so the once-per-run rule does not count it: the
+    // next check offers it again. Before, the card was counted as shown when it was asked for.
+    [TestMethod]
+    public void ANotProtectedCardHeldBackIsOfferedAgainAtTheNextCheck()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        h.Cards.HoldBackNearTray = true;
+        h.Start();
+        Assert.AreEqual(1, h.Cards.HeldBack.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+
+        h.Cards.HoldBackNearTray = false;
+        DeviceSnapshot before = Devices.Idle(2);
+        h.Monitor.Publish(before with { AllGroups = [.. before.AllGroups, new DeviceModel(Guid.NewGuid(), "AirPods", ConnectionState.Disconnected, [])] });
+        h.Pump();
+        h.Advance(BlockCoordinator.NewDeviceSettle);
+
+        Assert.AreEqual(2, h.ProtectionScan.Reads);
+        Assert.AreEqual(1, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+    }
+
     // The tray looks at whether the pinned pair is still paired when a new device group arrives. When that look found a stale pin and
     // told the person, the check for unprotected AirPods does not add a second card about the same pair.
     [TestMethod]

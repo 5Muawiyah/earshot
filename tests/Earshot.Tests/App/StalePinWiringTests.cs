@@ -185,6 +185,48 @@ public sealed class StalePinWiringTests
         });
     }
 
+    // The radio's card is held back the same way: at sign-in in quiet time with Bluetooth off, the start look saw nothing, so the
+    // coordinator's check still runs. Before, the radio card was shown without asking whether it was put on screen.
+    [TestMethod]
+    public void ARadioCardHeldBackAtStartLetsTheCoordinatorsCheckRun()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(), pairAirPods: Services(rig, radio: RadioCheckState.Off), settings: PinTheRigsPair,
+                arrange: h => h.Cards.HoldBackNearTray = true,
+                coordinatorServices: new CoordinatorServices { Protection = protection });
+            TrayHarness.PumpUntil(() => protection.Reads > 0, "The coordinator's check did not run after the held-back radio card.");
+
+            Assert.IsTrue(tray.Cards.HeldBack.Any(c => c.Content.Status == RadioLines.Off));
+        });
+    }
+
+    // A new device group whose look's card was held back has not told the person anything, so the coordinator's check is not
+    // silenced. Before, the hook answered for the new device whatever became of its card.
+    [TestMethod]
+    public void ANewDeviceLookWhoseCardWasHeldBackDoesNotSilenceTheCoordinator()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            AddASecondPairedPair(rig);
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig), settings: PinTheRigsPair);
+            tray.PumpUntilIdle();
+            tray.Cards.HoldBackNearTray = true;
+
+            Task<bool> answered = tray.Coordinator.NewDeviceHook!(CancellationToken.None);
+            TrayHarness.PumpUntil(() => answered.IsCompleted, "The new device's look did not end.");
+
+            Assert.IsTrue(tray.Cards.HeldBack.Any(c => c.Content.Status == PairAirPodsText.StaleChosen));
+            Assert.IsFalse(answered.Result, "A card nobody saw does not answer for the new device.");
+        });
+    }
+
     [TestMethod]
     public void ANoAirPodsCardHeldBackIsOfferedAgainAtTheNextLook()
     {

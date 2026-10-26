@@ -71,7 +71,18 @@ internal sealed partial class TrayContext
         {
             // A pair made or removed in Windows arrives as a new device group. A Pair AirPods that runs (its first question up, the
             // flag not yet raised) answers for the pairs itself.
-            _coordinator.NewDeviceHook = async _ => KeptThePinnedPairJustNow() || !await CheckPinnedPairAsync("new device", CardPlace.NearTray) || _elevatedRun == PairRun;
+            // A card Windows held back has told nobody anything, so it does not answer for the new device.
+            _coordinator.NewDeviceHook = async _ =>
+            {
+                if (KeptThePinnedPairJustNow())
+                {
+                    return true;
+                }
+
+                var cards = new PinLookCards();
+                bool showedNothing = await CheckPinnedPairAsync("new device", CardPlace.NearTray, cards: cards);
+                return (!showedNothing && !cards.Held) || _elevatedRun == PairRun;
+            };
             _coordinator.StartLookHook = () => _startLookShown?.Task ?? Task.FromResult(false);
         }
 
@@ -158,15 +169,16 @@ internal sealed partial class TrayContext
             Launch("check the pinned pair", async () =>
             {
                 bool showedNothing = true;
+                var cards = new PinLookCards();
                 try
                 {
-                    showedNothing = await CheckPinnedPairAsync(reason, CardPlace.NearTray);
+                    showedNothing = await CheckPinnedPairAsync(reason, CardPlace.NearTray, cards: cards);
                 }
                 finally
                 {
                     // A card Windows held back (quiet time, a full-screen app at sign-in) was not seen, so it does not answer for
                     // the pairs.
-                    shown.TrySetResult(!showedNothing && !_pinLookCardHeld);
+                    shown.TrySetResult(!showedNothing && !cards.Held);
                 }
             }, CardPlace.NearTray);
             return;
@@ -342,9 +354,11 @@ internal sealed partial class TrayContext
     // paired at all offers Pair AirPods too (once per run, unless the person has just asked for something that needs a pair).
     // https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.bluetoothdevice.getdeviceselectorfrompairingstate
     // token: the caller's own (a connect's), so a press that supersedes it ends this look too; otherwise Earshot's lifetime.
-    private async Task<bool> CheckPinnedPairAsync(string reason, CardPlace place, CancellationToken? token = null)
+    // cards: told when this look's card was held back by Windows, for a caller that counts only a card that was seen.
+    private async Task<bool> CheckPinnedPairAsync(string reason, CardPlace place, CancellationToken? token = null, PinLookCards? cards = null)
     {
         CancellationToken ct = token ?? _lifetime.Token;
+        cards ??= new PinLookCards();
         if (_closing || _pairServices is not { } services || _registry.SafeMode)
         {
             return true;
@@ -358,7 +372,6 @@ internal sealed partial class TrayContext
             return true;
         }
 
-        _pinLookCardHeld = false;
         EarshotSettings settings = _registry.Settings.Current;
         StalePinResult result;
         try
@@ -401,7 +414,7 @@ internal sealed partial class TrayContext
                 bool nonePaired = found.Listed && !found.Candidates.Any(c => c.DevicePresent);
                 if (nonePaired)
                 {
-                    switch (await RadioExplainsAsync(reason, place, ct))
+                    switch (await RadioExplainsAsync(reason, place, cards, ct))
                     {
                         case RadioSays.Shown:
                             return false;
@@ -411,14 +424,14 @@ internal sealed partial class TrayContext
                             return RadioStopped();
                     }
 
-                    await OfferPairAirPodsAsync(place, force: reason == "setup");
+                    await OfferPairAirPodsAsync(place, cards, force: reason == "setup");
                 }
 
                 return !nonePaired;
             }
 
             case StalePinState.Stale:
-                switch (await RadioExplainsAsync(reason, place, ct))
+                switch (await RadioExplainsAsync(reason, place, cards, ct))
                 {
                     case RadioSays.Shown:
                         return false;
@@ -432,13 +445,13 @@ internal sealed partial class TrayContext
                 _widgetStatus?.ForgetPair("the pinned AirPods are no longer paired");
                 if (result.Others.Count == 0)
                 {
-                    await OfferPairAirPodsAsync(place, force: true);
+                    await OfferPairAirPodsAsync(place, cards, force: true);
                 }
                 else
                 {
                     // Stays up until it is used: it is often shown at sign-in, and until a pair is chosen none is protected.
                     await ShowStayingCardAsync(
-                        PairAirPodsText.StaleChosen, PairAirPodsText.ChooseButton, () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
+                        PairAirPodsText.StaleChosen, PairAirPodsText.ChooseButton, () => Launch("choose device", () => ChooseDeviceAsync(place), place), place, cards);
                 }
 
                 return false;
@@ -491,7 +504,7 @@ internal sealed partial class TrayContext
     // No pinned pair in the paired list, or no AirPods in the tree, is also what a PC whose Bluetooth is off, disabled or missing
     // shows. The radio is read first (its own budget is a second): a state of the PC's own Bluetooth shows the radio's line and
     // button instead, and nothing kept for the pinned pair is dropped.
-    private async Task<RadioSays> RadioExplainsAsync(string reason, CardPlace place, CancellationToken ct)
+    private async Task<RadioSays> RadioExplainsAsync(string reason, CardPlace place, PinLookCards cards, CancellationToken ct)
     {
         if (_pairServices?.Radio is not { } radio)
         {
@@ -526,7 +539,12 @@ internal sealed partial class TrayContext
             return RadioSays.Nothing;
         }
 
-        ShowRadioCard(result, place);
+        if (!await ShowRadioCardAsync(result, place))
+        {
+            cards.Held = true;
+            _log.Info("Pairing check (" + reason + "): the radio's card was held back by Windows.");
+        }
+
         return RadioSays.Shown;
     }
 
@@ -566,24 +584,48 @@ internal sealed partial class TrayContext
     // The radio's line, and its button when it has one.
     private void ShowRadioCard(RadioCheckResult radio, CardPlace place)
     {
-        string line = radio.Line ?? "";
-        switch (radio.Action)
+        if (_closing || _closed)
         {
-            case RadioAction.BluetoothSettings:
-                ShowCardWithButton(TrayStatus.AppName, line, RadioLines.BluetoothSettingsButton, () => Launch("open bluetooth settings", () => OpenBluetoothSettingsAsync(place), place), place);
-                break;
-            case RadioAction.RecordTrace when TraceOffered:
-                ShowCardWithButton(TrayStatus.AppName, line, RadioLines.RecordTraceButton, () => AskForTrace(place), place);
-                break;
-            default:
-                ShowCard(TrayStatus.AppName, line, place);
-                break;
+            return;
         }
+
+        CardContent content = RadioCard(radio, place);
+        if (place.ClickPoint is { } point)
+        {
+            _registry.Cards.Show(content, place.Anchor, point);
+        }
+        else
+        {
+            _registry.Cards.Show(content, place.Anchor);
+        }
+    }
+
+    // The same card, completing with whether Windows put it on screen.
+    private async Task<bool> ShowRadioCardAsync(RadioCheckResult radio, CardPlace place)
+    {
+        if (_closing || _closed)
+        {
+            return true;
+        }
+
+        return await _registry.Cards.ShowAsync(RadioCard(radio, place), place.Anchor, place.ClickPoint);
+    }
+
+    private CardContent RadioCard(RadioCheckResult radio, CardPlace place)
+    {
+        string line = radio.Line ?? "";
+        return radio.Action switch
+        {
+            RadioAction.BluetoothSettings => new CardContent(TrayStatus.AppName, line, new CardAction(
+                RadioLines.BluetoothSettingsButton, () => Launch("open bluetooth settings", () => OpenBluetoothSettingsAsync(place), place))),
+            RadioAction.RecordTrace when TraceOffered => new CardContent(TrayStatus.AppName, line, new CardAction(RadioLines.RecordTraceButton, () => AskForTrace(place))),
+            _ => new CardContent(TrayStatus.AppName, line),
+        };
     }
 
     // "No AirPods are paired with this PC." and the button that starts Pair AirPods. Once per run unless forced, counted only once
     // it was put on screen: a card Windows held back is offered again at the next look.
-    private async Task OfferPairAirPodsAsync(CardPlace place, bool force = false)
+    private async Task OfferPairAirPodsAsync(CardPlace place, PinLookCards cards, bool force = false)
     {
         if (_closing || _closed || (_noAirPodsOffered && !force) || _pairServices is null || _registry.SafeMode || _elevatedRun == PairRun)
         {
@@ -593,17 +635,21 @@ internal sealed partial class TrayContext
         _noAirPodsOffered = true;
         _log.Info("No AirPods are paired with this PC, so Pair AirPods is offered.");
         // Stays up until it is used: it is the way forward after an install with nothing paired, often shown at sign-in.
-        if (!await ShowStayingCardAsync(PairAirPodsText.NoAirPodsPaired, PairAirPodsText.Title, () => StartPairAirPods(place), place))
+        if (!await ShowStayingCardAsync(PairAirPodsText.NoAirPodsPaired, PairAirPodsText.Title, () => StartPairAirPods(place), place, cards))
         {
             _noAirPodsOffered = false;
         }
     }
 
-    // The look's card held back by Windows the last time: then it answered for nothing.
-    private bool _pinLookCardHeld;
+    // Whether one look's card was held back by Windows: then that look answered for nothing. One per look, so two looks that
+    // overlap (a new device group during the start look) do not clear each other's.
+    private sealed class PinLookCards
+    {
+        public bool Held { get; set; }
+    }
 
-    // A card that stays up, completing with whether it was put on screen; one held back is logged and remembered for the look.
-    private async Task<bool> ShowStayingCardAsync(string text, string label, Action onClick, CardPlace place)
+    // A card that stays up, completing with whether it was put on screen; one held back is logged and told to its look.
+    private async Task<bool> ShowStayingCardAsync(string text, string label, Action onClick, CardPlace place, PinLookCards cards)
     {
         if (_closing || _closed)
         {
@@ -613,7 +659,7 @@ internal sealed partial class TrayContext
         bool shown = await _registry.Cards.ShowAsync(new CardContent(TrayStatus.AppName, text, new CardAction(label, onClick), StaysUp: true), place.Anchor, place.ClickPoint);
         if (!shown)
         {
-            _pinLookCardHeld = true;
+            cards.Held = true;
             _log.Info("Pairing check: the card \"" + text + "\" was held back by Windows, so it is offered again at the next look.");
         }
 

@@ -485,7 +485,7 @@ internal sealed partial class BlockCoordinator : IDisposable
             ProtectionReading reading = await _services.Protection.ReadAsync(CancellationToken.None);
             if (reading.AnyUnprotected)
             {
-                ShowNotProtectedCard(reading.Unprotected);
+                await ShowNotProtectedCardAsync(reading.Unprotected);
             }
             else if (!reading.Read)
             {
@@ -499,7 +499,9 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
     }
 
-    private void ShowNotProtectedCard(int count)
+    // Shown once per run, counted only once Windows put it on screen: one held back (quiet time at sign-in) is offered again at
+    // the next check.
+    private async Task ShowNotProtectedCardAsync(int count)
     {
         if (_notProtectedShown || _closing || _disposed)
         {
@@ -529,7 +531,11 @@ internal sealed partial class BlockCoordinator : IDisposable
                     CardPlace.NearTray.Show(_cards, TrayStatus.AppName, alreadyRunning ? FixOffer.AlreadyRunningMessage : FixOffer.NotStartedMessage);
                 }
             });
-        _cards.Show(new CardContent(TrayStatus.AppName, NotProtectedMessage, action), CardAnchor.NearTray);
+        if (!await _cards.ShowAsync(new CardContent(TrayStatus.AppName, NotProtectedMessage, action), CardAnchor.NearTray, null))
+        {
+            _notProtectedShown = false;
+            _log.Info("The card about AirPods that Earshot does not protect was held back by Windows, so it is offered again at the next check.");
+        }
     }
 
     // Earshot is closing (Exit): no idle wait, no reads again and no start-up check. The operation in flight is

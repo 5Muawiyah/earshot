@@ -84,7 +84,7 @@ internal sealed partial class BlockCoordinator
             ProtectionReading reading = await _services.Protection.ReadAsync(CancellationToken.None);
             if (reading.AnyUnprotected)
             {
-                ShowNotProtectedCard(reading.Unprotected);
+                await ShowNotProtectedCardAsync(reading.Unprotected);
             }
         }
         catch (Exception ex)
