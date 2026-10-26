@@ -40,6 +40,11 @@ internal sealed partial class TrayContext
     // looked, so the check for AirPods Earshot does not protect, which waited for that look, is owed once the pairing ends.
     private bool _protectionCheckOwed;
 
+    // Why it is owed, for the log line of the check when it runs.
+    private string _protectionCheckOwedBecause = StartLookGaveWay;
+
+    private const string StartLookGaveWay = "a pairing started during the tray's start-time look at the pairs";
+
     // The pairing flag is dropped: the coordinator reads the state again now, and a check the look owed runs (not over the line
     // that says the new pair is kept unprotected, just shown). UI thread only.
     private void DropPairRunFlag(PairAirPodsServices services, bool keep)
@@ -57,9 +62,11 @@ internal sealed partial class TrayContext
         if (_protectionCheckOwed && _elevatedRun != PairRun)
         {
             _protectionCheckOwed = false;
+            string because = _protectionCheckOwedBecause;
+            _protectionCheckOwedBecause = StartLookGaveWay;
             if (!KeptThePinnedPairJustNow())
             {
-                _coordinator.CheckProtectionAfterTrayPairing("a pairing started during the tray's start-time look at the pairs");
+                _coordinator.CheckProtectionAfterTrayPairing(because);
             }
         }
     }
@@ -76,6 +83,15 @@ internal sealed partial class TrayContext
             {
                 if (KeptThePinnedPairJustNow())
                 {
+                    return true;
+                }
+
+                // Pair AirPods' first question is up, so nothing is scanned or paired yet: the pairing answers for the new device
+                // now, and the check is owed for when the run ends, in case the person declines and the pair was made in Windows.
+                if (_elevatedRun == PairRun && !_pairRunFlagRaised)
+                {
+                    _protectionCheckOwed = true;
+                    _protectionCheckOwedBecause = "a new device group came while Pair AirPods asked its first question";
                     return true;
                 }
 

@@ -219,6 +219,33 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // The same new device group, then the person declines the first question: nothing answered for the new pair, so the
+    // coordinator's check runs once the run ends. Before, the pair made in Windows went unchecked until the next start.
+    [TestMethod]
+    public void ANewDeviceDuringTheFirstQuestionIsCheckedWhenThePersonDeclines()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayCancel();
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            TrayHarness? running = null;
+            rig.Prompter.OnAsk = _ => running!.Coordinator.NewDeviceHook!(CancellationToken.None).GetAwaiter().GetResult();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { Protection = protection });
+            running = tray;
+            tray.PumpUntilIdle();
+            int before = protection.Reads;
+
+            Click(tray);
+            TrayHarness.PumpUntil(() => protection.Reads > before, "The check was not run after the person declined.");
+
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("a new device group came while Pair AirPods asked its first question", StringComparison.Ordinal)),
+                string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
+        });
+    }
+
     // A device picker left open when Pair AirPods started: its choice is not applied while the pairing runs, since a pin made
     // then would race the pairing's adoption.
     [TestMethod]
