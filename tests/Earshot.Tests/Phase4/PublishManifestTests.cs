@@ -271,16 +271,24 @@ public sealed class PublishManifestTests
             StringAssert.Contains(notices, licence);
         }
 
-        // Named and linked, never copied out.
+        // Named and linked, never copied out, except for the one file built into Earshot.exe: it has no licences folder,
+        // and its MIT terms ask for the notice to go with every copy, so entry 5 carries it.
+        int embedded = notices.IndexOf(EmbeddedProfileEntry, StringComparison.Ordinal);
+        Assert.IsGreaterThan(-1, embedded, NoticesFileName + " has no entry for the embedded recording profile.");
+        string outsideTheEmbeddedEntry = notices[..embedded];
         foreach (string licenceText in LicenceTextFragments)
         {
-            Assert.IsFalse(notices.Contains(licenceText, StringComparison.OrdinalIgnoreCase), "The notices reproduce licence text: " + licenceText);
+            Assert.IsFalse(outsideTheEmbeddedEntry.Contains(licenceText, StringComparison.OrdinalIgnoreCase), "The notices reproduce licence text: " + licenceText);
         }
+
+        StringAssert.Contains(notices[embedded..], "The above copyright notice and this permission notice shall be included in");
 
         Assert.IsFalse(notices.Contains((char)0x2014), "An em-dash.");
     }
 
     private const string NoticesFileName = "THIRD-PARTY-NOTICES.txt";
+
+    private const string EmbeddedProfileEntry = "5. BluetoothStack.wprp, the Bluetooth recording profile";
 
     // As the self-contained publish names them in Earshot.deps.json today. The publish test reads that file itself, so
     // a package added later is caught there; this list is for the quick test, which has no publish to read.
