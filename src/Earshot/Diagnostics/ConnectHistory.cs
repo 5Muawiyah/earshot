@@ -39,7 +39,12 @@ internal static class ConnectHistoryOutcomes
 
 // One step of a switch as the history keeps it: what kind of step, and the raw code. Never an instance id, an address, a
 // container or a name.
-internal sealed record HistoryStep(string Name, int Code, string CodeName);
+internal sealed record HistoryStep(string Name, int Code, string CodeName)
+{
+    // The step did not do its job, for the line's headline code. Known only for steps made from a StepOutcome; a step read back
+    // from the file, or written by hand, is not counted as failed.
+    public bool Failed { get; init; }
+}
 
 // One switch. StartState is the verified state of the nodes just before it began (present-enabled, present-disabled,
 // away-flagged, away, mixed, unknown, none-paired); Path is how it went (direct, allow-first, hands-free-assisted,
@@ -140,7 +145,7 @@ internal sealed class ConnectHistory
     public static IReadOnlyList<HistoryStep> FromSteps(IEnumerable<StepOutcome> steps)
     {
         ArgumentNullException.ThrowIfNull(steps);
-        return steps.Take(MaxStepsPerEntry).Select(s => new HistoryStep(StepKind(s.Step), s.Code, Safe(s.CodeName))).ToList();
+        return steps.Take(MaxStepsPerEntry).Select(s => new HistoryStep(StepKind(s.Step), s.Code, Safe(s.CodeName)) { Failed = !s.Ok }).ToList();
     }
 
     // Appends the entry and drops what is older than Keep. A failure is logged with its code and returned as a step; the
@@ -398,8 +403,9 @@ internal sealed class ConnectHistory
             w.WriteString("time", e.At.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture));
             w.WriteString("step", Safe(e.Action));
             w.WriteString("outcome", Safe(e.Outcome));
-            // The first real code: a step's duration (code name "ms") carries milliseconds, not a result.
-            w.WriteString("code", Safe(e.Steps.FirstOrDefault(st => st.Code != 0 && st.CodeName != "ms")?.CodeName ?? "S_OK"));
+            // The first failed step's code: a duration (milliseconds), a count (the scan's candidates) or a radio state is not a
+            // result, and a step that did its job is not the headline.
+            w.WriteString("code", Safe(e.Steps.FirstOrDefault(st => st.Failed)?.CodeName ?? "S_OK"));
             w.WriteNumber("attempt", e.Retry ? 2 : 1);
             w.WriteNumber("durationMs", e.DurationMs);
             w.WriteString("reason", Safe(e.FailureClass.Length == 0 ? "None" : e.FailureClass));

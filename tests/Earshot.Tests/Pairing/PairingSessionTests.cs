@@ -676,6 +676,25 @@ public sealed class PairingSessionTests
         Assert.AreEqual("not-airpods", (await RunAsync(wrongRig)).ToHistoryEntry(DateTimeOffset.UnixEpoch).Outcome);
     }
 
+    // A real pairing entry's headline code is the pairing's own status: the scan's count of candidates, the radio's state and
+    // the durations before it are not results. Before, it read "candidates".
+    [TestMethod]
+    public async Task APairingEntrysHeadlineCodeIsThePairingsStatus()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig);
+        rig.Pairing.PairResult = new PairingCallResult("NotPaired", PairReasons.NotPaired, false, null);
+        using var temp = new TempFolder();
+        string path = Path.Combine(temp.Path, "connect-history.jsonl");
+        var history = new ConnectHistory(path, new ManualTime(), new CapturingLog());
+
+        PairingSessionResult result = await RunAsync(rig);
+        history.Append(result.ToHistoryEntry(new ManualTime().GetUtcNow()));
+
+        StringAssert.Contains(File.ReadAllText(path), "\"code\":\"NotPaired\"");
+    }
+
     // ---- the real watcher's reading of one event ----
 
     // The paired list the tray reads at rest asks only for the address and the container it matches on: not IsPresent ("live and

@@ -29,8 +29,8 @@ public sealed class ConnectHistoryTests
         Assert.AreEqual("ks-reconnect", read.Steps.Single().Name);
     }
 
-    // The line's headline code is the first real code, not a step's duration: a pairing's look-ms comes ahead of its pair step,
-    // and doctor keeps the headline. Before, it read "ms".
+    // The line's headline code is the first failed step's, not a step's duration: a pairing's look-ms comes ahead of its pair
+    // step. Before, it read "ms".
     [TestMethod]
     public void TheHeadlineCodeSkipsDurationSteps()
     {
@@ -39,7 +39,7 @@ public sealed class ConnectHistoryTests
         string path = Path.Combine(temp.Path, "connect-history.jsonl");
         var history = new ConnectHistory(path, time, new CapturingLog());
 
-        history.Append(Entry(time.GetUtcNow(), ConnectHistoryOutcomes.Failed, [new HistoryStep("look-ms", 1200, "ms"), new HistoryStep("pair", 2, "NotPaired"), new HistoryStep("pair-ms", 900, "ms")]));
+        history.Append(Entry(time.GetUtcNow(), ConnectHistoryOutcomes.Failed, [new HistoryStep("look-ms", 1200, "ms"), new HistoryStep("pair", 2, "NotPaired") { Failed = true }, new HistoryStep("pair-ms", 900, "ms")]));
 
         StringAssert.Contains(File.ReadAllText(path), "\"code\":\"NotPaired\"");
     }
