@@ -59,6 +59,34 @@ public sealed class FixRecheckTests
         Assert.AreEqual(2, h.ProtectionScan.Reads);
     }
 
+    // The tray looks at whether the pinned pair is still paired when a new device group arrives. When that look found a stale pin and
+    // told the person, the check for unprotected AirPods does not add a second card about the same pair.
+    [TestMethod]
+    public void ANewDeviceGroupAsksTheTraysPinnedPairLookFirstAndASaidSomethingAnswerSilencesTheOtherCard()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.ProtectionScan.Reading = new ProtectionReading(true, false, 0);
+        h.Start();
+        int hooked = 0;
+        h.Coordinator.NewDeviceHook = _ =>
+        {
+            hooked++;
+            return Task.FromResult(true);
+        };
+
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        DeviceSnapshot before = Devices.Idle(2);
+        h.Monitor.Publish(before with { AllGroups = [.. before.AllGroups, new DeviceModel(Guid.NewGuid(), "AirPods", ConnectionState.Disconnected, [])] });
+        h.Pump();
+        h.Advance(BlockCoordinator.NewDeviceSettle);
+
+        Assert.AreEqual(1, hooked);
+        Assert.AreEqual(1, h.ProtectionScan.Reads, "The tray said something about the pair, so the other check stays quiet.");
+        Assert.AreEqual(0, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+    }
+
     [TestMethod]
     public void AfterClosingARecheckDoesNothing()
     {

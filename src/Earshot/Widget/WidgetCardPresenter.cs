@@ -699,6 +699,14 @@ internal sealed partial class WidgetCardPresenter : IDisposable
                 // Fix connection asks for its own OKs on screens of its own; the card only starts it.
                 _host?.FixConnection();
                 break;
+            case SetupAction.PairAirPods:
+                // Pair AirPods asks for its own OKs on screens of its own; the card only starts it.
+                _host?.PairAirPods();
+                break;
+            case SetupAction.RecordTrace:
+                // One administrator prompt, asked for by the recorder; the card only starts it.
+                _host?.RecordTrace();
+                break;
             case SetupAction.ToggleAutoCheck:
                 if (_host is not null)
                 {

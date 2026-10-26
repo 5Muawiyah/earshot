@@ -72,6 +72,8 @@ internal sealed partial class TrayContext
         _menu.CheckAutomaticallyClicked += (_, _) => OnCheckAutomaticallyClicked();
         WireRepair(options);
         WireFixConnection();
+        WirePairAirPods(options);
+        WireTrace(options);
         RemoveStaleUpdateStaging();
         ApplyUpdates();
         if (options.UpdateOutcome is { } outcomeSource)

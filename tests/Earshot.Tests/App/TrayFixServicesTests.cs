@@ -27,6 +27,17 @@ public sealed class TrayFixServicesTests
         Assert.IsInstanceOfType<FixMarkerRePairWindow>(services.RePair);
         Assert.IsInstanceOfType<AirPodsProtectionCheck>(services.Protection);
         Assert.IsInstanceOfType<OwnProgramFixLauncher>(services.FixLauncher);
+        Assert.IsInstanceOfType<NodePairedAirPodsCheck>(services.PairedAirPods);
+    }
+
+    [TestMethod]
+    public void TheReadOnlyPairedCheckIsRealEvenWhereTheGateIsNeverReached()
+    {
+        var safe = Paths.FromEnvironment(name => name == Paths.SafeModeVariable ? "1" : null);
+        var redirected = Paths.FromEnvironment(name => name == Paths.DataRootVariable ? Path.GetTempPath() : null);
+
+        Assert.IsInstanceOfType<NodePairedAirPodsCheck>(Build(safe, null).PairedAirPods);
+        Assert.IsInstanceOfType<NodePairedAirPodsCheck>(Build(redirected, null).PairedAirPods);
     }
 
     [TestMethod]
@@ -44,6 +55,19 @@ public sealed class TrayFixServicesTests
             Assert.AreSame(NoRePairWindow.Instance, services.RePair);
             Assert.AreSame(NoProtectionCheck.Instance, services.Protection);
         }
+    }
+
+    [TestMethod]
+    public void TheTraceRecorderIsRealOnlyWhereTheHelperCouldRun()
+    {
+        var safe = Paths.FromEnvironment(name => name == Paths.SafeModeVariable ? "1" : null);
+        var redirected = Paths.FromEnvironment(name => name == Paths.DataRootVariable ? Path.GetTempPath() : null);
+
+        Assert.IsNull(Program.CreateTraceRecorder(safe, new CapturingLog()), "The helper refuses safe mode.");
+        Assert.IsNull(Program.CreateTraceRecorder(redirected, new CapturingLog()), "The helper refuses a redirected data folder.");
+        using Earshot.Tracing.ITraceRecorder? real = Program.CreateTraceRecorder(Paths.FromEnvironment(_ => null), new CapturingLog());
+        Assert.IsInstanceOfType<Earshot.Tracing.TraceRecorder>(real);
+        Assert.AreEqual(Earshot.Tracing.TraceState.Idle, real.State, "Making it starts nothing.");
     }
 
     [TestMethod]

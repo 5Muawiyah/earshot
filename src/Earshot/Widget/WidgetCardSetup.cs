@@ -9,7 +9,7 @@ internal enum SetupIcon { None, Spinner, Check, Caution, Down, Shield }
 
 // The update page's buttons (Update, Check, SetUp, Repair, Switch, and Cancel and TryAgain while it downloads or
 // has failed), and Back, any sub-page's back button.
-internal enum SetupAction { Cancel, TryAgain, Back, Update, Check, SetUp, Repair, Switch, ToggleAutoCheck, WhatsNew, HistoryEarlier, HistoryLater, FixConnection }
+internal enum SetupAction { Cancel, TryAgain, Back, Update, Check, SetUp, Repair, Switch, ToggleAutoCheck, WhatsNew, HistoryEarlier, HistoryLater, FixConnection, PairAirPods, RecordTrace }
 
 internal sealed record SetupButton(string Label, bool Primary, SetupAction Action);
 

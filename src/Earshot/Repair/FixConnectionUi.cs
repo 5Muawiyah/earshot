@@ -8,14 +8,18 @@ namespace Earshot.Repair;
 internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
 {
     private readonly CancellationTokenSource _cancel;
+    private readonly string _title;
     private Form? _form;
     private Label? _label;
 
-    // cancel: cancelled when the person presses Cancel in the window.
-    public FixRePairWindow(CancellationTokenSource cancel)
+    // cancel: cancelled when the person presses Cancel in the window. title: what the window and its dialogs are called, the Fix
+    // connection title unless Pair AirPods is the one running.
+    public FixRePairWindow(CancellationTokenSource cancel, string title = FixPromptText.Title)
     {
         ArgumentNullException.ThrowIfNull(cancel);
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
         _cancel = cancel;
+        _title = title;
     }
 
     public void ShowInstruction(string text)
@@ -25,7 +29,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         {
             _form = new Form
             {
-                Text = FixPromptText.Title,
+                Text = _title,
                 StartPosition = FormStartPosition.CenterScreen,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MinimizeBox = false,
@@ -50,16 +54,16 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        FixPromptAnswer answer = new TaskDialogPrompter().Ask(PickPrompt(candidates));
+        FixPromptAnswer answer = new TaskDialogPrompter().Ask(PickPrompt(candidates, _title));
         return Task.FromResult<UnpairedDevice?>(answer.Answer == FixAnswer.Ok && answer.Chosen >= 0 ? candidates[answer.Chosen] : null);
     }
 
     // One row per candidate, none chosen for the person; pressing the button is the "Pair" press on that one device.
-    internal static FixPrompt PickPrompt(IReadOnlyList<UnpairedDevice> candidates)
+    internal static FixPrompt PickPrompt(IReadOnlyList<UnpairedDevice> candidates, string title = FixPromptText.Title)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         return new FixPrompt(
-            FixPromptText.Title,
+            title,
             PairingText.Choose,
             "These Bluetooth headphones are in pairing mode nearby. Choose your AirPods, then press Pair. If none is yours, cancel.",
             [],
@@ -68,11 +72,11 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     }
 
     public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin) =>
-        Task.FromResult(new TaskDialogPrompter().Ask(PinPrompt(kind, pin)).Answer == FixAnswer.Ok);
+        Task.FromResult(new TaskDialogPrompter().Ask(PinPrompt(kind, pin, _title)).Answer == FixAnswer.Ok);
 
-    internal static FixPrompt PinPrompt(FixPairKind kind, string? pin) => kind == FixPairKind.ConfirmPinMatch
-        ? new FixPrompt(FixPromptText.Title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")
-        : new FixPrompt(FixPromptText.Title, "Enter " + pin + " on your device", "Windows is showing this number to pair.", [], [], "Continue");
+    internal static FixPrompt PinPrompt(FixPairKind kind, string? pin, string title = FixPromptText.Title) => kind == FixPairKind.ConfirmPinMatch
+        ? new FixPrompt(title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")
+        : new FixPrompt(title, "Enter " + pin + " on your device", "Windows is showing this number to pair.", [], [], "Continue");
 
     public void ShowResult(string text)
     {
@@ -80,8 +84,8 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         Close();
         var page = new TaskDialogPage
         {
-            Caption = FixPromptText.Title,
-            Heading = "Fix connection",
+            Caption = _title,
+            Heading = _title,
             Text = text,
             AllowCancel = true,
         };

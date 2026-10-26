@@ -114,7 +114,7 @@ public sealed class TrayStatusTests
         Assert.AreEqual("Earshot: AirPods - blocked", TrayStatus.Tooltip(iPhone, Block(BlockState.Blocked), pinned));
         Assert.AreEqual(GlyphState.Disconnected, TrayStatus.Glyph(iPhone, null, pinned, toggleInFlight: false));
         Assert.AreEqual("AirPods", TrayStatus.DeviceName(iPhone, pinned));
-        Assert.AreEqual(TrayStatus.NotFoundMessage(pinned), TrayStatus.CardStatus(iPhone, null, pinned));
+        Assert.AreEqual(TrayStatus.NotFoundMessage, TrayStatus.CardStatus(iPhone, null, pinned));
     }
 
     [TestMethod]
@@ -179,12 +179,8 @@ public sealed class TrayStatusTests
         Assert.AreEqual("Connected", TrayStatus.CardStatus(Target(ConnectionState.Connected), null, Settings()));
         Assert.AreEqual("Disconnected", TrayStatus.CardStatus(Target(ConnectionState.Disconnected), null, Settings()));
         Assert.AreEqual("Blocked at boot", TrayStatus.CardStatus(NoDevice(), Block(BlockState.Blocked), Settings()));
-        Assert.AreEqual(
-            "AirPods not found. Connect them once, or choose your device from the menu.",
-            TrayStatus.CardStatus(NotFound(), null, Settings()));
-        Assert.AreEqual(
-            "Buds not found. Connect them once, or choose your device from the menu.",
-            TrayStatus.CardStatus(NotFound(), null, Settings(s => s.DeviceMatch = "Buds")));
+        Assert.AreEqual("No AirPods are paired with this PC.", TrayStatus.CardStatus(NotFound(), null, Settings()));
+        Assert.AreEqual("No AirPods are paired with this PC.", TrayStatus.CardStatus(NotFound(), null, Settings(s => s.DeviceMatch = "Buds")));
         Assert.AreEqual(TrayStatus.CardNotKnown, TrayStatus.CardStatus(NoDevice(), null, Settings()),
             "Nothing has been read yet, so the card does not say the AirPods are missing.");
     }

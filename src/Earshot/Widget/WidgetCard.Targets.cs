@@ -229,7 +229,7 @@ internal sealed partial class WidgetCard
         foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
         {
             int index = row.Index;
-            string name = index switch { 0 => WidgetCopy.NameAutoCheck, 1 => WidgetCopy.SettingsWhatsNew, 2 => WidgetCopy.NameRepair, _ => WidgetCopy.NameFixConnection };
+            string name = index switch { 0 => WidgetCopy.NameAutoCheck, 1 => WidgetCopy.SettingsWhatsNew, 2 => WidgetCopy.NameRepair, 3 => WidgetCopy.NameFixConnection, 4 => WidgetCopy.NamePairAirPods, _ => WidgetCopy.NameTrace };
             CardControlRole role = index == 0 ? CardControlRole.CheckButton : CardControlRole.PushButton;
             list.Add(new CardControl(
                 name, role, row.Surface, null, false, index == 0 && setup.Rows is { AutoCheck: true },

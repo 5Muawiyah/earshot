@@ -47,6 +47,8 @@ internal sealed partial class BlockCoordinator
     public const string TryingAgainStatus = "Trying again";
     public const string ConnectInWindowsMessage = "Connect the AirPods in Windows settings.";
     public const string ConnectInWindowsFailedToOpenMessage = "Could not open Windows Bluetooth settings.";
+    public const string BluetoothSettingsOpenMessage = "Bluetooth settings is open. Connect your AirPods there.";
+    public const string NoAirPodsPairedMessage = "No AirPods are paired with this PC.";
 
     private DateTimeOffset _windowsConnectUntil = DateTimeOffset.MinValue;
     private CancellationTokenSource? _windowTimer;
@@ -130,7 +132,7 @@ internal sealed partial class BlockCoordinator
         return sealedReport;
     }
 
-    private void WriteHistory(ConnectHistoryEntry entry)
+    internal void WriteHistory(ConnectHistoryEntry entry)
     {
         if (_services.History is not { } history)
         {
@@ -429,13 +431,21 @@ internal sealed partial class BlockCoordinator
         WriteHistory(new ConnectHistoryEntry(
             started, ConnectHistoryActions.ConnectInWindows, startState, "windows", ConnectHistory.FromSteps(steps), false,
             report.IsSuccess ? ConnectHistoryOutcomes.Allowed : report.Cancelled ? ConnectHistoryOutcomes.Cancelled : ConnectHistoryOutcomes.Failed,
-            report.IsSuccess ? "None" : FailureClass.PcSide.ToString(), (long)(_time.GetUtcNow() - started).TotalMilliseconds));
+            report.IsSuccess || report.StartPairAirPods ? "None" : FailureClass.PcSide.ToString(), (long)(_time.GetUtcNow() - started).TotalMilliseconds));
         return report;
     }
 
     private async Task<ToggleReport> AllowAndOpenSettingsAsync(ToggleRequest request, List<StepOutcome> steps, CancellationToken ct)
     {
         BootBlockStatus? status = await ReadBlockStatusAsync(ct);
+
+        // Not set up: no gate exists and nothing of Earshot's blocks the nodes, so there is nothing to allow and no idle rule to
+        // keep off. A status whose tasks could not be read is not "not set up", and keeps its refusal.
+        if (status is { State: BlockState.NotSetUp, TasksKnown: true })
+        {
+            return await OpenSettingsBeforeSetUpAsync(request, steps, ct);
+        }
+
         if (status is null or { State: BlockState.NotSetUp or BlockState.NotFound or BlockState.Unknown })
         {
             return Finish(request, OpStatus.Failed, CoordinatorRules.AllowFirstRefusal(status, request.Container) ?? NotAvailableMessage, steps);
@@ -481,6 +491,29 @@ internal sealed partial class BlockCoordinator
 
         OpenWindowsConnectWindow();
         return Finish(request, OpStatus.Success, ConnectInWindowsMessage, steps);
+    }
+
+    // Connect in Windows before Earshot is set up. With no AirPods paired the tray is told to start Pair AirPods (no card is shown
+    // for this report); otherwise Windows' Bluetooth settings page is opened with no allow and no Connect in Windows window.
+    private async Task<ToggleReport> OpenSettingsBeforeSetUpAsync(ToggleRequest request, List<StepOutcome> steps, CancellationToken ct)
+    {
+        PairedAirPodsReading paired = await _services.PairedAirPods.ReadAsync(ct);
+        if (paired.NonePaired)
+        {
+            _log.Info("connect in windows: Earshot is not set up and no AirPods are paired, so Pair AirPods is offered instead.");
+            return Finish(request, OpStatus.Failed, NoAirPodsPairedMessage, steps, showCard: false) with { StartPairAirPods = true };
+        }
+
+        StepOutcome opened = _services.Launcher.OpenBluetoothSettings();
+        steps.Add(opened);
+        if (!opened.Ok)
+        {
+            _log.Warn("connect in windows: " + TrayReport.DescribeStep(opened));
+            return Finish(request, OpStatus.Failed, ConnectInWindowsFailedToOpenMessage, steps);
+        }
+
+        _log.Info("connect in windows: Earshot is not set up, so nothing was allowed and Windows' Bluetooth settings is open.");
+        return Finish(request, OpStatus.Success, BluetoothSettingsOpenMessage, steps);
     }
 
     private void OpenWindowsConnectWindow()

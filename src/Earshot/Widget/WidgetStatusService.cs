@@ -1557,6 +1557,50 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         return book with { Marks = _highWater.MarksFor(book), Sequence = ++_bookSequence };
     }
 
+    // A different pair of AirPods was adopted (the tray pinned another container): the previous pair's last readings, their
+    // estimate marks and the link to its case belong to something that is no longer on this PC, so none of them is shown
+    // against the new pair. The learned charge speeds stay: they are the model's and the case's, and they show no figure. The
+    // new pair is linked when its case is opened next to the PC, as for any first pair. reason is for the log only.
+    public void ForgetPair(string reason)
+    {
+        ArgumentNullException.ThrowIfNull(reason);
+        LastReadingBook? bookToSave = null;
+        MemorySave memoryToSave;
+        lock (_gate)
+        {
+            if (_closed)
+            {
+                return;
+            }
+
+            ResetReadingsLocked();
+            _selector.ForgetLink();
+            _setsInRange = 0;
+            _highWater.Clear();
+            _book = _book with { Left = null, Right = null, Case = null, Marks = Array.Empty<EstimateMark>() };
+            if (_lastReadingStore is not null)
+            {
+                bookToSave = TakeForSaveLocked(_book);
+                _savedBook = _book;
+            }
+
+            memoryToSave = TakeMemoryToSaveLocked(_timeProvider.GetUtcNow(), force: true);
+        }
+
+        if (bookToSave is not null)
+        {
+            _lastReadingStore!.Save(bookToSave);
+        }
+
+        if (memoryToSave.Due)
+        {
+            _linkMemoryStore?.Save(memoryToSave.Memory, memoryToSave.Sequence);
+        }
+
+        _log.Info("Widget: a different pair was adopted, so the previous pair's last readings and link were dropped.");
+        PublishAndNotify();
+    }
+
     // Whatever the linked set held is dropped: after a link that is another set, or a new paired model, nothing
     // of the old values may be shown against the new pair. The saved last readings stay: they are the owner's pair's, and
     // a newer fresh reading of the linked set replaces them part by part. The charge runs start over.

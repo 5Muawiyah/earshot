@@ -305,7 +305,7 @@ public sealed class TrayContextTests
             tray.PumpUntilIdle();
 
             Assert.IsEmpty(tray.Connection.Calls);
-            CollectionAssert.AreEqual(new[] { TrayStatus.NotFoundMessage(tray.Settings.Current) }, tray.Cards.Statuses);
+            CollectionAssert.AreEqual(new[] { TrayStatus.NotFoundMessage }, tray.Cards.Statuses);
         });
     }
 
@@ -1442,7 +1442,11 @@ internal sealed class TrayHarness : IDisposable
         Func<Earshot.Widget.SecondaryTaskbarReading>? secondaryTaskbars = null,
         Action<string>? setClipboardText = null,
         Earshot.Diagnostics.IFrameLogSource? frameLog = null,
-        Func<string>? diagnosticsLogPath = null)
+        Func<string>? diagnosticsLogPath = null,
+        PairAirPodsServices? pairAirPods = null,
+        CoordinatorServices? coordinatorServices = null,
+        Earshot.Infra.ISettingsLauncher? settingsLauncher = null,
+        Earshot.Tracing.ITraceRecorder? traceRecorder = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1599,6 +1603,9 @@ internal sealed class TrayHarness : IDisposable
             },
             CardEnvironmentFactory = cardEnvironmentFactory,
             TaskbarWatcherPollIntervalMs = taskbarWatcherPollIntervalMs ?? TaskbarWatcher.ShownPollIntervalMs,
+            PairAirPods = pairAirPods,
+            SettingsLauncher = settingsLauncher,
+            TraceRecorder = traceRecorder,
         };
         if (displaySource is not null)
         {
@@ -1650,7 +1657,7 @@ internal sealed class TrayHarness : IDisposable
         // must give it to both, or a deadline one of them computes against real time and the other against the
         // harness's own frozen ManualTime would never agree on when the budget has passed.
         Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,
-            Registry.Settings, Registry.Cards, Log, time ?? Time, new CoordinatorOptions(safeMode, StartedAtLogon: false));
+            Registry.Settings, Registry.Cards, Log, time ?? Time, new CoordinatorOptions(safeMode, StartedAtLogon: false), coordinatorServices);
         Context = new TrayContext(Registry, Coordinator, options);
         Coordinator.Start();
         PumpUntilIdle();

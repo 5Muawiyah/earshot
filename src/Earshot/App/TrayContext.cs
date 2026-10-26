@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Globalization;
 using Earshot.Audio.Connect;
+using Earshot.Bluetooth;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Hotkeys;
@@ -162,6 +163,14 @@ internal sealed record TrayStartOptions(
     // read apart from a scheduled one, deterministically, sets this far longer than anything the test
     // itself runs for, rather than racing a real timing window against a scheduled read.
     public int? TaskbarWatcherPollIntervalMs { get; init; }
+
+    // What Pair AirPods runs on: the real pairing API, window and radio check in the program, fakes in a test. Null (the default)
+    // means this tray cannot pair, which is what every tray-level test that does not test pairing gets, so none of them reaches
+    // the machine's Bluetooth.
+    public PairAirPodsServices? PairAirPods { get; init; }
+
+    // Records a Bluetooth trace: the real recorder in the program, a fake in a test. Null means this tray cannot record one.
+    public Earshot.Tracing.ITraceRecorder? TraceRecorder { get; init; }
 
     // Builds the ITrayIconVisibility GaugeController uses to show or hide the tray icon fallback. Null (the
     // default) means "wrap the real NotifyIcon" (NotifyIconVisibility), the production behaviour; a
@@ -555,6 +564,10 @@ internal sealed partial class TrayContext : ApplicationContext
         InitPauseOnLeave();
         _ = _coordinator.RefreshStatusAsync();
         _ = PinIfFirstSightingAsync();
+        if (!options.DataRootRedirected)
+        {
+            StartPinnedPairCheck("start");
+        }
     }
 
     // True while a connect, disconnect or menu action started here is in flight.
@@ -657,6 +670,7 @@ internal sealed partial class TrayContext : ApplicationContext
         if (disposing)
         {
             Close();
+            UnwireTrace();
             _registry.Monitor.SnapshotChanged -= OnSnapshotChanged;
             _registry.Settings.Changed -= OnSettingsChanged;
             _coordinator.Changed -= OnCoordinatorChanged;
@@ -912,9 +926,17 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             string message = _snapshot.ReadStatus == SnapshotReadStatus.Failed
                 ? ConnectMessages.CouldNotReadDevices
-                : TrayStatus.NotFoundMessage(settings);
+                : TrayStatus.NotFoundMessage;
             _log.Warn("Toggle: " + message);
-            ShowCard(settings.DeviceMatch, message, place);
+            if (message == TrayStatus.NotFoundMessage && _pairServices is not null && !_registry.SafeMode)
+            {
+                ShowCardWithButton(settings.DeviceMatch, message, PairAirPodsText.Title, () => StartPairAirPods(place), place);
+            }
+            else
+            {
+                ShowCard(settings.DeviceMatch, message, place);
+            }
+
             return;
         }
 
@@ -971,14 +993,29 @@ internal sealed partial class TrayContext : ApplicationContext
                 report.Steps);
             _log.Write(report.IsSuccess || cancelled ? LogLevel.Info : LogLevel.Warn, text);
             LogSwitch(_log, report);
-            bool fixOffered = FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);
-            if (fixOffered)
+            // A radio that is off, switched off, broken or absent is the whole story of a failed connect: its line and its button are
+            // shown, and nothing that cannot help (Fix connection, Connect in Windows) is offered. Read once, only after a failure.
+            RadioCheckResult? radio = wanted && !report.IsSuccess && !cancelled ? await ReadRadioAfterFailureAsync(cts.Token) : null;
+            bool radioBlocks = radio is { BlocksRepair: true };
+            bool fixOffered = !radioBlocks && FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);
+            if (radioBlocks)
             {
-                ShowFixOffer(intent.DeviceName, report.UserMessage, place);
+                ShowRadioCard(radio!, place);
+            }
+            else if (fixOffered)
+            {
+                // A pinned pair that is no longer paired cannot be fixed or connected: the person is told so and offered Pair AirPods.
+                if (await CheckPinnedPairAsync("connect failed", place))
+                {
+                    ShowFixOffer(intent.DeviceName, report.UserMessage, place);
+                }
             }
             else if (!_registry.SafeMode && ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
             {
-                ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
+                if (await CheckPinnedPairAsync("connect failed", place))
+                {
+                    ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
+                }
             }
 
             // A click sees the result on the icon; a hotkey has nothing else to show it, so it gets a
@@ -2090,6 +2127,13 @@ internal sealed partial class TrayContext : ApplicationContext
 
     private async Task RunSetupAsync(CardPlace place)
     {
+        // Set-up sends the pinned pair's address and container to the gate. A pair removed in Windows would be sent as it was, and
+        // the gate would find no such device, so the pin is looked at first.
+        if (!await CheckPinnedPairAsync("setup", place))
+        {
+            return;
+        }
+
         if (!TryBeginElevatedRun(SetupRun, place))
         {
             return;
@@ -2700,6 +2744,7 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
+        Guid previousPair = _registry.Settings.Current.PinnedContainerId;
         bool gateRepinned = false;
         if (status is not null && !TrayStatus.NeedsSetUp(status))
         {
@@ -2734,6 +2779,7 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         _pinAttemptedFor = choice.ContainerId;
+        ForgetPreviousPairIfDifferent(previousPair, choice.ContainerId);
         _log.Info("Device chosen: " + choice.Name + " (" + choice.Address + ", container " + choice.ContainerId + "), match \"" + choice.Match + "\".");
         _ = RefreshSnapshotAsync();
 

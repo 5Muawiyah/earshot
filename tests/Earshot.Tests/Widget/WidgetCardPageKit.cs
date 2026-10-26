@@ -218,6 +218,14 @@ internal sealed class FakeCardHost : IWidgetCardHost
 
     public void FixConnection() => FixConnectionCalls++;
 
+    public int PairAirPodsCalls { get; private set; }
+
+    public void PairAirPods() => PairAirPodsCalls++;
+
+    public int RecordTraceCalls { get; private set; }
+
+    public void RecordTrace() => RecordTraceCalls++;
+
     public void SwitchToInstalled() => SwitchCalls++;
 }
 

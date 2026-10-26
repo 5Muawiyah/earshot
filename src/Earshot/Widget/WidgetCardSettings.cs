@@ -213,6 +213,12 @@ internal interface IWidgetCardHost
     // Starts Fix connection, which removes and pairs the AirPods again after two OKs of its own.
     void FixConnection();
 
+    // Starts Pair AirPods, which looks for AirPods in pairing mode and asks its own questions on screen.
+    void PairAirPods();
+
+    // Starts a Bluetooth trace, or stops one that is running. One administrator prompt.
+    void RecordTrace();
+
     void SwitchToInstalled();
 
     // Raised, on any thread, whenever the update flow moves.

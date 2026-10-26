@@ -367,7 +367,7 @@ public sealed class TraySwitchTests
             Press(tray, HotkeyAction.SwitchToPc);
 
             Assert.IsEmpty(tray.Connection.Calls);
-            Assert.AreEqual(TrayStatus.NotFoundMessage(tray.Settings.Current), tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual(TrayStatus.NotFoundMessage, tray.Cards.Shown[^1].Content.Status);
         });
     }
 

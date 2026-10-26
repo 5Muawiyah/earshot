@@ -1699,7 +1699,9 @@ internal sealed partial class WidgetCard : Form
                     0 => SetupAction.ToggleAutoCheck,
                     1 => SetupAction.WhatsNew,
                     2 => SetupAction.Repair,
-                    _ => SetupAction.FixConnection,
+                    3 => SetupAction.FixConnection,
+                    4 => SetupAction.PairAirPods,
+                    _ => SetupAction.RecordTrace,
                 });
                 break;
         }
@@ -1821,7 +1823,7 @@ internal sealed partial class WidgetCard : Form
         {
             Surface(row.Surface);
             char glyph = row.Index switch { 0 => FluentGlyphs.Sync, 1 => FluentGlyphs.WhatsNew, 2 => FluentGlyphs.Repair, _ => FluentGlyphs.Bluetooth };
-            string label = row.Index switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, 2 => WidgetCopy.RepairEarshot, _ => WidgetCopy.FixConnectionRow };
+            string label = row.Index switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, 2 => WidgetCopy.RepairEarshot, 3 => WidgetCopy.FixConnectionRow, 4 => WidgetCopy.PairAirPodsRow, _ => WidgetCopy.TraceRow };
             CardPaint.Glyph(g, glyph, row.Icon, colours.Text, _dpi);
             CardPaint.Wrapped(g, label, row.Label, _type, fourteen, bold: false, colours.Text);
             bool focused = focusVisible && focus == new SetupTarget(SetupTargetKind.Row, row.Index);
@@ -1848,7 +1850,7 @@ internal sealed partial class WidgetCard : Form
 
                     break;
                 default:
-                    CardPaint.SmallButton(g, row.Control, row.Index == 2 ? WidgetCopy.RepairButton : WidgetCopy.FixConnectionButton, colours, _type, _dpi, focused);
+                    CardPaint.SmallButton(g, row.Control, row.Index switch { 2 => WidgetCopy.RepairButton, 3 => WidgetCopy.FixConnectionButton, 4 => WidgetCopy.PairAirPodsButton, _ => WidgetCopy.TraceButton }, colours, _type, _dpi, focused);
                     break;
             }
         }

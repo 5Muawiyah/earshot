@@ -160,6 +160,9 @@ internal sealed class FakePairing : IPairingApi
 
     public List<PairedDevice> Paired { get; } = new();
 
+    // The steps the paired list reports with it, so a test can make the read fail.
+    public List<StepOutcome> ListSteps { get; } = new();
+
     public List<WatchEvent> Events { get; } = new();
 
     public PairingCallResult UnpairResult { get; set; } = new("Unpaired", 0, true, null);
@@ -186,7 +189,7 @@ internal sealed class FakePairing : IPairingApi
     public Task<PairedListResult> ListPairedAsync(CancellationToken ct)
     {
         Calls.Add("list-paired");
-        return Task.FromResult(new PairedListResult(Paired.ToList(), []));
+        return Task.FromResult(new PairedListResult(Paired.ToList(), ListSteps.ToList()));
     }
 
     public Task<PairingCallResult> UnpairAsync(string deviceId, CancellationToken ct)

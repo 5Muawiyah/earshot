@@ -54,3 +54,26 @@ internal sealed class NoProtectionCheck : IProtectionCheck
 
     public Task<ProtectionReading> ReadAsync(CancellationToken ct) => Task.FromResult(ProtectionReading.Nothing);
 }
+
+// Whether any AirPods are paired with this PC now, by the identity rule and with their device node in the tree. Connect in Windows
+// asks it before Earshot is set up: with none paired there is nothing to connect in Windows, and the person is taken to Pair AirPods.
+//   Read   the node list could be read at all
+//   Count  how many sets of AirPods are paired now
+internal sealed record PairedAirPodsReading(bool Read, int Count)
+{
+    public static PairedAirPodsReading Unknown { get; } = new(false, 0);
+
+    public bool NonePaired => Read && Count == 0;
+}
+
+internal interface IPairedAirPodsCheck
+{
+    Task<PairedAirPodsReading> ReadAsync(CancellationToken ct);
+}
+
+internal sealed class NoPairedAirPodsCheck : IPairedAirPodsCheck
+{
+    public static NoPairedAirPodsCheck Instance { get; } = new();
+
+    public Task<PairedAirPodsReading> ReadAsync(CancellationToken ct) => Task.FromResult(PairedAirPodsReading.Unknown);
+}
