@@ -57,6 +57,48 @@ public sealed class FixRePairWindowThreadTests
         });
     }
 
+    // Fix resumes on a pool thread after the administrator run, and its second question is a window with pictures: the question
+    // is asked on the window's thread, as the pick and the number questions are.
+    [TestMethod]
+    public void AQuestionAskedFromAPoolThreadIsAskedOnTheWindowsThread()
+    {
+        StaThread.Run(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            int windowThread = Environment.CurrentManagedThreadId;
+            using var cancel = new CancellationTokenSource();
+            using var window = new FixRePairWindow(cancel);
+            var inner = new ThreadRecordingPrompter();
+            IFixPrompter prompter = window.AskingOnThisThread(inner);
+            var prompt = new FixPrompt("t", "h", "b", [], [], "OK");
+
+            Task<FixPromptAnswer> asked = Task.Run(() => prompter.Ask(prompt, CancellationToken.None));
+            Task<FixPromptAnswer> askedPlain = Task.Run(() => prompter.Ask(prompt));
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            while (!(asked.IsCompleted && askedPlain.IsCompleted) && watch.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                Application.DoEvents();
+                Thread.Sleep(1);
+            }
+
+            Assert.IsTrue(asked.IsCompleted && askedPlain.IsCompleted, "The questions were not asked on the window's thread.");
+            CollectionAssert.AreEqual(new[] { windowThread, windowThread }, inner.AskedOn.ToArray());
+        });
+    }
+
+    private sealed class ThreadRecordingPrompter : IFixPrompter
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<int> AskedOn { get; } = new();
+
+        public FixPromptAnswer Ask(FixPrompt prompt) => Ask(prompt, CancellationToken.None);
+
+        public FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn)
+        {
+            AskedOn.Enqueue(Environment.CurrentManagedThreadId);
+            return new FixPromptAnswer(FixAnswer.Cancel, -1);
+        }
+    }
+
     [TestMethod]
     public void ACallOnTheWindowsOwnThreadRunsAtOnce()
     {

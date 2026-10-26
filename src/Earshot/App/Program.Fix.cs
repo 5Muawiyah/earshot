@@ -279,7 +279,7 @@ internal static partial class Program
             Records = records,
             Leftovers = MachineLeftovers.For(paths, service),
             Desktop = desktop,
-            Prompter = new TaskDialogPrompter(),
+            Prompter = ui.AskingOnThisThread(new TaskDialogPrompter()),
             PlanFiles = elevation.PlanFiles,
             Elevator = elevation.Elevator,
             Pairing = new WinRtPairingApi(),

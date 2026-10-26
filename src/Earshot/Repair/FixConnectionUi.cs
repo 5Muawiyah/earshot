@@ -40,6 +40,21 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         return true;
     });
 
+    // The run's questions, asked on this window's thread: Fix resumes on a pool thread after the administrator run, and its
+    // second question is a window with pictures, which belongs on the thread whose message loop runs it.
+    internal IFixPrompter AskingOnThisThread(IFixPrompter inner)
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        return new OnWindowThreadPrompter(this, inner);
+    }
+
+    private sealed class OnWindowThreadPrompter(FixRePairWindow window, IFixPrompter inner) : IFixPrompter
+    {
+        public FixPromptAnswer Ask(FixPrompt prompt) => window.OnUi(() => inner.Ask(prompt));
+
+        public FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn) => window.OnUi(() => inner.Ask(prompt, closeOn));
+    }
+
     // cancel: cancelled when the person presses Cancel in the window. title: what the window and its dialogs are called, the Fix
     // connection title unless Pair AirPods is the one running.
     public FixRePairWindow(CancellationTokenSource cancel, string title = FixPromptText.Title)
