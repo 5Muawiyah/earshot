@@ -487,6 +487,15 @@ internal sealed class RePairer
         _radio = radio;
     }
 
+    // Set once the run removes something or starts the scan, so a caller whose run was cut off (cancelled or thrown out of)
+    // knows a pairing began. Read only once RunAsync has ended.
+    internal bool Began { get; private set; }
+
+    // The history steps of the pairing session so far, for that cut-off run's entry.
+    internal IReadOnlyList<StepOutcome> SessionStepsSoFar => _session?.StepsSoFar ?? [];
+
+    private PairingSession? _session;
+
     public async Task<RePairResult> RunAsync(FixConsent consent, RePairTarget? target, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(consent);
@@ -501,6 +510,7 @@ internal sealed class RePairer
         bool touched = false;
         bool remained = false;
         var session = new PairingSession(_api, _nodes, _ui, _options, _log, _radio);
+        _session = session;
 
         // The radio is read before anything is removed: a pair is never taken away from a PC whose Bluetooth cannot pair it again.
         RadioCheckResult? radio = await session.CheckRadioAsync(ct).ConfigureAwait(false);
@@ -534,6 +544,7 @@ internal sealed class RePairer
             }
 
             touched = true;
+            Began = true;
             PairingCallResult unpair = await _api.UnpairAsync(paired.Id, ct).ConfigureAwait(false);
             statuses.Add(unpair);
             lines.Add("Remove " + target.Name + ": " + unpair.Name + " (" + unpair.Code.ToString(CultureInfo.InvariantCulture) + ").");
@@ -553,6 +564,7 @@ internal sealed class RePairer
         // The scan. It starts only here, after the second OK. The removed pair is still listed by the watcher, so what was listed
         // before the instruction is never offered back.
         touched = true;
+        Began = true;
         PairingSessionResult ran = await session.RunAsync(excludeAlreadyListed: true, ct, radio).ConfigureAwait(false);
         lines.AddRange(ran.Lines);
         steps.AddRange(ran.Steps);

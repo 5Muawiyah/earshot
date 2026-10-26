@@ -157,4 +157,53 @@ public sealed class FixConnectionTests
 
         Assert.IsEmpty(history.Read());
     }
+
+    // The pair was already removed when the person cancels in the pairing window: the run still leaves its entry, with the
+    // steps taken so far and where it stopped, as Pair AirPods does.
+    [TestMethod]
+    public async Task ARePairCancelledInItsWindowStillLeavesACancelledEntryWithItsSteps()
+    {
+        using var rig = new FixRig();
+        using var temp = new TempFolder();
+        ConnectHistory history = HistoryIn(temp, new ManualTime());
+        rig.History = history;
+        FixRePairTests.ArrangeHappyPairing(rig);
+        rig.Prompter.SayOk();
+        rig.Prompter.SayOk();
+        using var cancel = new CancellationTokenSource();
+        rig.Ui.OnPick = cancel.Cancel;
+
+        FixResult result = await FixConnection.RunAsync([], rig.Host(), cancel.Token);
+
+        Assert.Contains("Cancelled.", result.Lines);
+        ConnectHistoryEntry entry = history.Read().Single();
+        Assert.AreEqual("pair", entry.Action);
+        Assert.AreEqual("cancelled", entry.Outcome);
+        Assert.IsTrue(entry.Steps.Any(s => s.Name == "scan"), string.Join(", ", entry.Steps.Select(s => s.Name)));
+        HistoryStep stopped = entry.Steps.Single(s => s.Name == "cancelled");
+        Assert.AreEqual("by-person", stopped.CodeName);
+        Assert.IsTrue(entry.Steps.Any(s => s.Name == "cancelled-ms"));
+    }
+
+    [TestMethod]
+    public async Task ARePairThatThrowsStillLeavesAFailedEntryWithTheCode()
+    {
+        using var rig = new FixRig();
+        using var temp = new TempFolder();
+        ConnectHistory history = HistoryIn(temp, new ManualTime());
+        rig.History = history;
+        FixRePairTests.ArrangeHappyPairing(rig);
+        rig.Pairing.ThrowOnPair = new IOException("the pairing call failed");
+        rig.Prompter.SayOk();
+        rig.Prompter.SayOk();
+
+        FixResult result = await RunAsync(rig);
+
+        Assert.AreEqual(FixOutcome.Failed, result.Outcome);
+        ConnectHistoryEntry entry = history.Read().Single();
+        Assert.AreEqual("failed", entry.Outcome);
+        HistoryStep stopped = entry.Steps.Single(s => s.Name == "unexpected");
+        Assert.AreEqual(new IOException().HResult, stopped.Code);
+        Assert.IsTrue(entry.Steps.Any(s => s.Name == "pick"), string.Join(", ", entry.Steps.Select(s => s.Name)));
+    }
 }

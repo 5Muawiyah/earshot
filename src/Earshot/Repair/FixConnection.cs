@@ -1,4 +1,5 @@
 using System.Globalization;
+using Earshot.App;
 using Earshot.Boot;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
@@ -298,7 +299,20 @@ internal static class FixConnection
         bool touchedBefore = state.Touched;
         state.Touched = true;
         var repairer = new RePairer(host.Pairing, host.Nodes, host.RePairUi, host.Options, host.Log, host.Radio);
-        RePairResult repaired = await repairer.RunAsync(second, target is null ? null : new RePairTarget(target.Address, target.Name), ct).ConfigureAwait(false);
+        var pairWatch = System.Diagnostics.Stopwatch.StartNew();
+        RePairResult repaired;
+        try
+        {
+            repaired = await repairer.RunAsync(second, target is null ? null : new RePairTarget(target.Address, target.Name), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (repairer.Began)
+        {
+            // Cut off by the person's Cancel or the window's close, or by a fault, after the pair was removed or the scan began:
+            // the run still leaves its one entry, and the result and the closing block follow as before.
+            RecordCutOff(host, steps, repairer.SessionStepsSoFar, ex, ex is OperationCanceledException && ct.IsCancellationRequested, pairWatch.ElapsedMilliseconds);
+            throw;
+        }
+
         if (!repaired.Touched)
         {
             // Refused before anything was removed or scanned (the radio check): nothing here needs the closing block.
@@ -359,6 +373,24 @@ internal static class FixConnection
         }
 
         ConnectHistoryEntry entry = repaired.Session.ToHistoryEntry(host.Time.GetUtcNow(), later);
+        steps.Add(host.History.Append(entry));
+    }
+
+    // The entry of a pairing that was cut off: the session's steps so far, then the step it stopped at with its code and the time.
+    private static void RecordCutOff(FixHost host, List<StepOutcome> steps, IReadOnlyList<StepOutcome> sessionSteps, Exception ex, bool cancelled, long ms)
+    {
+        if (host.History is null)
+        {
+            return;
+        }
+
+        StepOutcome stopped = cancelled
+            ? new StepOutcome("cancelled", false, NativeCodes.NotAttempted, "by-person", null)
+            : StepOutcomes.FromHResult("unexpected", ex.HResult, ex.GetType().Name, ok: false);
+        var entry = new ConnectHistoryEntry(
+            host.Time.GetUtcNow(), ConnectHistoryActions.Pair, "none", "custom-pairing",
+            ConnectHistory.FromSteps([.. sessionSteps, stopped, new StepOutcome(stopped.Step + "-ms", true, (int)Math.Min(ms, int.MaxValue), "ms", null)]),
+            false, cancelled ? ConnectHistoryOutcomes.Cancelled : ConnectHistoryOutcomes.Failed, FailureClass.None.ToString(), ms);
         steps.Add(host.History.Append(entry));
     }
 
