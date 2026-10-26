@@ -9,9 +9,9 @@ namespace Earshot.Tests.TestWindow;
 public sealed class RunAllOrderTests
 {
     [TestMethod]
-    public void HasTwentySixItemsTwelveSinglesFiveVariantsNineMoreSingles()
+    public void HasTwentySevenItemsTwelveSinglesFiveVariantsTenMoreSingles()
     {
-        Assert.AreEqual(26, RunAllOrder.Items.Count);
+        Assert.AreEqual(27, RunAllOrder.Items.Count);
     }
 
     [TestMethod]
@@ -27,7 +27,7 @@ public sealed class RunAllOrderTests
         {
             "01", "02", "03", "04", "05", "06", "07", "08", "09", "17", "20", "22",
             "10v1", "10v2", "10v3", "10v4", "10v5",
-            "11", "12", "13", "14", "23", "15", "16", "21", "18",
+            "11", "12", "13", "14", "23", "24", "15", "16", "21", "18",
         };
 
         CollectionAssert.AreEqual(expectedKeys, RunAllOrder.Items.Select(item => item.Key).ToArray());

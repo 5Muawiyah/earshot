@@ -119,6 +119,17 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'Gauge left under'; Text = 'Gauge left under Windows.UI.Core.CoreWindow after a foreground change: not the taskbar.' }
     [ordered]@{ Pattern = 'Auto-pause paused'; Text = 'Auto-pause paused com.example.player.' }
     [ordered]@{ Pattern = 'connect: '; Text = 'connect: Success. Connected.' }
+
+    # test 24: the radio check, Pair AirPods and the Bluetooth trace, in the shapes the tray writes (RadioCheck.cs, TrayContext.PairAirPods.cs,
+    # PairingSession.cs, TrayContext.Trace.cs). The Pair AirPods pattern is one read of three lines; the script tells them apart.
+    [ordered]@{ Pattern = 'radio check: Off in'; Raw = $true; Text = 'radio check: Off in 21 ms.' }
+    [ordered]@{ Pattern = 'radio check: Ok in'; Raw = $true; Text = 'radio check: Ok in 18 ms.' }
+    [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: started from the menu.' }
+    [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: Paired, None.' }
+    [ordered]@{ Pattern = 'Pair AirPods: '; Raw = $true; Text = 'Pair AirPods: the new pair is the one Earshot uses.' }
+    [ordered]@{ Pattern = 'pair: Windows answered '; Raw = $true; Text = 'pair: Windows answered Paired (0).' }
+    [ordered]@{ Pattern = 'Bluetooth trace: '; Raw = $true; Text = 'Bluetooth trace: recording.' }
+    [ordered]@{ Pattern = 'Bluetooth trace ended: '; Raw = $true; Text = 'Bluetooth trace ended: Saved.' }
 )
 
 # The one pattern that is also written with a stamp in the past, so the -SinceUtc filter in
@@ -163,6 +174,7 @@ $script:StartStates = @{
     '22-service-handback|resume'         = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '23-connect-every-state|first'       = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '23-connect-every-state|resume'      = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '24-pair-airpods|first'              = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
 }
 
 # The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
@@ -248,6 +260,21 @@ $script:Answers = [ordered]@{
     'compared with the last live reading'                                    = 'yes'
     'did live figures replace the estimate'                                  = 'yes'
 
+    # test 24: Pair AirPods.
+    'did the earshot card say "bluetooth is off."'                           = 'yes'
+    'did the "bluetooth is off." line go from the card'                      = 'yes'
+    'can you put the case into pairing mode now'                             = 'yes'
+    'are your airpods airpods pro 3 or airpods 4'                            = 'yes'
+    'does the list show your airpods with a name'                            = 'yes'
+    'did earshot ask you a yes or no question while pairing'                 = 'no'
+    'did earshot show a number to check while pairing'                       = 'no'
+    'did windows show a pairing box of its own'                              = 'no'
+    'did windows ask for administrator permission while earshot set itself up' = 'yes'
+    'did windows ask for it more than once'                                  = 'no'
+    'before you open the case: does the earshot gauge'                       = 'no'
+    'now the case is open: does a battery figure appear'                     = 'yes'
+    'do you want to try the bluetooth trace now'                             = 'yes'
+
     # test 20: hand back on Exit.
     'did the sound go back to your phone or stop coming out'                 = 'yes'
     'did a card say the airpods were being handed back'                      = 'yes'
@@ -275,6 +302,7 @@ $script:Notes = [ordered]@{
     'how did the unsupplied third argument'   = 'the literal placeholder arrived'
     'what did the card near the tray say'     = 'Connected.'
     'what did the card say that time'         = 'Back on your phone.'
+    'what else did the list show'             = 'none'
 }
 
 $script:World = $null
@@ -298,6 +326,8 @@ $script:CaseItemCounts = @{
     'switch-timed-out' = 0; 'switch-not-at-rest' = 1; 'switch-rejected' = 1; 'switch-unparsable' = 0
     # test 23: the owner can set up none of the states and does not restart, so every state reads "not reached".
     'not-reached' = 1
+    # test 24: Pair AirPods ended in a failed pairing, and the log holds only the two lines it wrote.
+    'pair-failed' = 0
 
     # test 17 and test 22: the hand-back service's own cases. Each looks like the shared "one" for every log line and
     # list, and differs only in the status file the service wrote (Write-FakeStatusFiles below).
@@ -334,7 +364,7 @@ function Initialize-FakeMachine
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -364,6 +394,8 @@ function Initialize-FakeMachine
         Protection  = $start.Protection
         SetUp       = $start.SetUp
         TrayRunning = $true
+        Radio       = 'On'
+        TrayPaired  = $false
     }
 
     # test 18's own case: the resume check never got the chance to re-block, because this computer
@@ -396,7 +428,7 @@ function New-FakeSandbox
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -557,6 +589,17 @@ function New-FakeSandbox
             $index = $index + 1
             $mangledStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
             $lines = $lines + @([string]$mangledStamp + ' INFO  ' + $mangled)
+        }
+    }
+
+    # test 24, pair-failed: Pair AirPods started, found no device and wrote its one outcome line. Nothing else is in the log.
+    if ($Case -eq 'pair-failed')
+    {
+        foreach ($failedLine in @('Pair AirPods: started from the menu.', 'Pair AirPods: Failed, NoDevice.'))
+        {
+            $index = $index + 1
+            $failedStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+            $lines = $lines + @([string]$failedStamp + ' INFO  ' + $failedLine)
         }
     }
 
@@ -1241,6 +1284,36 @@ function Update-FakeWorld
 
 # The report a command answers with, and the evidence file it writes beside the run folders.
 # Both come back so the caller can write them where the real command would have.
+# What `doctor` writes, with the members test 24 reads: the radio check's verdict, and the pairing runs. The pairing run is stamped an
+# hour ahead, as the log lines are, so a script that keeps the runs since a moment it took keeps it.
+function Get-FakeDoctor
+{
+    $radioOff = ($script:World.Radio -eq 'Off')
+    $runs = @()
+    if ($script:World.TrayPaired)
+    {
+        $stamp = (Get-Date).ToUniversalTime().AddHours(1).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+        if ((Get-FakeContext).Case -eq 'pair-failed')
+        {
+            $runs = @([ordered]@{ time = $stamp; outcome = 'failed'; status = 'NoDevice'; statusValue = $null; modelCheck = $null; durationMs = 30000 })
+        }
+        else
+        {
+            $runs = @([ordered]@{ time = $stamp; outcome = 'paired'; status = 'Paired'; statusValue = 0; modelCheck = 'airpods'; durationMs = 41000 })
+        }
+    }
+
+    return [ordered]@{
+        radio   = [ordered]@{
+            found       = $true
+            state       = $(if ($radioOff) { 'Off' } else { 'Ok' })
+            radioState  = $(if ($radioOff) { 'Off' } else { 'On' })
+            problemCode = $null
+        }
+        pairing = $runs
+    }
+}
+
 function Get-FakeCommandAnswer
 {
     param([Parameter(Mandatory = $true)][string[]]$Command)
@@ -1249,7 +1322,11 @@ function Get-FakeCommandAnswer
     $evidence = $null
     $text = ($Command -join ' ')
 
-    if ($Command[0] -eq 'probe')
+    if ($Command[0] -eq 'doctor')
+    {
+        $report = Get-FakeDoctor
+    }
+    elseif ($Command[0] -eq 'probe')
     {
         switch ($Command[1])
         {
@@ -1317,7 +1394,8 @@ function Get-FakeAnswer
 
     # test 23, not-reached: the owner can set up none of the states, does not restart, and says so after the restart too.
     if ((Get-FakeContext).Case -eq 'not-reached' -and ($Options -contains 'no') -and
-        ($lower.Contains('can you set this up now') -or $lower.Contains('do you want to restart now') -or $lower.Contains('did you restart this pc and sign in')))
+        ($lower.Contains('can you set this up now') -or $lower.Contains('do you want to restart now') -or $lower.Contains('did you restart this pc and sign in') -or
+            $lower.Contains('can you put the case into pairing mode now')))
     {
         return 'no'
     }
@@ -1369,6 +1447,12 @@ function Update-FakeWorldForOwnerAction
     param([Parameter(Mandatory = $true)][string]$Text)
 
     $lower = $Text.ToLowerInvariant()
+
+    # test 24: Bluetooth turned off and on in quick settings, and the pairing pressed in Earshot's window. None of these texts
+    # connects or disconnects the AirPods, so only the radio and the pairing change.
+    if ($lower.Contains('open quick settings')) { $script:World.Radio = 'Off'; return }
+    if ($lower.Contains('turn bluetooth back on')) { $script:World.Radio = 'On'; return }
+    if ($lower.Contains('and press pair.')) { $script:World.TrayPaired = $true; return }
 
     # test 22: the owner ends the Earshot task in Task Manager, so the tray is gone while the AirPods stay connected.
     if ($lower.Contains('end task'))

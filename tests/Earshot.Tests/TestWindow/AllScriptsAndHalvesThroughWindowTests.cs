@@ -79,8 +79,8 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         "22-ServiceHandBack.ps1 resume|shutdown-was-clean",
     };
 
-    private const int ExpectedScriptCount = 24;
-    private const int ExpectedHalfCount = 33;
+    private const int ExpectedScriptCount = 25;
+    private const int ExpectedHalfCount = 34;
 
     [TestMethod]
     public void EveryScriptAndHalfIsDrivenThroughTheWindowWithMatchingEvidence()

@@ -964,4 +964,38 @@
         'not-reached' = @{ Overall = 'inconclusive'; Criteria = @{ 'connects-restart' = 'inconclusive' }
             FindingsInclude = @{ 'restartReached' = 'not reached' } }
     }
+
+    # ------------------------------------------------------ 24 pair airpods
+    # The fake world turns the radio off and on with the owner's words and records a tray pairing when the owner presses Pair, so the
+    # radio verdict and the pairing run in the report follow the world, while every log criterion follows the case's lines: none
+    # has none (so each fails), one has one of each (every line passes; the single click line passes the Connect), two has two of each
+    # (the Connect cannot be told apart, so it is inconclusive). not-reached: the owner cannot reach pairing mode, so the nine
+    # pairing criteria read inconclusive and the radio ones still decide. pair-failed: the report and the log both say the pairing failed.
+    '24-pair-airpods|first' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'radio-off-seen' = 'fail'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'fail'
+                'pair-radio-checked' = 'fail'; 'model-check' = 'pass'; 'pair-adopted' = 'fail'; 'setup-one-prompt' = 'pass'
+                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'fail'; 'trace-saved' = 'fail' }
+            FindingsInclude = @{ 'pairReached' = 'reached'; 'radioVerdictOff' = 'Off'; 'radioVerdictOn' = 'Ok'; 'connectAfterPairingMs' = $null } }
+        one  = @{ Overall = 'pass'; Criteria = @{
+                'radio-off-seen' = 'pass'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'pass'
+                'pair-radio-checked' = 'pass'; 'model-check' = 'pass'; 'pair-adopted' = 'pass'; 'setup-one-prompt' = 'pass'
+                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'pass'; 'trace-saved' = 'pass' }
+            FindingsInclude = @{ 'pairingRunOutcome' = 'paired'; 'pairingRunStatus' = 'Paired'; 'connectAfterPairingMs' = 1719; 'permissionPrompts' = 'one' } }
+        two  = @{ Overall = 'inconclusive'; Criteria = @{
+                'radio-off-seen' = 'pass'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'pass'
+                'pair-radio-checked' = 'pass'; 'model-check' = 'pass'; 'pair-adopted' = 'pass'; 'setup-one-prompt' = 'pass'
+                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'inconclusive'; 'trace-saved' = 'pass' } }
+        'not-reached' = @{ Overall = 'inconclusive'; Criteria = @{
+                'radio-off-seen' = 'pass'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'inconclusive'; 'pair-paired' = 'inconclusive'
+                'pair-radio-checked' = 'inconclusive'; 'model-check' = 'inconclusive'; 'pair-adopted' = 'inconclusive'
+                'setup-one-prompt' = 'inconclusive'; 'no-old-reading' = 'inconclusive'; 'connect-after-pairing' = 'inconclusive'
+                'trace-saved' = 'inconclusive' }
+            FindingsInclude = @{ 'pairReached' = 'not reached' } }
+        'pair-failed' = @{ Overall = 'fail'; Criteria = @{
+                'radio-off-seen' = 'fail'; 'radio-cleared' = 'pass'; 'listed-with-name' = 'pass'; 'pair-paired' = 'fail'
+                'pair-radio-checked' = 'fail'; 'model-check' = 'fail'; 'pair-adopted' = 'fail'; 'setup-one-prompt' = 'pass'
+                'no-old-reading' = 'pass'; 'connect-after-pairing' = 'fail'; 'trace-saved' = 'fail' }
+            FindingsInclude = @{ 'pairFailureLine' = 'Pair AirPods: Failed, NoDevice.'; 'pairingRunOutcome' = 'failed' } }
+    }
 }

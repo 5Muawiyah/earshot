@@ -109,7 +109,7 @@ public sealed class HowToBlockTests
         // (three with none), so one more: 245. Test 19's case-open card steps (three instructions and three
         // questions, replacing one of each) and its estimate steps (two instructions and three questions) add
         // nine, all with no block: 255.
-        const int expectedMissingCount = 259;
+        const int expectedMissingCount = 272;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +
