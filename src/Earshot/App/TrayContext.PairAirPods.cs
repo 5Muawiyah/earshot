@@ -72,13 +72,22 @@ internal sealed partial class TrayContext
             services.RunFlag.Active = true;
             Launch("recover a pairing", async () =>
             {
+                bool answered = true;
                 try
                 {
-                    await RecoverPairingAsync(services, CardPlace.NearTray);
+                    answered = await RecoverPairingAsync(services, CardPlace.NearTray);
                 }
                 finally
                 {
                     services.RunFlag.Active = _elevatedRun == PairRun;
+                }
+
+                // The coordinator's check for AirPods Earshot does not protect waited while this ran. When nothing was shown, it
+                // runs now: it compares the paired AirPods with the gate's own device, which a pin saved in the tray alone (the
+                // block status unread at the adoption) does not change.
+                if (!answered && !_closing && !services.RunFlag.Active)
+                {
+                    _coordinator.CheckProtectionAfterPairRecovery();
                 }
             }, CardPlace.NearTray);
             return;
@@ -89,20 +98,23 @@ internal sealed partial class TrayContext
 
     // A marker from a run that paired and did not adopt. The stale-pin check comes first and says what it found; then a pair of
     // AirPods that is paired and not the pinned one is offered through the device picker, never adopted by itself. The marker
-    // stays until a pair is chosen, or until no such pair is left.
-    private async Task RecoverPairingAsync(PairAirPodsServices services, CardPlace place)
+    // stays until a pair is chosen, or until no such pair is left. True when the person was shown something (or Earshot is
+    // closing); false when nothing was shown, so the coordinator's own check runs after it.
+    private async Task<bool> RecoverPairingAsync(PairAirPodsServices services, CardPlace place)
     {
         _log.Warn("Pair AirPods: an earlier pairing ended before its AirPods were adopted, so they may be paired, unpinned and unblocked.");
         if (!await CheckPinnedPairAsync("pairing recovery", place) || _closing)
         {
-            return;
+            return true;
         }
 
         AirPodsDiscoveryResult found = await Task.Run(() => AirPodsDiscovery.Find(services.Nodes), _lifetime.Token);
         if (!found.Listed)
         {
-            _log.Warn("Pair AirPods: the devices could not be listed, so the pairing that did not finish is looked at again next start.");
-            return;
+            // New AirPods may be paired and unblocked, and nothing can be told now: the person is told, and the marker stays.
+            _log.Warn("Pair AirPods: the devices could not be listed, so the person is asked to choose and the marker is kept.");
+            OfferChooseLeftPair(PairAirPodsText.RecoverUnread, place);
+            return true;
         }
 
         Guid pinned = _registry.Settings.Current.PinnedContainerId;
@@ -110,11 +122,12 @@ internal sealed partial class TrayContext
         if (left == 0)
         {
             ClearPairMarker("no paired AirPods other than the pinned ones are left");
-            return;
+            return false;
         }
 
         _log.Info("Pair AirPods: " + left.ToString(System.Globalization.CultureInfo.InvariantCulture) + " paired set(s) of AirPods are not the pinned ones, so the device picker is offered.");
         OfferChooseLeftPair(PairAirPodsText.RecoverChoose, place);
+        return true;
     }
 
     private void OfferChooseLeftPair(string line, CardPlace place) =>
@@ -348,7 +361,12 @@ internal sealed partial class TrayContext
 
         // Each step after the session's own, with its code and how long it took.
         var later = new List<StepOutcome>();
-        if (end.Adopted is { } adopted)
+        if (end.Replace is { } replaceStep)
+        {
+            later.Add(replaceStep);
+        }
+
+        if (end.Adopted is { } adopted && end.Replace is not { Ok: false })
         {
             later.Add(end.Adoption switch
             {
@@ -410,6 +428,9 @@ internal sealed partial class TrayContext
         public long AdoptMs { get; init; }
 
         public DeviceChoiceResult? Adoption { get; init; }
+
+        // The answer to "use these instead?", when it was asked.
+        public StepOutcome? Replace { get; init; }
     }
 
     private async Task<PairRunEnd> PairAndAdoptAsync(PairAirPodsServices services, CardPlace place)
@@ -417,7 +438,7 @@ internal sealed partial class TrayContext
         using FixRunLock? runLock = FixRunLock.TryAcquire(services.LockName, _log);
         if (runLock is null)
         {
-            _log.Info("Pair AirPods: not started, a Fix connection or a pairing is already running.");
+            _log.Info("Pair AirPods: not started, the Fix lock is held (by a Fix connection or pairing run, or by another program holding its name).");
             ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, place);
             return EndedEarly(new StepOutcome("lock", false, ExitCodes.AlreadyRunning, "already-running", null), ConnectHistoryOutcomes.Failed, 0);
         }
@@ -482,6 +503,21 @@ internal sealed partial class TrayContext
                 return new PairRunEnd(result, null, false);
             }
 
+            // Earshot always asks before it takes on a different pair: the pick and the Pair press chose what to pair, not that it
+            // takes the place of AirPods that are still paired.
+            FixAnswer? replace = await AskToReplaceAsync(services, found);
+            if (replace is { } kept && kept != FixAnswer.Ok)
+            {
+                _log.Info("Pair AirPods: the person kept the AirPods Earshot uses (" + kept + "), so the new pair is left paired and not used.");
+                ClearPairMarker("the person kept the AirPods Earshot uses", fromPairRun: true);
+                ShowCard(TrayStatus.AppName, PairAirPodsText.KeptOtherPair, place);
+                return new PairRunEnd(result, false, false)
+                {
+                    Replace = new StepOutcome("replace", false, NativeCodes.NotAttempted, kept.ToString(), null),
+                    Adoption = DeviceChoiceResult.NotApplied,
+                };
+            }
+
             var adoptWatch = System.Diagnostics.Stopwatch.StartNew();
             DeviceChoiceResult adoption = await AdoptPairedAirPodsAsync(found, place);
             long adoptMs = adoptWatch.ElapsedMilliseconds;
@@ -490,7 +526,12 @@ internal sealed partial class TrayContext
                 // Pinned in the tray only: the gate still names the previous pair, so the new one is not blocked at rest. Its own card
                 // says so, and the marker stays for the next start's check.
                 _log.Warn("Pair AirPods: the boot block status could not be read, so the gate was not given the new pair; the recovery marker is kept.");
-                return new PairRunEnd(result, false, false) { AdoptMs = adoptMs, Adoption = adoption };
+                return new PairRunEnd(result, false, false)
+                {
+                    AdoptMs = adoptMs,
+                    Adoption = adoption,
+                    Replace = replace is null ? null : new StepOutcome("replace", true, 0, FixAnswer.Ok.ToString(), null),
+                };
             }
 
             bool adopted = adoption == DeviceChoiceResult.Applied;
@@ -507,7 +548,12 @@ internal sealed partial class TrayContext
             }
 
             ShowCard(TrayStatus.AppName, !adopted ? PairAirPodsText.PairedNotAdopted : setUp ? PairingText.SetsItselfUp : PairAirPodsText.PairedAndUsing, place);
-            return new PairRunEnd(result, adopted, setUp) { AdoptMs = adoptMs, Adoption = adoption };
+            return new PairRunEnd(result, adopted, setUp)
+            {
+                AdoptMs = adoptMs,
+                Adoption = adoption,
+                Replace = replace is null ? null : new StepOutcome("replace", true, 0, FixAnswer.Ok.ToString(), null),
+            };
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
@@ -581,7 +627,28 @@ internal sealed partial class TrayContext
         _widgetStatus?.ForgetPair("a different pair was adopted");
     }
 
-    // The pair the person has just paired is the one they chose, so it is adopted at once: pinned, given to the gate when
+    // Whether the new pair may take the place of the pinned one: null when there is nothing to replace (nothing valid pinned, the
+    // same pair again, or the pinned pair no longer in the device tree), otherwise the person's answer. A device list that could
+    // not be read counts as the pinned pair still there, so the question is asked.
+    private async Task<FixAnswer?> AskToReplaceAsync(PairAirPodsServices services, AirPodsCandidate found)
+    {
+        Guid pinned = _registry.Settings.Current.PinnedContainerId;
+        if (!NodeMatch.IsValidTargetContainer(pinned) || pinned == found.ContainerId)
+        {
+            return null;
+        }
+
+        AirPodsDiscoveryResult paired = await Task.Run(() => AirPodsDiscovery.Find(services.Nodes), CancellationToken.None);
+        if (paired.Listed && !paired.Candidates.Any(c => c.DevicePresent && c.ContainerId == pinned))
+        {
+            return null;
+        }
+
+        var question = new FixPrompt(PairAirPodsText.Title, PairAirPodsText.ReplaceHeading, PairAirPodsText.ReplaceBody, [], [], PairAirPodsText.ReplaceButton);
+        return services.Prompter.Ask(question).Answer;
+    }
+
+    // The pair the person has just paired, and agreed to use, is adopted at once: pinned, given to the gate when
     // Earshot is set up, and the previous pair's readings and link dropped.
     private async Task<DeviceChoiceResult> AdoptPairedAirPodsAsync(AirPodsCandidate found, CardPlace place)
     {

@@ -4,6 +4,7 @@ using Earshot.Bluetooth;
 using Earshot.Contracts;
 using Earshot.Diagnostics;
 using Earshot.Infra;
+using Earshot.Interop;
 using Earshot.Pairing;
 using Earshot.Repair;
 using Earshot.Tests.Integration.Coordinator;
@@ -73,6 +74,7 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
+            rig.Prompter.SayOk(); // Use these AirPods instead of the pinned ones, which are still paired.
             string? pinnedAtSetUp = null;
             using var folder = new TempFolder();
             var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
@@ -95,15 +97,17 @@ public sealed class PairAirPodsTests
 
             Assert.AreEqual(FixRig.NewAirPodsAddress + "|" + FixRig.NewAirPodsContainer, pinnedAtSetUp, "Set-up ran after the new pair was pinned.");
             Assert.AreEqual(1, tray.Block.Calls.Count(c => c == "setup"), "One set-up, so one administrator prompt.");
-            Assert.HasCount(1, rig.Prompter.Asked, "One question: Look for AirPods. The pick is the other.");
+            Assert.HasCount(2, rig.Prompter.Asked, "Two questions: Look for AirPods, and use these instead of the pinned pair. The pick is the other.");
             StringAssert.Contains(rig.Prompter.Asked[0].Body, PairingText.TurnOffIPhoneBluetooth);
             StringAssert.Contains(rig.Prompter.Asked[0].Body, PairingText.CaseFront);
             StringAssert.Contains(rig.Prompter.Asked[0].Body, PairingText.CaseBack);
             Assert.AreEqual("Look for AirPods", rig.Prompter.Asked[0].OkText);
+            Assert.AreEqual(PairAirPodsText.ReplaceButton, rig.Prompter.Asked[1].OkText);
             ConnectHistoryEntry entry = history.Read().Single();
             Assert.AreEqual(ConnectHistoryActions.Pair, entry.Action);
             Assert.AreEqual(ConnectHistoryOutcomes.Paired, entry.Outcome);
             var stepNames = entry.Steps.Select(s => s.Name).ToList();
+            CollectionAssert.Contains(stepNames, "replace");
             CollectionAssert.Contains(stepNames, "adopt");
             CollectionAssert.Contains(stepNames, "setup");
             Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)), "No automatic unpair.");
@@ -119,12 +123,70 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
+            rig.Prompter.SayOk(); // Use these AirPods instead of the pinned ones, which are still paired.
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
 
             Click(tray);
 
             CollectionAssert.Contains(tray.Block.Calls, "set-device:" + FixRig.NewAirPodsAddress);
             Assert.IsFalse(tray.Block.Calls.Contains("setup"));
+            Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
+        });
+    }
+
+    // Earshot always asks before it takes on a different pair. Saying no keeps the pinned pair, adopts nothing, unpairs nothing,
+    // says the new pair is not protected, clears the marker (the person decided) and records the answer.
+    [TestMethod]
+    public void APairingWhileAnotherPairIsPinnedAsksAndANoKeepsThePinnedPair()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayCancel();
+            var marker = new FakePairRecoveryMarker();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig, marker: marker),
+                coordinatorServices: new CoordinatorServices { History = history });
+
+            Click(tray);
+
+            Assert.HasCount(2, rig.Prompter.Asked);
+            Assert.AreEqual(PairAirPodsText.ReplaceHeading, rig.Prompter.Asked[1].Heading);
+            Assert.AreEqual(AirPodsContainer, tray.Settings.Current.PinnedContainerId, "The pinned pair stays the one Earshot uses.");
+            Assert.IsFalse(tray.Block.Calls.Any(c => c.StartsWith("set-device:", StringComparison.Ordinal)), "The gate was not given the new pair.");
+            Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)), "No automatic unpair.");
+            Assert.AreEqual(PairAirPodsText.KeptOtherPair, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(marker.Exists());
+            ConnectHistoryEntry entry = history.Read().Single();
+            HistoryStep replace = entry.Steps.Single(st => st.Name == "replace");
+            Assert.AreEqual(NativeCodes.NotAttempted, replace.Code);
+            Assert.AreEqual(nameof(FixAnswer.Cancel), replace.CodeName);
+            Assert.IsFalse(entry.Steps.Any(st => st.Name == "adopt"), "Nothing was adopted, so there is no adopt step.");
+        });
+    }
+
+    // With nothing valid pinned there is nothing to replace, so the pick is the only choice and no second question is asked.
+    [TestMethod]
+    public void APairingWithNothingPinnedAsksOnlyLookForAirPods()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig), settings: s =>
+            {
+                s.PinnedContainerId = Guid.Empty;
+                s.PinnedAddress = "";
+            });
+
+            Click(tray);
+
+            Assert.HasCount(1, rig.Prompter.Asked);
             Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
         });
     }
@@ -235,6 +297,7 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
+            rig.Prompter.SayOk(); // Use these AirPods instead of the pinned ones, which are still paired.
             var paired = new FakePairedAirPodsCheck { Reading = new PairedAirPodsReading(true, 0) };
             using var tray = new TrayHarness(
                 snapshot: Target(ConnectionState.Disconnected),
@@ -250,7 +313,7 @@ public sealed class PairAirPodsTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, paired.Reads);
-            Assert.HasCount(1, rig.Prompter.Asked, "Pair AirPods asked its first question.");
+            Assert.HasCount(2, rig.Prompter.Asked, "Pair AirPods asked its first question, then whether to use the new pair instead.");
             Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
         });
     }
@@ -318,6 +381,7 @@ public sealed class PairAirPodsTests
                 paired(id);
             };
             rig.Prompter.SayOk();
+            rig.Prompter.SayOk(); // Use these AirPods instead of the pinned ones, which are still paired.
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
 
             Click(tray);
@@ -356,6 +420,7 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
+            rig.Prompter.SayOk(); // Use these AirPods instead of the pinned ones, which are still paired.
             var marker = new FakePairRecoveryMarker();
             using var tray = new TrayHarness(
                 snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker),
@@ -412,6 +477,61 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // A run that pinned the new pair in the tray but could not give it to the gate (the block status unread), then stopped: at the
+    // next start the tray's pin is the new pair, so the recovery finds nothing to offer and clears the marker. Before, the
+    // coordinator's own check had waited for the recovery and did not run either, so new AirPods the gate does not name stayed
+    // paired and unblocked with nothing said. Now that check runs once the recovery has shown nothing.
+    [TestMethod]
+    public void AMarkerLeftAtStartWhoseNewPairTheGateDoesNotNameShowsTheNotProtectedCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Where(n => n.Container != RecordedNodes.AirPodsContainer).Concat(FixRig.NewAirPodsNodes()));
+            rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+            var marker = new FakePairRecoveryMarker { Present = true };
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(),
+                pairAirPods: services,
+                coordinatorServices: new CoordinatorServices { Protection = protection, TrayPairing = services.RunFlag },
+                settings: s =>
+                {
+                    s.PinnedContainerId = FixRig.NewAirPodsContainer;
+                    s.PinnedAddress = FixRig.NewAirPodsAddress;
+                });
+
+            Assert.IsFalse(marker.Exists(), "No other pair was left to offer.");
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("showed nothing, so the check for AirPods that Earshot does not protect runs now", StringComparison.Ordinal)),
+                string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
+            Assert.AreEqual(BlockCoordinator.NotProtectedMessage, tray.Cards.Shown[^1].Content.Status);
+        });
+    }
+
+    // A marker found at start with the device list unreadable: new AirPods may be paired and unblocked and nothing can be told, so
+    // the person is asked to choose rather than told nothing, and the marker stays.
+    [TestMethod]
+    public void AMarkerLeftAtStartWithTheDevicesUnreadAsksToChooseAndKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Nodes.Inner.ListResult = CfgMgr32.CR_FAILURE;
+            var marker = new FakePairRecoveryMarker { Present = true };
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig, marker: marker), settings: s =>
+            {
+                s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                s.PinnedAddress = RecordedNodes.AirPodsAddress;
+            });
+
+            CardContent card = tray.Cards.Shown[^1].Content;
+            Assert.AreEqual(PairAirPodsText.RecoverUnread, card.Status);
+            Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+            Assert.IsTrue(marker.Exists());
+        });
+    }
+
     // A pair Earshot could not look at keeps the marker, and the card offers the device picker instead of saying "not AirPods".
     [TestMethod]
     public void APairThatCouldNotBeCheckedKeepsTheMarkerAndOffersThePicker()
@@ -445,6 +565,7 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
+            rig.Prompter.SayOk(); // Use these AirPods instead of the pinned ones, which are still paired.
             var marker = new FakePairRecoveryMarker();
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
             tray.Block.StatusFailure = new IOException("The status could not be read.");

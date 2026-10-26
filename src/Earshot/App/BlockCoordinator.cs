@@ -456,6 +456,13 @@ internal sealed partial class BlockCoordinator : IDisposable
             return;
         }
 
+        await CheckProtectionAsync();
+    }
+
+    // The check for AirPods Earshot does not protect: paired AirPods against the gate's own device. A failure is logged with its
+    // type and code.
+    private async Task CheckProtectionAsync()
+    {
         try
         {
             ProtectionReading reading = await _services.Protection.ReadAsync(CancellationToken.None);

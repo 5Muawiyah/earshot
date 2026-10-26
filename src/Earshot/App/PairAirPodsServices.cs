@@ -81,6 +81,16 @@ internal static class PairAirPodsText
 
     public const string RecoverChoose = "Earshot closed before it could start using the AirPods you paired. Choose them to finish.";
 
+    public const string ReplaceHeading = "Use these AirPods instead?";
+
+    public const string ReplaceBody = "Earshot uses your other AirPods now. If you choose these, Earshot uses them instead, and your other AirPods stay paired.";
+
+    public const string ReplaceButton = "Use these";
+
+    public const string KeptOtherPair = "Earshot still uses your other AirPods. The new ones stay paired, and Earshot doesn't protect them.";
+
+    public const string RecoverUnread = "Earshot closed while pairing and can't see your devices now. Choose your AirPods to finish.";
+
     // The first question, before anything is scanned: three lines, each its own step.
     public static string FirstQuestionBody =>
         PairingText.TurnOffIPhoneBluetooth + Environment.NewLine + Environment.NewLine +

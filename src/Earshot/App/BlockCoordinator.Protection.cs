@@ -86,6 +86,20 @@ internal sealed partial class BlockCoordinator
         }
     }
 
+    // The tray's look at a pairing that did not finish, which the start checks wait for, ended without showing anything. The
+    // check for AirPods Earshot does not protect runs now instead of at the next start: the tray compared with its own pin,
+    // and the gate may still name another pair. UI thread only.
+    public void CheckProtectionAfterPairRecovery()
+    {
+        if (_closing || _disposed || !_started || _services.TrayPairing.Active)
+        {
+            return;
+        }
+
+        _log.Info("The tray's look at a pairing that did not finish showed nothing, so the check for AirPods that Earshot does not protect runs now.");
+        _ = CheckProtectionAsync();
+    }
+
     // A Fix connection run started from the tray has ended. It may have left a run half done or a new pair Earshot does not
     // protect (an adoption that failed), so the checks made at start run again now rather than at the next sign-in, and the
     // card about unprotected AirPods may be shown again. UI thread only, like the rest of the coordinator.
