@@ -261,7 +261,7 @@ internal sealed class PairingSession
                 listWait.CancelAfter(_options.PairedListWait);
                 try
                 {
-                    now = await _api.ListPairedAsync(listWait.Token).ConfigureAwait(false);
+                    now = await _api.ListPairedAsync(listWait.Token).WaitAsync(listWait.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -375,7 +375,8 @@ internal sealed class PairingSession
         pairCts.CancelAfter(_options.PairTimeout);
         try
         {
-            return await _api.PairAsync(deviceId, new Prompt(_ui, pairCts.Token), pairCts.Token).ConfigureAwait(false);
+            // WaitAsync ends the wait at the limit whether or not the operation honours its token.
+            return await _api.PairAsync(deviceId, new Prompt(_ui, pairCts.Token), pairCts.Token).WaitAsync(pairCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

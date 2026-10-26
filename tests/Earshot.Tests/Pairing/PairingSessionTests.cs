@@ -409,6 +409,23 @@ public sealed class PairingSessionTests
         Assert.AreEqual(PairingText.TimedOut, result.CardLine);
     }
 
+    // A PairAsync that ignores Cancel still ends at the time limit: the wait is given up, not left to Windows.
+    [TestMethod]
+    public async Task APairingThatIgnoresCancelStillEndsAtTheTimeout()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig, name: "");
+        rig.Pairing.HangOnPair = true;
+        rig.Pairing.HangIgnoresCancel = true;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.AreEqual(PairFailureReason.TimedOut, result.Reason);
+        Assert.IsLessThan(10_000L, watch.ElapsedMilliseconds);
+    }
+
     [TestMethod]
     public async Task ACancelledRunThrowsAndStillClosesTheWindow()
     {

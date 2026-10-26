@@ -537,7 +537,8 @@ internal sealed class RePairer
                 listWait.CancelAfter(_options.PairedListWait);
                 try
                 {
-                    list = await _api.ListPairedAsync(listWait.Token).ConfigureAwait(false);
+                    // WaitAsync ends the wait at the budget whether or not the call honours its token.
+                    list = await _api.ListPairedAsync(listWait.Token).WaitAsync(listWait.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
@@ -575,7 +576,7 @@ internal sealed class RePairer
                 unpairWait.CancelAfter(_options.UnpairWait);
                 try
                 {
-                    unpair = await _api.UnpairAsync(paired.Id, unpairWait.Token).ConfigureAwait(false);
+                    unpair = await _api.UnpairAsync(paired.Id, unpairWait.Token).WaitAsync(unpairWait.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {

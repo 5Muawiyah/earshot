@@ -104,6 +104,21 @@ public sealed class FixRePairTests
     }
 
     [TestMethod]
+    public async Task ARemovalThatIgnoresCancelStillEndsWithinItsBudget()
+    {
+        using var rig = new FixRig();
+        ArrangeHappyPairing(rig);
+        rig.Pairing.HangOnUnpair = true;
+        rig.Pairing.HangIgnoresCancel = true;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        RePairResult result = await Make(rig).RunAsync(RePairConsent(), Target, CancellationToken.None);
+
+        Assert.AreEqual(RePairFailure.UnpairFailed, result.Failure);
+        Assert.IsLessThan(10_000L, watch.ElapsedMilliseconds);
+    }
+
+    [TestMethod]
     public async Task AFirstDeviceListedBeforeThePromptIsNeverACandidate()
     {
         using var rig = new FixRig();

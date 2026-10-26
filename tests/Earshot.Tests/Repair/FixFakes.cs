@@ -228,7 +228,7 @@ internal sealed class FakePairing : IPairingApi
         OnListPaired?.Invoke();
         if (HangOnList)
         {
-            await Task.Delay(Timeout.Infinite, ct);
+            await Hang(ct);
         }
 
         return new PairedListResult(Paired.ToList(), ListSteps.ToList());
@@ -237,12 +237,17 @@ internal sealed class FakePairing : IPairingApi
     // UnpairAsync waits until it is cancelled, as a removal Windows never answers does.
     public bool HangOnUnpair { get; set; }
 
+    // A hang that ignores its token, as a WinRT operation that does not honour Cancel would: the call never ends.
+    public bool HangIgnoresCancel { get; set; }
+
+    private Task Hang(CancellationToken ct) => HangIgnoresCancel ? new TaskCompletionSource().Task : Task.Delay(Timeout.Infinite, ct);
+
     public async Task<PairingCallResult> UnpairAsync(string deviceId, CancellationToken ct)
     {
         Calls.Add("unpair:" + deviceId);
         if (HangOnUnpair)
         {
-            await Task.Delay(Timeout.Infinite, ct);
+            await Hang(ct);
         }
 
         if (UnpairResult.Success)
@@ -274,7 +279,7 @@ internal sealed class FakePairing : IPairingApi
 
         if (HangOnPair)
         {
-            await Task.Delay(Timeout.Infinite, ct);
+            await Hang(ct);
         }
 
         foreach ((FixPairKind kind, string? pin) in Requests)

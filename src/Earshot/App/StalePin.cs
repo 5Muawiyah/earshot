@@ -60,7 +60,8 @@ internal static class StalePin
             limit.CancelAfter(budget ?? DefaultBudget);
             try
             {
-                paired = await api.ListPairedAsync(limit.Token).ConfigureAwait(false);
+                // WaitAsync ends the wait at the budget whether or not the call honours its token.
+                paired = await api.ListPairedAsync(limit.Token).WaitAsync(limit.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {

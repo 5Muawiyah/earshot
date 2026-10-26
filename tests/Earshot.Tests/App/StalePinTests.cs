@@ -43,6 +43,22 @@ public sealed class StalePinTests
         Assert.IsLessThan(5000L, watch.ElapsedMilliseconds);
     }
 
+    // A list call that ignores its cancellation still ends the look within its budget: the wait does not depend on Windows
+    // honouring Cancel.
+    [TestMethod]
+    public async Task APairedListThatIgnoresCancelStillEndsWithinTheBudget()
+    {
+        using var rig = new FixRig();
+        rig.Pairing.HangOnList = true;
+        rig.Pairing.HangIgnoresCancel = true;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        StalePinResult result = await StalePin.ReadAsync(rig.Pairing, rig.Nodes, RecordedNodes.AirPodsContainer, CancellationToken.None, TimeSpan.FromMilliseconds(100));
+
+        Assert.AreEqual(StalePinState.Unknown, result.State);
+        Assert.IsLessThan(5000L, watch.ElapsedMilliseconds);
+    }
+
     [TestMethod]
     public async Task APairStillInTheListIsNotStale()
     {
