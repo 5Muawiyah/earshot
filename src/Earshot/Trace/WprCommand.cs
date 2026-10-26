@@ -3,8 +3,9 @@ namespace Earshot.Tracing;
 // The wpr.exe command lines. Windows Performance Recorder command line:
 // https://learn.microsoft.com/en-us/windows-hardware/test/wpt/wpr-command-line-options
 //
-// -start "<profile file>!<profile id>" -filemode, -stop <file> and -cancel were run on this PC on 25 October 2026. Starting
-// and stopping need administrator, and a non-elevated -status does not see an elevated session.
+// -start "<profile file>!<profile id>" -filemode, -stop <file> and -cancel were run by hand on the owner's PC on 25 October
+// 2026, as recorded in verification.md; the output was not kept. Starting and stopping need administrator, and a non-elevated
+// -status does not see an elevated session.
 //
 // Two options from the same page keep the recording Earshot's own. -recordtempto names the folder the recording is written to
 // before it is saved, so the file being recorded sits in the run folder only administrators can open instead of the user's

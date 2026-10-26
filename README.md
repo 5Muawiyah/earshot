@@ -152,7 +152,7 @@ Startup on is not covered.
 - **Says when this PC's Bluetooth is the problem.** After a Connect fails, and
   before a pairing starts, Earshot reads this PC's Bluetooth once and, when it
   is the cause, says only what it saw: "Bluetooth is off.", "Bluetooth is turned
-  off by a switch on this PC or by its firmware.", "Bluetooth on this PC isn't
+  off by a switch, the firmware or a policy on this PC.", "Bluetooth on this PC isn't
   working. Windows reports problem code N." or "Windows finds no Bluetooth on
   this PC.", each with a Bluetooth settings button, or "Bluetooth on this PC
   can't do Classic Bluetooth, which AirPods need for sound.", with no button,
@@ -352,7 +352,7 @@ the PC maker supplied fixed it at once. Roll the driver back in Device
 Manager: open Bluetooth, right-click the Bluetooth adapter, choose
 Properties, then Driver, then Roll Back Driver. Earshot does not change
 drivers. On that PC a hand-made Bluetooth trace showed where the pairing
-stopped; Earshot's Record a Bluetooth trace makes the same kind of trace, and
+stopped; Earshot's Record a Bluetooth trace records the Bluetooth stack too, and
 has not had a live run yet.
 
 ## What it does not do

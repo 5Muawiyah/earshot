@@ -1393,7 +1393,7 @@ tray can let it go from any thread. A pinned pair that Windows no longer holds
 (`StalePin`) is said at start and when a device appears, and the device picker
 or Pair AirPods is offered; nothing is adopted by itself. Either card stays up
 until it is used. The paired list is given 5 seconds (a waiting budget), after
-which the look says nothing and logs ERROR_TIMEOUT. At start, a card from this
+which the look says nothing and logs earshot-timeout. At start, a card from this
 look answers for the pairs, so the coordinator's card about unprotected AirPods
 is not shown over it.
 
@@ -1427,7 +1427,7 @@ https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
 | State | Line | Button |
 |---|---|---|
 | Off | Bluetooth is off. | Bluetooth settings |
-| Switched off | Bluetooth is turned off by a switch on this PC or by its firmware. | Bluetooth settings |
+| Switched off | Bluetooth is turned off by a switch, the firmware or a policy on this PC. | Bluetooth settings |
 | Problem | Bluetooth on this PC isn't working. Windows reports problem code N. | Bluetooth settings |
 | No adapter | Windows finds no Bluetooth on this PC. | Bluetooth settings |
 | No Classic Bluetooth | Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound. | None |

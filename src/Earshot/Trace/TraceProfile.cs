@@ -16,7 +16,8 @@ internal static class TraceProfile
     public const string ResourceName = "Earshot.Trace.BluetoothStack.wprp";
 
     // The recording to start. "BluetoothStack.Verbose.File" is the id the file's own comments use, and wpr.exe refuses it
-    // with 0xc5600611 on this PC; the profile id without the suffix, with -filemode, was proved to start (25 October 2026).
+    // with 0xc5600611 on the owner's PC; the profile id without the suffix, with -filemode, started (25 October 2026, by hand,
+    // as recorded in verification.md).
     public const string ProfileId = "BluetoothStack.Verbose";
 
     public const string SourceCommit = "7f68a48cd21306c6b0519728ec311a0f66479aff";
