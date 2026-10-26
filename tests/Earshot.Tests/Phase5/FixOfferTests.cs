@@ -161,6 +161,23 @@ public sealed class FixOfferTests
         Assert.IsGreaterThan(plain, withButton);
     }
 
+    // A card that stays up has no dismiss timer: the trace's Stop is the only way to end the recording, so its card goes only
+    // when it is pressed, clicked, replaced or hidden.
+    [TestMethod]
+    public void ACardThatStaysUpHasNoDismissTimer()
+    {
+        using var rig = new Rig();
+        rig.Presenter.Show(new CardContent("AirPods", Reason), CardAnchor.NearTray);
+        rig.Ui.RunAll();
+        int restarts = rig.Timer.Restarts.Count;
+
+        rig.Presenter.Show(new CardContent("AirPods", Reason, new CardAction("Stop", () => { }), StaysUp: true), CardAnchor.NearTray);
+        rig.Ui.RunAll();
+
+        Assert.HasCount(restarts, rig.Timer.Restarts, "No dismiss interval was started for it.");
+        Assert.IsFalse(rig.Timer.Running, "The earlier card's timer was stopped, so it cannot close this one.");
+    }
+
     [TestMethod]
     public void AButtonThatThrowsIsLoggedAndTheCardIsStillGone()
     {

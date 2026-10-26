@@ -1850,7 +1850,7 @@ internal sealed partial class WidgetCard : Form
 
                     break;
                 default:
-                    CardPaint.SmallButton(g, row.Control, row.Index switch { 2 => WidgetCopy.RepairButton, 3 => WidgetCopy.FixConnectionButton, 4 => WidgetCopy.PairAirPodsButton, _ => WidgetCopy.TraceButton }, colours, _type, _dpi, focused);
+                    CardPaint.SmallButton(g, row.Control, row.Index switch { 2 => WidgetCopy.RepairButton, 3 => WidgetCopy.FixConnectionButton, 4 => WidgetCopy.PairAirPodsButton, _ => rows.TraceRecording ? WidgetCopy.TraceStopButton : WidgetCopy.TraceButton }, colours, _type, _dpi, focused);
                     break;
             }
         }

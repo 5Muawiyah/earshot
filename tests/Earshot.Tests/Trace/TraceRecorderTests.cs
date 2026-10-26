@@ -347,10 +347,11 @@ public sealed class TraceRecorderTests
         bool disposedDuringStop = false;
         rig.Factory.Signals.OnRequestStop = () =>
         {
-            // The run ends while the press is still in progress, and is given time to dispose what it would.
+            // The run ends while the press is still in progress, and is given ample time (on old code, which disposed outside the
+            // lock, it would have by then; on this code it waits for the press).
             rig.Factory.Signals.Finish();
             rig.Launcher.Completion.TrySetResult(new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0)));
-            Thread.Sleep(300);
+            Thread.Sleep(2000);
             disposedDuringStop = rig.Factory.Signals.Disposed;
         };
 

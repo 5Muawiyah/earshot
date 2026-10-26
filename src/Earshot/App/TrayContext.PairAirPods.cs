@@ -311,14 +311,14 @@ internal sealed partial class TrayContext
     }
 
     // A card with one button, in the same place as the other cards of the tray.
-    private void ShowCardWithButton(string title, string text, string label, Action onClick, CardPlace place)
+    private void ShowCardWithButton(string title, string text, string label, Action onClick, CardPlace place, bool staysUp = false)
     {
         if (_closing || _closed)
         {
             return;
         }
 
-        var content = new CardContent(title, text, new CardAction(label, onClick));
+        var content = new CardContent(title, text, new CardAction(label, onClick), staysUp);
         if (place.ClickPoint is { } point)
         {
             _registry.Cards.Show(content, place.Anchor, point);

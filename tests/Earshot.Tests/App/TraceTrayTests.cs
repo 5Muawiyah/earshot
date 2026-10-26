@@ -127,6 +127,37 @@ public sealed class TraceTrayTests
         });
     }
 
+    // Stop is always within reach: the running card stays up until it is used or replaced, and the settings row's button reads
+    // Stop while the trace records. Before, the card closed after twelve seconds and the row still said Record, so a person
+    // waiting for the prompt and then pairing found nothing labelled Stop, and the trace ran its full ten minutes. The note,
+    // long enough to need its time, stays up too.
+    [TestMethod]
+    public void StopStaysWithinReachWhileTheTraceRecords()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+
+            tray.Context.RecordTraceFromSettings();
+            string note = TraceCopy.NoteFor(recorder.DestinationFolder);
+            WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == note), "the note");
+            Assert.IsTrue(tray.Cards.Shown.Last(c => c.Content.Status == note).Content.StaysUp, "The note stays up.");
+            Assert.IsFalse(tray.Context.WidgetCardHostForTest.ReadSettings().TraceRecording);
+            PressRecordOnTheNote(tray, recorder);
+
+            recorder.BeginRecording();
+            WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Running), "the running card");
+
+            Assert.IsTrue(tray.Cards.Shown.Last(c => c.Content.Status == TraceCopy.Running).Content.StaysUp, "The running card stays up.");
+            Assert.IsTrue(tray.Context.WidgetCardHostForTest.ReadSettings().TraceRecording, "The row's button reads Stop.");
+
+            recorder.Finish(Saved);
+            WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.SavedIn(Folder)), "the saved card");
+            Assert.IsFalse(tray.Context.WidgetCardHostForTest.ReadSettings().TraceRecording, "Record again once it has ended.");
+        });
+    }
+
     [TestMethod]
     public void AskingAgainWhileItRecordsStopsItAndStartsNothingNew()
     {

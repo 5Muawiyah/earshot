@@ -43,4 +43,5 @@ internal sealed record SetupViewModel(
 
 // What the updates page's own rows need: whether Check automatically is on, whether an install exists (Repair is offered),
 // and the running version for the status row's title.
-internal sealed record UpdatesRows(bool AutoCheck, bool ShowRepair, string? Version);
+// TraceRecording: a Bluetooth trace is recording, so its row's button stops it and says so.
+internal sealed record UpdatesRows(bool AutoCheck, bool ShowRepair, string? Version, bool TraceRecording = false);

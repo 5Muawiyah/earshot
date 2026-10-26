@@ -79,6 +79,7 @@ internal static class WidgetCopy
     public const string PairAirPodsButton = "Pair";
     public const string TraceRow = "Bluetooth trace";
     public const string TraceButton = "Record";
+    public const string TraceStopButton = "Stop";
     public const string RepairSub = "Checks the installed files and sets Earshot up again.";
     public const string CheckAutomatically = "Check automatically";
     public const string UpdateButton = "Update";
@@ -140,6 +141,7 @@ internal static class WidgetCopy
     public const string NameFixConnection = FixConnectionRow;
     public const string NamePairAirPods = PairAirPodsRow;
     public const string NameTrace = "Record a Bluetooth trace";
+    public const string NameTraceStop = "Stop the Bluetooth trace";
     public const string NameAutoCheck = "Check for updates automatically";
     public const string NameMicOff = "Microphone off mode";
     public const string NameSoundSettings = "Open sound settings";

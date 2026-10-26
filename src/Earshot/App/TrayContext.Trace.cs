@@ -56,18 +56,22 @@ internal sealed partial class TrayContext
 
     // Raised on whichever thread changed the state, so the card is shown from the UI thread. The state turns to Recording when
     // the helper is asked for, before the administrator prompt is answered, so neither the card nor the log says it records.
+    // The running card stays up until it is pressed, clicked or replaced, and the settings row's button reads Stop while the
+    // trace records, so Stop is always within reach: without it the recording would run its full ten minutes.
     private void OnTraceStateChanged(object? sender, EventArgs e)
     {
-        if (_traceRecorder is not { State: TraceState.Recording })
-        {
-            return;
-        }
-
+        bool recording = _traceRecorder is { State: TraceState.Recording };
         CardPlace place = _tracePlace;
         _registry.UiPost(() =>
         {
+            _widgetCardPresenter?.Refresh();
+            if (!recording)
+            {
+                return;
+            }
+
             _log.Info("Bluetooth trace: started; it records once the administrator prompt is allowed.");
-            ShowCardWithButton(TrayStatus.AppName, TraceCopy.Running, TraceCopy.StopButton, () => _traceRecorder?.Stop(), place);
+            ShowCardWithButton(TrayStatus.AppName, TraceCopy.Running, TraceCopy.StopButton, () => _traceRecorder?.Stop(), place, staysUp: true);
         });
     }
 
@@ -132,7 +136,8 @@ internal sealed partial class TrayContext
             return;
         }
 
-        ShowCardWithButton(TrayStatus.AppName, TraceCopy.NoteFor(recorder.DestinationFolder), TraceCopy.NoteButton, () => BeginTrace(place), place);
+        // The note is long enough to need its time, and nothing is recorded until its button is pressed, so it stays up too.
+        ShowCardWithButton(TrayStatus.AppName, TraceCopy.NoteFor(recorder.DestinationFolder), TraceCopy.NoteButton, () => BeginTrace(place), place, staysUp: true);
     }
 
     // The note's Record button. Everything is asked again, because the card may have stayed up while things changed.

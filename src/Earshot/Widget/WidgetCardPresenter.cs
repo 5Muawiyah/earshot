@@ -377,7 +377,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     private SetupViewModel UpdatePageWithRows()
     {
         CardSettingsValues values = _host!.ReadSettings();
-        return UpdatePage() with { Rows = new UpdatesRows(values.CheckAutomatically, values.InstallExists, values.InstalledVersion) };
+        return UpdatePage() with { Rows = new UpdatesRows(values.CheckAutomatically, values.InstallExists, values.InstalledVersion, values.TraceRecording) };
     }
 
     // The battery history page: the chart of the day the person has stepped to, from the store through the host's query.

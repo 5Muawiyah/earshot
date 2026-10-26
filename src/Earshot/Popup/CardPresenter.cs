@@ -311,7 +311,14 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
 
             _onScreen = true;
             _shownContent = content;
-            timer.Restart(content.Action is null ? DismissAfter : ActionDismissAfter);
+            if (content.StaysUp)
+            {
+                timer.Stop();
+            }
+            else
+            {
+                timer.Restart(content.Action is null ? DismissAfter : ActionDismissAfter);
+            }
             _log.Write(LogLevel.Debug, string.Create(CultureInfo.InvariantCulture,
                 $"Shown at {bounds.X},{bounds.Y} {bounds.Width}x{bounds.Height}, {dpi} DPI, taskbar {target.Edge}, {where}: {what}."));
             return true;

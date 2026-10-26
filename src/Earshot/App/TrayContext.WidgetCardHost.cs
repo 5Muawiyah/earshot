@@ -106,6 +106,7 @@ internal sealed partial class TrayContext
                     .Select(d => new DisplayOption(d.Id, DisplayNames.Long(d, displays.Displays))).ToList(),
                 CaseOpenCardShownOn = CaseOpenCardDisplayChoice.Targets(widget.CaseOpenCardDisplays, widget.GaugeDisplay, displays.Displays).Select(d => d.Id).ToList(),
                 ElevatedRunNote = _tray._elevatedRun is { } run ? FinishingMessage(run) : null,
+                TraceRecording = _tray._traceRecorder is { State: Tracing.TraceState.Recording },
             };
         }
 

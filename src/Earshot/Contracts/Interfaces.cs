@@ -111,7 +111,9 @@ public interface IBatteryProvider
 // Card surface. The popup card implements it; everything else only calls Show and Hide.
 public enum CardAnchor { NearCursor, NearTray }
 // Title = device name; no battery field in v1. Action is one button under the status (the Fix offer), or null for none.
-public sealed record CardContent(string Title, string Status, CardAction? Action = null);
+// StaysUp: the card has no dismiss timer and goes only when clicked, pressed, replaced or hidden, for a button that is the
+// only way to end something that is still running (the trace's Stop).
+public sealed record CardContent(string Title, string Status, CardAction? Action = null, bool StaysUp = false);
 
 // A button on a card: its words and what a press does. The card hides itself when it is pressed.
 public sealed record CardAction(string Label, Action OnClick);

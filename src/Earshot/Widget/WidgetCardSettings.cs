@@ -104,6 +104,9 @@ internal sealed record CardSettingsValues(
     // of their usual line, and the tray refuses the buttons with the same words.
     public string? ElevatedRunNote { get; init; }
 
+    // A Bluetooth trace is recording: the row's button reads Stop, and pressing it stops the recording.
+    public bool TraceRecording { get; init; }
+
     public const int LowBatteryMin = 10;
     public const int LowBatteryMax = 90;
     public const int LowBatteryStep = 10;
