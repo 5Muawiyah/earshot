@@ -66,8 +66,9 @@ internal sealed partial class TrayContext
         _pairServices = options.PairAirPods;
         if (_pairServices is not null && !options.DataRootRedirected)
         {
-            // A pair made or removed in Windows arrives as a new device group.
-            _coordinator.NewDeviceHook = async _ => KeptThePinnedPairJustNow() || !await CheckPinnedPairAsync("new device", CardPlace.NearTray);
+            // A pair made or removed in Windows arrives as a new device group. A Pair AirPods that runs (its first question up, the
+            // flag not yet raised) answers for the pairs itself.
+            _coordinator.NewDeviceHook = async _ => KeptThePinnedPairJustNow() || !await CheckPinnedPairAsync("new device", CardPlace.NearTray) || _elevatedRun == PairRun;
             _coordinator.StartLookHook = () => _startLookShown?.Task ?? Task.FromResult(false);
         }
 

@@ -182,6 +182,28 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // A new device group that arrives while Pair AirPods' first question is up (the pairing flag is still down): the pairing
+    // answers for the pairs, so the tray's hook says it answered and the coordinator's card about unprotected AirPods, with a Fix
+    // button the lock would refuse, is not shown over the question.
+    [TestMethod]
+    public void ANewDeviceWhilePairAirPodsAsksItsFirstQuestionIsAnsweredByThePairing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            TrayHarness? running = null;
+            bool? answered = null;
+            rig.Prompter.OnAsk = _ => answered ??= running!.Coordinator.NewDeviceHook!(CancellationToken.None).GetAwaiter().GetResult();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            running = tray;
+
+            Click(tray);
+
+            Assert.IsTrue(answered, "The hook said nothing was answered while the pairing's first question was up.");
+        });
+    }
+
     // With nothing valid pinned there is nothing to replace, so the pick is the only choice and no second question is asked.
     [TestMethod]
     public void APairingWithNothingPinnedAsksOnlyLookForAirPods()
