@@ -97,18 +97,43 @@ public sealed class RadioCheckTests
     }
 
     [TestMethod]
-    public async Task NoAdapterAndNoClassicBluetoothBothReadAsNoAdapter()
+    public async Task NoAdapterReadsAsNoAdapter()
     {
-        RadioCheckResult none = await Check(Adapter(null, found: false, id: null), Node()).CheckAsync(CancellationToken.None);
-        RadioCheckResult le = await Check(Adapter(RadioStateValues.On, classic: false), Node()).CheckAsync(CancellationToken.None);
+        RadioCheckResult r = await Check(Adapter(null, found: false, id: null), Node()).CheckAsync(CancellationToken.None);
 
-        foreach (RadioCheckResult r in new[] { none, le })
-        {
-            Assert.AreEqual(RadioCheckState.NoAdapter, r.State);
-            Assert.AreEqual("Windows finds no Bluetooth on this PC.", r.Line);
-            Assert.AreEqual(RadioAction.BluetoothSettings, r.Action);
-            Assert.IsTrue(r.BlocksRepair);
-        }
+        Assert.AreEqual(RadioCheckState.NoAdapter, r.State);
+        Assert.AreEqual("Windows finds no Bluetooth on this PC.", r.Line);
+        Assert.AreEqual(RadioAction.BluetoothSettings, r.Action);
+        Assert.IsTrue(r.BlocksRepair);
+    }
+
+    // An adapter that was found and does not do Classic Bluetooth is not "no Bluetooth": it has a line of its own, and no
+    // button, since no setting changes it.
+    [TestMethod]
+    public async Task AnAdapterWithoutClassicBluetoothSaysSoAndOffersNoButton()
+    {
+        RadioCheckResult r = await Check(Adapter(RadioStateValues.On, classic: false), Node()).CheckAsync(CancellationToken.None);
+
+        Assert.AreEqual(RadioCheckState.NoClassic, r.State);
+        Assert.AreEqual("Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound.", r.Line);
+        Assert.AreEqual(RadioAction.None, r.Action);
+        Assert.IsTrue(r.BlocksRepair);
+    }
+
+    // A default adapter that could not be asked (the call threw, or Windows is too old) says nothing about whether there is an
+    // adapter: no line, no block of the offers, and the raw code kept.
+    [TestMethod]
+    public async Task AnAdapterReadThatDidNotAnswerClaimsNothingAndKeepsItsCode()
+    {
+        var threw = new AdapterReading(false, false, null, null, [StepOutcomes.FromHResult("bluetooth-adapter", unchecked((int)0x8007048F), "COMException", ok: false)], Answered: false);
+
+        RadioCheckResult r = await Check(threw, Node()).CheckAsync(CancellationToken.None);
+
+        Assert.AreEqual(RadioCheckState.Unknown, r.State);
+        Assert.IsNull(r.Line);
+        Assert.AreEqual(RadioAction.None, r.Action);
+        Assert.IsFalse(r.BlocksRepair);
+        Assert.AreEqual(unchecked((int)0x8007048F), r.HistoryCode);
     }
 
     [TestMethod]

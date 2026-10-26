@@ -107,7 +107,7 @@ internal sealed class RadioFact
 
     public bool? ClassicSupported { get; set; }
 
-    // The radio check's verdict by name: Ok, Off, SwitchedOff, Problem, NoAdapter or Unknown.
+    // The radio check's verdict by name: Ok, Off, SwitchedOff, Problem, NoAdapter, NoClassic or Unknown.
     public string? State { get; set; }
 
     // Windows.Devices.Radios.RadioState by name: Unknown, On, Off or Disabled.

@@ -19,8 +19,8 @@ namespace Earshot.Bluetooth;
 // https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
 // https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/winrt-api-desktop-app-support
 //
-// What only a live run on a real radio proves: what GetDefaultAsync returns with no adapter (null or an exception: both read as
-// NoAdapter here), the Disabled state of a hardware or software switch, a real problem code, and the Unreachable line (it
+// What only a live run on a real radio proves: what GetDefaultAsync returns with no adapter (null reads as NoAdapter here; an
+// exception, or a Windows too old to ask, is a read that did not answer and claims nothing), the Disabled state of a hardware or software switch, a real problem code, and the Unreachable line (it
 // comes from a pairing result, never from these reads; see PairingSession).
 
 internal enum RadioCheckState
@@ -30,6 +30,7 @@ internal enum RadioCheckState
     SwitchedOff,
     Problem,
     NoAdapter,
+    NoClassic,
     Unreachable,
     Unknown,
 }
@@ -52,8 +53,9 @@ internal static class RadioStateValues
 }
 
 // What the adapter reads gave. RadioState is null when the radio could not be asked; InstanceId is null when the radio's node
-// could not be named.
-internal sealed record AdapterReading(bool Found, bool ClassicSupported, int? RadioState, string? InstanceId, IReadOnlyList<StepOutcome> Steps);
+// could not be named. Answered is false when the default adapter could not be asked at all (the call threw, or Windows is too
+// old for it): then Found says nothing about whether there is an adapter.
+internal sealed record AdapterReading(bool Found, bool ClassicSupported, int? RadioState, string? InstanceId, IReadOnlyList<StepOutcome> Steps, bool Answered = true);
 
 internal interface IRadioApi
 {
@@ -86,10 +88,11 @@ internal sealed record RadioCheckResult(
     long ElapsedMs)
 {
     // True when the state means a connect or a pairing cannot work: the card shows this line and its button instead of an offer.
-    public bool BlocksRepair => State is RadioCheckState.Off or RadioCheckState.SwitchedOff or RadioCheckState.Problem or RadioCheckState.NoAdapter or RadioCheckState.Unreachable;
+    public bool BlocksRepair => State is RadioCheckState.Off or RadioCheckState.SwitchedOff or RadioCheckState.Problem or RadioCheckState.NoAdapter or RadioCheckState.NoClassic or RadioCheckState.Unreachable;
 
     // The number the history keeps for this state: 0 for Ok, the radio state for Off and SwitchedOff, the problem number for
-    // Problem, the first failing read for NoAdapter, and the radio state (or 0) for Unknown.
+    // Problem, the first failing read for NoAdapter, 0 for NoClassic, and the radio state (or the first failing read, or 0) for
+    // Unknown.
     public int HistoryCode => State switch
     {
         RadioCheckState.Ok => 0,
@@ -97,7 +100,8 @@ internal sealed record RadioCheckResult(
         RadioCheckState.SwitchedOff => RadioStateValues.Disabled,
         RadioCheckState.Problem => ProblemCode ?? 0,
         RadioCheckState.NoAdapter => ReadCodes.FirstOrDefault(s => !s.Ok)?.Code ?? 0,
-        _ => RadioState ?? 0,
+        RadioCheckState.NoClassic => 0,
+        _ => RadioState ?? ReadCodes.FirstOrDefault(s => !s.Ok)?.Code ?? 0,
     };
 
     public StepOutcome ToStep() => new("radio-check", State == RadioCheckState.Ok, HistoryCode, State.ToString(), null);
@@ -108,6 +112,7 @@ internal static class RadioLines
     public const string Off = "Bluetooth is off.";
     public const string SwitchedOff = "Bluetooth is turned off by a switch or setting on this PC.";
     public const string NoAdapter = "Windows finds no Bluetooth on this PC.";
+    public const string NoClassic = "Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound.";
     public const string Unreachable = "This PC found the AirPods but couldn't reach them.";
     public const string BluetoothSettingsButton = "Bluetooth settings";
     public const string RecordTraceButton = "Record a Bluetooth trace";
@@ -121,6 +126,7 @@ internal static class RadioLines
         RadioCheckState.SwitchedOff => SwitchedOff,
         RadioCheckState.Problem => ProblemLine(problemCode ?? 0),
         RadioCheckState.NoAdapter => NoAdapter,
+        RadioCheckState.NoClassic => NoClassic,
         RadioCheckState.Unreachable => Unreachable,
         _ => null,
     };
@@ -185,9 +191,22 @@ internal sealed class RadioCheck : IRadioCheck
 
         AdapterReading adapter = await read.ConfigureAwait(false);
         var codes = adapter.Steps.ToList();
-        if (!adapter.Found || !adapter.ClassicSupported)
+        if (!adapter.Answered)
+        {
+            // The adapter could not be asked, which is not the same as no adapter: nothing is claimed, and the codes are kept.
+            return Result(RadioCheckState.Unknown, adapter, null, codes, watch);
+        }
+
+        if (!adapter.Found)
         {
             return Result(RadioCheckState.NoAdapter, adapter, null, codes, watch);
+        }
+
+        // An adapter that does only Bluetooth Low Energy: the AirPods' sound needs Classic Bluetooth, and there is no setting to
+        // change, so no button.
+        if (!adapter.ClassicSupported)
+        {
+            return Result(RadioCheckState.NoClassic, adapter, null, codes, watch);
         }
 
         DevNodeStatusInfo? node = null;
@@ -247,7 +266,7 @@ internal sealed class WinRtRadioApi : IRadioApi
     {
         if (!FixPlatform.HasDeviceEnumeration)
         {
-            return new AdapterReading(false, false, null, null, [StepOutcomes.NotAvailable("bluetooth-adapter", "Windows is older than 10.0.19041.")]);
+            return new AdapterReading(false, false, null, null, [StepOutcomes.NotAvailable("bluetooth-adapter", "Windows is older than 10.0.19041.")], Answered: false);
         }
 
         return await ReadGuardedAsync(ct).ConfigureAwait(false);
@@ -265,7 +284,7 @@ internal sealed class WinRtRadioApi : IRadioApi
         catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
         {
             steps.Add(StepOutcomes.FromHResult("bluetooth-adapter", ex.HResult, ex.GetType().Name, ok: false));
-            return new AdapterReading(false, false, null, null, steps);
+            return new AdapterReading(false, false, null, null, steps, Answered: false);
         }
 
         if (adapter is null)

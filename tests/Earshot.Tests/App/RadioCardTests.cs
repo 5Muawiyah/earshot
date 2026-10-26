@@ -87,6 +87,24 @@ public sealed class RadioCardTests
         });
     }
 
+    // An adapter without Classic Bluetooth has its line and no button: there is nothing to change in Bluetooth settings, and
+    // nothing for the AirPods is offered either.
+    [TestMethod]
+    public void AnAdapterWithoutClassicBluetoothShowsItsLineWithNoButton()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, RadioCheckState.NoClassic));
+
+            FailTheConnect(tray);
+
+            Assert.AreEqual(RadioLines.NoClassic, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsNull(tray.Cards.Shown[^1].Content.Action);
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Action?.Label is "Fix connection" or "Connect in Windows"));
+        });
+    }
+
     [TestMethod]
     public void AProblemCodeIsNamedInTheLine()
     {
