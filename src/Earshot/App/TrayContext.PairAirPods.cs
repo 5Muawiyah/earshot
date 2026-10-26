@@ -325,7 +325,7 @@ internal sealed partial class TrayContext
         StalePinResult result;
         try
         {
-            result = await StalePin.ReadAsync(services.Api, services.Nodes, settings.PinnedContainerId, settings.PinnedAddress, ct, services.StalePinBudget);
+            result = await StalePin.ReadAsync(services.Api, services.Nodes, settings.PinnedContainerId, ct, services.StalePinBudget);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

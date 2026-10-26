@@ -13,8 +13,8 @@ namespace Earshot.Tests.App;
 [TestClass]
 public sealed class StalePinTests
 {
-    private static Task<StalePinResult> Read(FixRig rig, Guid? container = null, string? address = null) =>
-        StalePin.ReadAsync(rig.Pairing, rig.Nodes, container ?? RecordedNodes.AirPodsContainer, address ?? RecordedNodes.AirPodsAddress, CancellationToken.None);
+    private static Task<StalePinResult> Read(FixRig rig, Guid? container = null) =>
+        StalePin.ReadAsync(rig.Pairing, rig.Nodes, container ?? RecordedNodes.AirPodsContainer, CancellationToken.None);
 
     private static PairedDevice OwnersPair() => new("paired-old", "AirPods Pro", RecordedNodes.AirPodsAddress, RecordedNodes.AirPodsContainer);
 
@@ -36,7 +36,7 @@ public sealed class StalePinTests
         rig.Pairing.HangOnList = true;
         var watch = System.Diagnostics.Stopwatch.StartNew();
 
-        StalePinResult result = await StalePin.ReadAsync(rig.Pairing, rig.Nodes, RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress, CancellationToken.None, TimeSpan.FromMilliseconds(100));
+        StalePinResult result = await StalePin.ReadAsync(rig.Pairing, rig.Nodes, RecordedNodes.AirPodsContainer, CancellationToken.None, TimeSpan.FromMilliseconds(100));
 
         Assert.AreEqual(StalePinState.Unknown, result.State);
         Assert.IsTrue(result.Steps.Any(s => s.Code == 1460 && !s.Ok && s.CodeName == "earshot-timeout"), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code + " " + s.CodeName)));
@@ -135,10 +135,27 @@ public sealed class StalePinTests
         using var rig = new FixRig();
         RemovePairing(rig);
 
-        StalePinResult result = await Read(rig, container: Guid.Empty, address: "");
+        StalePinResult result = await Read(rig, container: Guid.Empty);
 
         Assert.AreEqual(StalePinState.NotPinned, result.State);
         Assert.IsEmpty(rig.Pairing.Calls, "Nothing is read when there is nothing to check.");
+    }
+
+    // The same AirPods removed in Windows and paired again: the address is the same and the container is new, so the pin names
+    // a container that is gone and Connect would go to it. Stale, with the new pairing offered in its place.
+    [TestMethod]
+    public async Task TheSameAirPodsPairedAgainUnderANewContainerAreStaleAndOffered()
+    {
+        using var rig = new FixRig();
+        RemovePairing(rig);
+        var removedContainer = new Guid("11111111-2222-4333-8444-555555555503");
+        rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(FixRig.NewAirPodsNodes()));
+        rig.Pairing.Paired.Add(new PairedDevice("paired-again", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+
+        StalePinResult result = await Read(rig, container: removedContainer);
+
+        Assert.AreEqual(StalePinState.Stale, result.State);
+        Assert.AreEqual(FixRig.NewAirPodsContainer, result.Others.Single().ContainerId);
     }
 
     [TestMethod]

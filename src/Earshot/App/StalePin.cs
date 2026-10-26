@@ -10,7 +10,8 @@ namespace Earshot.App;
 // set-up sends its address and container to the gate, which finds no such device. Read only.
 //
 //   NotPinned  nothing valid is pinned, so there is nothing to be stale
-//   NotStale   the pinned container is in Windows' paired list, or a node of the pinned address is in the tree now
+//   NotStale   the pinned container is in Windows' paired list, or a node of it is in the tree now. By container only: the
+//              same AirPods paired again keep their address under a new container, and the pin then names nothing
 //   Stale      neither: the pairing is gone
 //   Unknown    a read failed. Not knowing is never stale: dropping a pin and the readings kept for it on a failed read would be
 //              worse than leaving a stale one for the next look.
@@ -43,11 +44,10 @@ internal static class StalePin
     // and a failed connect's card, so it must not wait for as long as Windows takes.
     public static readonly TimeSpan DefaultBudget = TimeSpan.FromSeconds(5);
 
-    public static async Task<StalePinResult> ReadAsync(IPairingApi api, INodeReader nodes, Guid pinnedContainer, string pinnedAddress, CancellationToken ct, TimeSpan? budget = null)
+    public static async Task<StalePinResult> ReadAsync(IPairingApi api, INodeReader nodes, Guid pinnedContainer, CancellationToken ct, TimeSpan? budget = null)
     {
         ArgumentNullException.ThrowIfNull(api);
         ArgumentNullException.ThrowIfNull(nodes);
-        ArgumentNullException.ThrowIfNull(pinnedAddress);
         if (!NodeMatch.IsValidTargetContainer(pinnedContainer))
         {
             return new StalePinResult(StalePinState.NotPinned, [], []);
@@ -81,11 +81,8 @@ internal static class StalePin
             return new StalePinResult(StalePinState.Unknown, [], steps);
         }
 
-        bool Pinned(string address, Guid container) =>
-            container == pinnedContainer || (pinnedAddress.Length > 0 && string.Equals(address, pinnedAddress, StringComparison.OrdinalIgnoreCase));
-
-        bool stillPaired = paired.Devices.Any(d => Pinned(d.Address12, d.ContainerId));
-        bool inTheTree = found.Candidates.Any(c => c.DevicePresent && Pinned(c.Address, c.ContainerId));
+        bool stillPaired = paired.Devices.Any(d => d.ContainerId == pinnedContainer);
+        bool inTheTree = found.Candidates.Any(c => c.DevicePresent && c.ContainerId == pinnedContainer);
         if (stillPaired || inTheTree)
         {
             return new StalePinResult(StalePinState.NotStale, [], steps);
