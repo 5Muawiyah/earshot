@@ -63,7 +63,7 @@ internal static partial class Program
             if (runLock is null)
             {
                 log.Warn("fix: the Fix lock is held (by a Fix connection or Pair AirPods run, or by another program holding its name), so this run was not started.");
-                output.Writer.WriteLine(FixRunLock.FixAlreadyRunningMessage);
+                output.Writer.WriteLine(FixRunLock.LockHeldMessage);
                 ctx.ExitCode = ExitCodes.AlreadyRunning;
                 return;
             }

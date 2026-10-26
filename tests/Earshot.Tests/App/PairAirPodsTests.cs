@@ -673,7 +673,7 @@ public sealed class PairAirPodsTests
 
                 Click(tray);
 
-                Assert.AreEqual(FixRunLock.PairAlreadyRunningMessage, tray.Cards.Shown[^1].Content.Status);
+                Assert.AreEqual(FixRunLock.LockHeldMessage, tray.Cards.Shown[^1].Content.Status);
                 Assert.IsEmpty(rig.Prompter.Asked);
             }
             finally
@@ -1102,7 +1102,7 @@ public sealed class PairAirPodsTests
             Click(tray);
 
             Assert.AreEqual(0, launcher.Started);
-            Assert.IsTrue(tray.Cards.Shown.Any(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage));
+            Assert.IsTrue(tray.Cards.Shown.Any(c => c.Content.Status == "Earshot is already pairing the AirPods."), "The tray knows its own pairing runs.");
         });
     }
 
@@ -1115,7 +1115,9 @@ public sealed class PairAirPodsTests
 
             tray.Context.SayFixRefusedByTheLock();
 
-            Assert.AreEqual(FixRunLock.PairAlreadyRunningMessage, tray.Cards.Shown[^1].Content.Status);
+            // The lock cannot tell a run from another program that holds its name, so the card says a run may be open. Before,
+            // it said one was, also when nothing was.
+            Assert.AreEqual("Fix connection or Pair AirPods may already be running. Try again in a moment.", tray.Cards.Shown[^1].Content.Status);
         });
     }
 

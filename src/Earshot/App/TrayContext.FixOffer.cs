@@ -114,7 +114,7 @@ internal sealed partial class TrayContext
     internal void SayFixRefusedByTheLock()
     {
         _log.Info("Fix connection: the run ended because another Fix connection or pairing holds the lock.");
-        ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, CardPlace.NearTray);
+        ShowCard(TrayStatus.AppName, FixRunLock.LockHeldMessage, CardPlace.NearTray);
     }
 
     private void StartFixConnectionNow()

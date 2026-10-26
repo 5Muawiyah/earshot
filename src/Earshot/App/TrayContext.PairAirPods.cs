@@ -571,7 +571,7 @@ internal sealed partial class TrayContext
         if (runLock is null)
         {
             _log.Info("Pair AirPods: not started, the Fix lock is held (by a Fix connection or pairing run, or by another program holding its name).");
-            ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, place);
+            ShowCard(TrayStatus.AppName, FixRunLock.LockHeldMessage, place);
             return EndedEarly(new StepOutcome("lock", false, ExitCodes.AlreadyRunning, "already-running", null), ConnectHistoryOutcomes.Failed, 0);
         }
 

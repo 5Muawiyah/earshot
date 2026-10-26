@@ -174,7 +174,7 @@ public sealed class FixRunLockTests
         int freeCode = RunFix(exe, output, holdLock: null);
 
         Assert.AreEqual(ExitCodes.AlreadyRunning, heldCode, heldText);
-        StringAssert.Contains(heldText, FixRunLock.FixAlreadyRunningMessage);
+        StringAssert.Contains(heldText, FixRunLock.LockHeldMessage);
         Assert.AreEqual(ExitCodes.PlanOnly, freeCode, "With the lock free the same run plans as before.");
     }
 

@@ -131,7 +131,7 @@ internal sealed partial class TrayContext
 
         if (recorder.NeedsSetUp)
         {
-            _log.Info("Bluetooth trace: Earshot is not set up, so there is no installed copy to raise.");
+            _log.Info("Bluetooth trace: no copy of Earshot new enough to record a trace is installed in Program Files, so there is none to raise.");
             ShowCard(TrayStatus.AppName, TraceCopy.SetUpFirst, place);
             return;
         }

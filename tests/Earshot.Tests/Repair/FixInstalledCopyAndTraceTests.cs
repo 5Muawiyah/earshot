@@ -38,6 +38,9 @@ public sealed class FixInstalledCopyAndTraceTests
         Assert.IsNull(run.ExitCode);
         Assert.AreEqual(NotInstalledFixElevator.StepName, run.Step.Step);
         Assert.IsEmpty(launcher.Launches);
+
+        // A copy that is installed but too old to apply the plan gets this too, so the step does not say there is none.
+        Assert.AreEqual("No copy of Earshot new enough to apply the plan is installed in Program Files, so there is no copy to raise.", run.Step.Detail);
     }
 
     // Changes to make and no installed copy: nothing is asked, and the result says to set up Earshot first.

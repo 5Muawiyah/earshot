@@ -30,8 +30,11 @@ namespace Earshot.App;
 internal sealed class FixRunLock : IDisposable
 {
     public const string BaseName = @"Global\Earshot.Fix.Run";
-    public const string FixAlreadyRunningMessage = "Fix connection is already running.";
-    public const string PairAlreadyRunningMessage = "Earshot is already pairing or fixing the AirPods.";
+    // What a refusal by the lock can say: the name is held, by a run or by whatever else holds it, which cannot be told apart.
+    public const string LockHeldMessage = "Fix connection or Pair AirPods may already be running. Try again in a moment.";
+
+    // The tray's own Pair AirPods is running, which the tray knows.
+    public const string PairAlreadyRunningMessage = "Earshot is already pairing the AirPods.";
 
     // How long Dispose waits for the holding thread to let the mutex go. It does nothing but release, so this is never reached
     // in practice; if it is, the wait is logged and the thread is left to finish on its own.
@@ -122,8 +125,9 @@ internal sealed class FixRunLock : IDisposable
         {
             // MutexAcl.Create opens a mutex that is already there with full access, so the account that runs Earshot is given full
             // control: a second run of the same account then opens it and is refused as held, and a run whose last owner died
-            // takes it over. Administrators may wait on it and release it, so an elevated Setup.exe under Administrator protection
-            // is refused too (it cannot open it with full access, which counts as held).
+            // takes it over. The Administrators entry grants wait and release only. Earshot's own open asks for full access, which
+            // that entry does not give, so it lets no Earshot run in: an elevated Setup.exe under Administrator protection runs
+            // as another account, cannot open the mutex with full access, and is refused as held. Nothing else is granted.
             var security = new MutexSecurity();
             using (WindowsIdentity self = WindowsIdentity.GetCurrent())
             {

@@ -146,7 +146,7 @@ internal sealed class NotInstalledFixElevator : IFixElevator
 {
     public const string StepName = "installed-copy";
 
-    public static StepOutcome Why => StepOutcomes.NotAttempted(StepName, "Earshot is not installed in Program Files, so there is no copy to raise.");
+    public static StepOutcome Why => StepOutcomes.NotAttempted(StepName, "No copy of Earshot new enough to apply the plan is installed in Program Files, so there is no copy to raise.");
 
     public Task<ElevatedRun> ApplyAsync(FixConsent consent, string planPath, string planSha256, CancellationToken ct)
     {
