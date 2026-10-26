@@ -14,7 +14,9 @@ internal static class WprCommand
 {
     // With the terminal services session in it, so a cancel before a start reaches only this session's Earshot recording, not
     // one another signed-in user's Earshot is making.
-    internal static string InstanceName { get; } = "EarshotBluetoothTraceS" + System.Diagnostics.Process.GetCurrentProcess().SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    internal static string InstanceName { get; } = InstanceNameFor(System.Diagnostics.Process.GetCurrentProcess().SessionId);
+
+    internal static string InstanceNameFor(int sessionId) => "EarshotBluetoothTraceS" + sessionId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public static string ExePath(string systemRoot)
     {

@@ -56,7 +56,9 @@ public sealed class WprCommandTests
     [TestMethod]
     public void TheInstanceNameCarriesThisSession()
     {
-        Assert.AreEqual("EarshotBluetoothTraceS" + System.Diagnostics.Process.GetCurrentProcess().SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture), WprCommand.InstanceName);
+        Assert.AreEqual("EarshotBluetoothTraceS1", WprCommand.InstanceNameFor(1));
+        Assert.AreEqual("EarshotBluetoothTraceS2", WprCommand.InstanceNameFor(2));
+        Assert.AreEqual(WprCommand.InstanceNameFor(System.Diagnostics.Process.GetCurrentProcess().SessionId), WprCommand.InstanceName, "The name in use is this process's session's.");
     }
 
     [TestMethod]

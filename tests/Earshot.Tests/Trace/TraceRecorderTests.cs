@@ -12,7 +12,13 @@ internal sealed class FakeTraySignals : ITrayTraceSignals
     public bool CopiedSet { get; private set; }
     public bool Disposed { get; private set; }
     public void Finish() => _done.TrySetResult();
-    public void RequestStop() => StopRequested = true;
+    public Action? OnRequestStop { get; set; }
+
+    public void RequestStop()
+    {
+        StopRequested = true;
+        OnRequestStop?.Invoke();
+    }
     public bool IsDone => _done.Task.IsCompleted;
 
     public bool WaitDone(CancellationToken ct)
@@ -329,6 +335,32 @@ public sealed class TraceRecorderTests
         await run;
     }
 
+    // A Stop pressed just as the run ends. Before, Stop took the signals without the lock while the run's end disposed them
+    // outside it, so the press could reach events that were disposed under it. Now the end waits for a Stop in progress.
+    [TestMethod]
+    public async Task AStopAsTheRunEndsNeverReachesSignalsDisposedUnderIt()
+    {
+        var rig = new Rig();
+        Task<TraceResult> run = rig.Recorder.RecordAsync(CancellationToken.None);
+        await Rig.Until(() => rig.Calls.Count >= 2);
+        rig.Files.ResultText = Saved;
+        bool disposedDuringStop = false;
+        rig.Factory.Signals.OnRequestStop = () =>
+        {
+            // The run ends while the press is still in progress, and is given time to dispose what it would.
+            rig.Factory.Signals.Finish();
+            rig.Launcher.Completion.TrySetResult(new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0)));
+            Thread.Sleep(300);
+            disposedDuringStop = rig.Factory.Signals.Disposed;
+        };
+
+        await Task.Run(rig.Recorder.Stop);
+        await run;
+
+        Assert.IsFalse(disposedDuringStop, "The signals were disposed while Stop was using them.");
+        Assert.IsTrue(rig.Factory.Signals.Disposed, "The run's end still disposes them once Stop is done.");
+    }
+
     // Exit: the helper is not asked to stop and save a file nobody will collect. It sees the tray process end and cancels.
     [TestMethod]
     public async Task DisposingTheRecorderWhileItRecordsDoesNotAskTheHelperToSave()
@@ -441,7 +473,7 @@ public sealed class TraceRecorderTests
             Assert.IsFalse(text.Contains((char)0x2014), text);
         }
 
-        Same("Recording a Bluetooth trace. Try pairing now.", TraceCopy.Running);
+        Same("Allow the Windows prompt to start the trace. Then try pairing, and press Stop when you are done.", TraceCopy.Running);
         Same("Stop", TraceCopy.StopButton);
         Same("Record a Bluetooth trace", TraceCopy.StartButton);
         Same(

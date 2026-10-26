@@ -54,7 +54,8 @@ internal sealed partial class TrayContext
         }
     }
 
-    // Raised on whichever thread changed the state, so the card is shown from the UI thread.
+    // Raised on whichever thread changed the state, so the card is shown from the UI thread. The state turns to Recording when
+    // the helper is asked for, before the administrator prompt is answered, so neither the card nor the log says it records.
     private void OnTraceStateChanged(object? sender, EventArgs e)
     {
         if (_traceRecorder is not { State: TraceState.Recording })
@@ -65,7 +66,7 @@ internal sealed partial class TrayContext
         CardPlace place = _tracePlace;
         _registry.UiPost(() =>
         {
-            _log.Info("Bluetooth trace: recording.");
+            _log.Info("Bluetooth trace: started; it records once the administrator prompt is allowed.");
             ShowCardWithButton(TrayStatus.AppName, TraceCopy.Running, TraceCopy.StopButton, () => _traceRecorder?.Stop(), place);
         });
     }

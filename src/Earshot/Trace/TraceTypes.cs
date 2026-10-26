@@ -195,7 +195,7 @@ internal static class TraceCopy
 {
     public const string StartButton = "Record a Bluetooth trace";
     public const string StopButton = "Stop";
-    public const string Running = "Recording a Bluetooth trace. Try pairing now.";
+    public const string Running = "Allow the Windows prompt to start the trace. Then try pairing, and press Stop when you are done.";
     // Shown before anything is asked or recorded, with the button that starts the recording, and the folder it will be saved in.
     public static string NoteFor(string folder) =>
         "A Bluetooth trace holds the Bluetooth addresses of your devices and may hold pairing keys. It is saved in " + folder +

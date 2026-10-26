@@ -295,6 +295,26 @@ public sealed class TraceTrayTests
         });
     }
 
+    // The Fix result's button asks for a trace; it is not the row's switch, so while one records it says so and stops nothing.
+    [TestMethod]
+    public void AFixResultAskingWhileOneRecordsSaysSoAndStopsNothing()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+            recorder.BeginRecording();
+            tray.PumpUntilIdle();
+
+            tray.Context.RecordTraceFromFixResult();
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(TraceCopy.AlreadyRecording, tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual(0, recorder.Stopped);
+            Assert.AreEqual(0, recorder.Recorded);
+        });
+    }
+
     // With no installed copy the unreachable card says its line and offers no trace button.
     [TestMethod]
     public void ThePairingCardOffersNoTraceButtonWithoutAnInstalledCopy()
