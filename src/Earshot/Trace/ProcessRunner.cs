@@ -10,7 +10,8 @@ internal sealed record ProcessRun(bool Started, int ExitCode, bool TimedOut, str
 // The one boundary the trace code starts programs through, so tests fake it and one test runs the real one.
 internal interface IProcessRunner
 {
-    // tempFolder: when given, the program's TEMP and TMP.
+    // tempFolder: when given (the trace's elevated wpr runs), the program's TEMP and TMP, and the program gets only the system's
+    // own folders as its environment.
     ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout, string? tempFolder = null);
 }
 
@@ -21,6 +22,31 @@ internal interface IProcessRunner
 internal sealed class WindowsProcessRunner : IProcessRunner
 {
     private const int MaxOutputCharacters = 8000;
+
+    // The system folders an elevated run's PATH holds, in this order.
+    internal static IReadOnlyList<string> SystemPath()
+    {
+        string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return [Environment.SystemDirectory, windows, Path.Combine(Environment.SystemDirectory, "Wbem")];
+    }
+
+    internal static IReadOnlyList<(string Name, string Value)> ElevatedEnvironment(string tempFolder)
+    {
+        string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        return
+        [
+            ("SystemRoot", windows),
+            ("windir", windows),
+            ("SystemDrive", Path.GetPathRoot(windows)?.TrimEnd('\\') ?? ""),
+            ("ProgramData", Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)),
+            ("ALLUSERSPROFILE", Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)),
+            ("ComSpec", Path.Combine(Environment.SystemDirectory, "cmd.exe")),
+            ("PATH", string.Join(";", SystemPath())),
+            ("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+            ("TEMP", tempFolder),
+            ("TMP", tempFolder),
+        ];
+    }
 
     public ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout, string? tempFolder = null)
     {
@@ -40,11 +66,17 @@ internal sealed class WindowsProcessRunner : IProcessRunner
             info.ArgumentList.Add(arg);
         }
 
+        // An elevated wpr run starts with an environment of the system's own folders, read from Windows rather than from the
+        // person's variables (HKCU\Environment, PATH), which any program of theirs can change: nothing of theirs reaches an
+        // elevated program. TEMP and TMP are the private run folder.
         // https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.environment
         if (tempFolder is not null)
         {
-            info.Environment["TEMP"] = tempFolder;
-            info.Environment["TMP"] = tempFolder;
+            info.Environment.Clear();
+            foreach ((string name, string value) in ElevatedEnvironment(tempFolder))
+            {
+                info.Environment[name] = value;
+            }
         }
 
         var output = new StringBuilder();

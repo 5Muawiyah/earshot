@@ -64,6 +64,20 @@ public sealed class ProcessRunnerTests
         StringAssert.Contains(run.Output, temp.Path + " " + temp.Path, "Output was: " + run.Output);
     }
 
+    // The trace's wpr runs elevated, so they get a small environment of the system's own folders, not the person's: a variable
+    // of the caller's (here one this test sets, as HKCU\Environment would) does not reach it, and PATH is the system folders only.
+    [TestMethod]
+    public void ATraceRunGetsTheSystemsFoldersAndNoneOfTheCallersVariables()
+    {
+        using var temp = new TempFolder();
+        using var mark = new EnvironmentVariableScope("EARSHOT_CALLER_MARK", "from-the-person");
+        ProcessRun run = new WindowsProcessRunner().Run(System32("cmd.exe"), ["/c", "echo", "[%EARSHOT_CALLER_MARK%]", "[%PATH%]"], TimeSpan.FromSeconds(30), tempFolder: temp.Path);
+
+        Assert.IsTrue(run.Started, run.Problem);
+        Assert.IsFalse(run.Output.Contains("from-the-person", StringComparison.Ordinal), "Output was: " + run.Output);
+        StringAssert.Contains(run.Output, "[" + string.Join(";", WindowsProcessRunner.SystemPath()) + "]", "Output was: " + run.Output);
+    }
+
     [TestMethod]
     public void AProgramThatWaitsForKeysIsNotWaitedOnForever()
     {
