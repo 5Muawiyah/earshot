@@ -187,6 +187,7 @@ public sealed class RadioCheckTests
 
         Assert.AreEqual(RadioCheckState.Unknown, r.State);
         Assert.IsTrue(r.ReadCodes.Any(s => s.Step == "radio-read" && s.Code == 1460 && !s.Ok), string.Join("; ", r.ReadCodes.Select(s => s.Step + " " + s.Code)));
+        Assert.AreEqual("earshot-timeout", r.ToStep().CodeName, "The history names Earshot's own time limit as such, not as a Windows timeout.");
         Assert.IsLessThan(2000, r.ElapsedMs);
         Assert.IsTrue(seen.IsCancellationRequested, "The abandoned read is told to stop.");
     }

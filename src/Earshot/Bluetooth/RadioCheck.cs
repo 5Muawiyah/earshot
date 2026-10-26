@@ -104,7 +104,12 @@ internal sealed record RadioCheckResult(
         _ => RadioState ?? ReadCodes.FirstOrDefault(s => !s.Ok)?.Code ?? 0,
     };
 
-    public StepOutcome ToStep() => new("radio-check", State == RadioCheckState.Ok, HistoryCode, State.ToString(), null);
+    // A read that ran past this build's own budget is named as Earshot's, so the history does not take it for a Windows timeout.
+    public StepOutcome ToStep() => new("radio-check", State == RadioCheckState.Ok, HistoryCode, TimedOut ? EarshotTimeout : State.ToString(), null);
+
+    internal const string EarshotTimeout = "earshot-timeout";
+
+    private bool TimedOut => State == RadioCheckState.Unknown && ReadCodes.Any(s => s.Step == "radio-read" && s.Code == 1460);
 }
 
 internal static class RadioLines
