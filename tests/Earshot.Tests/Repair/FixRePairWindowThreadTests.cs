@@ -34,11 +34,12 @@ public sealed class FixRePairWindowThreadTests
         });
     }
 
-    // The person closing the window is their Cancel; the run closing it is not.
+    // The person closing the window is their Cancel; the run closing it is not. The window is shown, so on a private desktop:
+    // run 115 found it shown on the runner's own desktop when this ran on a plain STA thread.
     [TestMethod]
     public void ClosingTheWindowCancelsTheRunAndTheRunsOwnCloseDoesNot()
     {
-        StaThread.Run(() =>
+        Phase5.CardDesktop.Run(() =>
         {
             SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
             using var byPerson = new CancellationTokenSource();
