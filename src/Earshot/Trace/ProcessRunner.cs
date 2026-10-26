@@ -10,7 +10,8 @@ internal sealed record ProcessRun(bool Started, int ExitCode, bool TimedOut, str
 // The one boundary the trace code starts programs through, so tests fake it and one test runs the real one.
 internal interface IProcessRunner
 {
-    ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout);
+    // tempFolder: when given, the program's TEMP and TMP.
+    ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout, string? tempFolder = null);
 }
 
 // CreateProcess without a shell, no window, arguments passed as a list (no command-line parsing of a path), standard input
@@ -21,7 +22,7 @@ internal sealed class WindowsProcessRunner : IProcessRunner
 {
     private const int MaxOutputCharacters = 8000;
 
-    public ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout)
+    public ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout, string? tempFolder = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exe);
         ArgumentNullException.ThrowIfNull(args);
@@ -37,6 +38,13 @@ internal sealed class WindowsProcessRunner : IProcessRunner
         foreach (string arg in args)
         {
             info.ArgumentList.Add(arg);
+        }
+
+        // https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.processstartinfo.environment
+        if (tempFolder is not null)
+        {
+            info.Environment["TEMP"] = tempFolder;
+            info.Environment["TMP"] = tempFolder;
         }
 
         var output = new StringBuilder();

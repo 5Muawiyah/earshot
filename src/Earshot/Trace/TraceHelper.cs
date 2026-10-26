@@ -202,7 +202,7 @@ internal static class TraceHelper
         // A session an earlier helper left behind would make -start fail. The cancel names Earshot's own instance, which by
         // wpr's page should keep it to Earshot's own recording (not yet seen in a real one). "No trace running" is the normal
         // answer, so the code is recorded and nothing is concluded from it.
-        ProcessRun cancel = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
+        ProcessRun cancel = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit, runFolder);
         log.Info("trace: wpr -cancel " + Describe(cancel));
 
         string markerPath = Path.Combine(machine.TraceFolder, MarkerFileName);
@@ -212,20 +212,23 @@ internal static class TraceHelper
             log.Warn("trace: the marker could not be written: " + marker);
         }
 
-        ProcessRun start = runner.Run(machine.WprPath, WprCommand.Start(profilePath, runFolder), StartLimit);
+        ProcessRun start = runner.Run(machine.WprPath, WprCommand.Start(profilePath, runFolder), StartLimit, runFolder);
         if (!Succeeded(start))
         {
             wprCode = start.ExitCode;
             log.Warn("trace: wpr -start failed: " + Describe(start));
 
-            // A start that was killed at its limit may still have started the session, which must not be left recording.
+            // A start that was killed at its limit may still have started the session, which must not be left recording. wpr that
+            // ran to its end and failed started nothing.
+            bool ended = !start.TimedOut;
             if (start.TimedOut || !start.Started)
             {
-                ProcessRun cancelAfterStart = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
+                ProcessRun cancelAfterStart = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit, runFolder);
                 log.Info("trace: wpr -cancel after the failed start " + Describe(cancelAfterStart));
+                ended = !start.Started || Succeeded(cancelAfterStart);
             }
 
-            _ = machine.DeleteFile(markerPath);
+            RemoveMarkerIf(ended, machine, markerPath, log);
             return TraceOutcome.StartFailed;
         }
 
@@ -236,24 +239,24 @@ internal static class TraceHelper
         // The tray is gone, so nobody would collect a file: the session is cancelled and nothing is written.
         if (reason == TraceStopReason.TrayExited)
         {
-            ProcessRun discard = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
+            ProcessRun discard = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit, runFolder);
             log.Info("trace: the tray exited, so the recording was cancelled. wpr -cancel " + Describe(discard));
-            _ = machine.DeleteFile(markerPath);
+            RemoveMarkerIf(Succeeded(discard), machine, markerPath, log);
             return TraceOutcome.Discarded;
         }
 
         fileName = "bluetooth-" + utcNow().ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + ".etl";
         string etlPath = Path.Combine(runFolder, fileName);
-        ProcessRun stop = runner.Run(machine.WprPath, WprCommand.Stop(etlPath), StopLimit);
+        ProcessRun stop = runner.Run(machine.WprPath, WprCommand.Stop(etlPath), StopLimit, runFolder);
         if (!Succeeded(stop))
         {
             wprCode = stop.ExitCode;
             log.Warn("trace: wpr -stop failed: " + Describe(stop));
 
             // A session that would not save must not be left recording.
-            ProcessRun cancelAfter = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
+            ProcessRun cancelAfter = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit, runFolder);
             log.Info("trace: wpr -cancel after the failed stop " + Describe(cancelAfter));
-            _ = machine.DeleteFile(markerPath);
+            RemoveMarkerIf(Succeeded(cancelAfter), machine, markerPath, log);
             fileName = "";
             return TraceOutcome.StopFailed;
         }
@@ -271,6 +274,19 @@ internal static class TraceHelper
         }
 
         return TraceOutcome.Saved;
+    }
+
+    // The marker says a session may still be recording. It goes only once a stop or a cancel has worked; otherwise the session
+    // may still run, and the next start of the tray says so.
+    private static void RemoveMarkerIf(bool sessionEnded, ITraceMachine machine, string markerPath, ILog log)
+    {
+        if (!sessionEnded)
+        {
+            log.Warn("trace: the session may still be recording, so the marker is kept and the next start says so.");
+            return;
+        }
+
+        _ = machine.DeleteFile(markerPath);
     }
 
     public static int ExitCodeFor(TraceOutcome outcome) => outcome switch

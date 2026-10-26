@@ -534,10 +534,13 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         return removed;
     }
 
+    internal static string ExplorerPath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+
     // The trace is already saved when this runs, so a folder window that does not open is logged and nothing more.
     public void OpenFolder(string folder)
     {
-        var info = new ProcessStartInfo("explorer.exe") { UseShellExecute = false };
+        // By its full path, so no explorer.exe beside Earshot or in the current folder is started instead.
+        var info = new ProcessStartInfo(ExplorerPath) { UseShellExecute = false };
         info.ArgumentList.Add(folder);
         try
         {
@@ -549,11 +552,23 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         }
     }
 
+    // A marker is a few short lines; a bigger file is not one, and is not read (a folder that has not been checked yet may hold
+    // anything).
+    internal const int MaxMarkerBytes = 1024;
+
     public string? ReadMarker()
     {
         try
         {
-            return File.ReadAllText(Path.Combine(_traceFolder, TraceHelper.MarkerFileName));
+            string path = Path.Combine(_traceFolder, TraceHelper.MarkerFileName);
+            var info = new FileInfo(path);
+            if (info.Exists && info.Length > MaxMarkerBytes)
+            {
+                _log.Warn("trace: the marker is " + info.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + " bytes, which no marker is, so it is not read.");
+                return null;
+            }
+
+            return File.ReadAllText(path);
         }
         catch (FileNotFoundException)
         {

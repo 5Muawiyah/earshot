@@ -53,6 +53,17 @@ public sealed class ProcessRunnerTests
         Assert.AreEqual(7, run.ExitCode);
     }
 
+    // The trace's wpr runs get the private run folder as TEMP and TMP, not the person's own temporary folder.
+    [TestMethod]
+    public void ATempFolderGivenIsTheProgramsTempAndTmp()
+    {
+        using var temp = new TempFolder();
+        ProcessRun run = new WindowsProcessRunner().Run(System32("cmd.exe"), ["/c", "echo", "%TEMP%", "%TMP%"], TimeSpan.FromSeconds(30), tempFolder: temp.Path);
+
+        Assert.IsTrue(run.Started, run.Problem);
+        StringAssert.Contains(run.Output, temp.Path + " " + temp.Path, "Output was: " + run.Output);
+    }
+
     [TestMethod]
     public void AProgramThatWaitsForKeysIsNotWaitedOnForever()
     {

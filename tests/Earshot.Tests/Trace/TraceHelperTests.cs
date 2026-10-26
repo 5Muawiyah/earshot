@@ -110,10 +110,12 @@ internal sealed class FakeRunner : IProcessRunner
 {
     public List<string> Calls { get; } = [];
     public Func<IReadOnlyList<string>, ProcessRun>? Respond { get; set; }
+    public List<string?> TempFolders { get; } = [];
 
-    public ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout)
+    public ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout, string? tempFolder = null)
     {
         Calls.Add(string.Join(' ', args));
+        TempFolders.Add(tempFolder);
         return Respond?.Invoke(args) ?? new ProcessRun(true, 0, false, "", null);
     }
 }
@@ -288,6 +290,50 @@ public sealed class TraceHelperTests
         Assert.IsTrue(machine.FolderDeleted);
         Assert.IsTrue(log.Has(LogLevel.Info, "the tray exited, so the recording was cancelled"));
         Assert.AreEqual(ExitCodes.Ok, TraceHelper.ExitCodeFor(outcome));
+    }
+
+    // A cancel that failed may have left the session recording, so the marker stays and the next start says a trace may still
+    // be running. Before, the marker was deleted whatever the cancel returned.
+    [TestMethod]
+    public void AFailedCancelAfterTheTrayExitedKeepsTheMarker()
+    {
+        var (_, machine, _, _, log) = Run((_, s, r) =>
+        {
+            s.Reason = TraceStopReason.TrayExited;
+            r.Respond = a => a[0] == "-cancel" ? new ProcessRun(true, 1, false, "", null) : new ProcessRun(true, 0, false, "", null);
+        });
+
+        CollectionAssert.DoesNotContain(machine.Calls, "delete " + TraceHelper.MarkerFileName);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "the marker is kept"), string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
+    [TestMethod]
+    public void AFailedStopWhoseCancelAlsoFailedKeepsTheMarker()
+    {
+        var (outcome, machine, _, _, _) = Run((_, _, r) => r.Respond = a => a[0] is "-stop" or "-cancel" ? new ProcessRun(true, 1, false, "", null) : new ProcessRun(true, 0, false, "", null));
+
+        Assert.AreEqual(TraceOutcome.StopFailed, outcome);
+        CollectionAssert.DoesNotContain(machine.Calls, "delete " + TraceHelper.MarkerFileName);
+    }
+
+    [TestMethod]
+    public void AFailedStopWhoseCancelWorkedRemovesTheMarker()
+    {
+        var (outcome, machine, _, _, _) = Run((_, _, r) => r.Respond = a => a[0] == "-stop" ? new ProcessRun(true, 1, false, "", null) : new ProcessRun(true, 0, false, "", null));
+
+        Assert.AreEqual(TraceOutcome.StopFailed, outcome);
+        CollectionAssert.Contains(machine.Calls, "delete " + TraceHelper.MarkerFileName);
+    }
+
+    // Every wpr run has the private run folder as its TEMP and TMP, so nothing it makes for itself lands in the person's own
+    // temporary folder, where a program of theirs could read it.
+    [TestMethod]
+    public void EveryWprRunHasTheRunFolderAsItsTemporaryFolder()
+    {
+        var (_, machine, _, runner, _) = Run();
+
+        Assert.IsNotEmpty(runner.TempFolders);
+        Assert.IsTrue(runner.TempFolders.All(f => f == Path.Combine(machine.TraceFolder, Nonce)), string.Join(" | ", runner.TempFolders));
     }
 
     [TestMethod]

@@ -214,6 +214,25 @@ public sealed class TraceRealTests
         Assert.AreEqual(0, files.RemovePartialCopies(Path.Combine(root.Path, "no-such-folder")));
     }
 
+    // A marker is a few short lines: a bigger file in the trace folder is not read, so it cannot hold up the tray's start.
+    [TestMethod]
+    public void AMarkerFileTooBigToBeOneIsNotRead()
+    {
+        using var root = new TempFolder();
+        File.WriteAllText(Path.Combine(root.Path, TraceHelper.MarkerFileName), new string('x', TraceUserFiles.MaxMarkerBytes + 1));
+        var files = new TraceUserFiles(root.Path, new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
+
+        Assert.IsNull(files.ReadMarker());
+    }
+
+    // The folder window is opened by explorer.exe's full path in the Windows folder.
+    [TestMethod]
+    public void TheFolderWindowIsOpenedByExplorersFullPath()
+    {
+        Assert.AreEqual(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), TraceUserFiles.ExplorerPath);
+        Assert.IsTrue(Path.IsPathFullyQualified(TraceUserFiles.ExplorerPath));
+    }
+
     [TestMethod]
     public void AMissingResultOrMarkerReadsAsNothing()
     {
