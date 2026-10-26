@@ -425,6 +425,21 @@ public sealed class PairingSessionTests
         Assert.IsTrue(await new PairingSession.Prompt(rig.Ui, CancellationToken.None).ConfirmAsync(FixPairKind.ConfirmOnly, null));
     }
 
+    // The attempt ending while the number question is up (Cancel, Exit or the time limit) is not a yes, even when the question's
+    // own answer was.
+    [TestMethod]
+    public async Task AnAttemptThatEndsWhileTheNumberIsAskedIsNotAccepted()
+    {
+        using var rig = new FixRig();
+        using var attempt = new CancellationTokenSource();
+        rig.Ui.ConfirmPin = true;
+        rig.Ui.OnPin = attempt.Cancel;
+        var prompt = new PairingSession.Prompt(rig.Ui, attempt.Token);
+
+        Assert.IsFalse(await prompt.ConfirmAsync(FixPairKind.ConfirmPinMatch, "123456"));
+        Assert.HasCount(1, rig.Ui.PinsShown);
+    }
+
     // A PairAsync that ignores Cancel still ends at the time limit: the wait is given up, not left to Windows.
     [TestMethod]
     public async Task APairingThatIgnoresCancelStillEndsAtTheTimeout()

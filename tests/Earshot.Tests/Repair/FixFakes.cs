@@ -135,10 +135,14 @@ internal sealed class FakeRePairUi : IFixRePairUi
     // The token each number question was given, so a test can see it ends with the pairing attempt.
     public List<CancellationToken> PinTokens { get; } = new();
 
+    // Called while the number question is up, before its answer.
+    public Action? OnPin { get; set; }
+
     public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin, CancellationToken ct)
     {
         PinsShown.Add(kind + ":" + pin);
         PinTokens.Add(ct);
+        OnPin?.Invoke();
         return Task.FromResult(ConfirmPin);
     }
 
