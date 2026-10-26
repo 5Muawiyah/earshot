@@ -20,6 +20,18 @@ internal sealed class NoStartRecovery : IStartRecovery
 
 // Whether a Fix connection run is in the middle of pairing the AirPods again. While it is, the link the new pairing makes is not
 // cut by an automatic block: the run ends in the normal block itself, and a window that is never closed ends by itself.
+// Set by the tray while its own Pair AirPods runs; read by the coordinator's checks for unprotected AirPods.
+internal sealed class PairRunFlag
+{
+    private volatile bool _active;
+
+    public bool Active
+    {
+        get => _active;
+        set => _active = value;
+    }
+}
+
 internal interface IRePairWindow
 {
     bool IsOpen { get; }

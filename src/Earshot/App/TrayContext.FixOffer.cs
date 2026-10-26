@@ -110,10 +110,26 @@ internal sealed partial class TrayContext
         StartFixConnectionNow();
     }
 
+    // A Fix the tray started ended at once because another Fix connection or Pair AirPods run held the lock.
+    internal void SayFixRefusedByTheLock()
+    {
+        _log.Info("Fix connection: the run ended because another Fix connection or pairing holds the lock.");
+        ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, CardPlace.NearTray);
+    }
+
     private void StartFixConnectionNow()
     {
         if (_closing)
         {
+            return;
+        }
+
+        // A pairing or an elevated run of the tray's own holds the lock or the tray's attention: a Fix started now would only be
+        // refused, so the press says why instead.
+        if (_elevatedRun is { } running)
+        {
+            _log.Info("Fix connection: not started, because " + running + " is running.");
+            ShowCard(TrayStatus.AppName, running == PairRun ? FixRunLock.PairAlreadyRunningMessage : FinishingMessage(running), CardPlace.NearTray);
             return;
         }
 

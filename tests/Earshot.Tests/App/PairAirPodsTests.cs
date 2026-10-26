@@ -26,6 +26,8 @@ public sealed class PairAirPodsTests
 {
     private const string UnpairedId = "unpaired-airpods";
 
+    private static readonly string[] LookSteps = ["look", "look-ms"];
+
     private static void ArrangePairs(FixRig rig, bool airPods = true)
     {
         rig.Pairing.OnPaired = _ =>
@@ -470,6 +472,153 @@ public sealed class PairAirPodsTests
 
             StringAssert.StartsWith(tray.Cards.Shown[^1].Content.Status, "Earshot could not save its note of this pairing");
             Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("pair:", StringComparison.Ordinal)), string.Join(", ", rig.Pairing.Calls));
+        });
+    }
+
+    // Cancel in the Pair AirPods window is a cancel: before, the cancellation escaped the run and the person got "Something
+    // went wrong", no history entry and a marker left behind.
+    [TestMethod]
+    public void CancelInThePairingWindowSaysCancelledWritesTheHistoryAndClearsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Pairing.HangOnPair = true;
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var cancelling = new PairAirPodsServices
+            {
+                Api = services.Api, Nodes = services.Nodes, Prompter = services.Prompter, Radio = services.Radio, Options = services.Options,
+                LockName = services.LockName, Marker = marker,
+                UiFactory = c =>
+                {
+                    rig.Ui.OnPick = c.Cancel;
+                    return rig.Ui;
+                },
+            };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: cancelling, coordinatorServices: new CoordinatorServices { History = history });
+
+            Click(tray);
+
+            Assert.AreEqual(PairingText.Cancelled, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Log.Entries.Any(e => e.Level == LogLevel.Error), string.Join(" | ", tray.Log.Entries.Where(e => e.Level == LogLevel.Error).Select(e => e.Message)));
+            Assert.IsFalse(marker.Exists(), "Nothing new was paired, so the marker is cleared.");
+            Assert.AreEqual(ConnectHistoryOutcomes.Cancelled, history.Read().Single().Outcome);
+        });
+    }
+
+    // Cancel pressed when Windows had already paired the AirPods: they are offered, and the marker stays.
+    [TestMethod]
+    public void CancelAfterWindowsPairedOffersThePairAndKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Pairing.HangOnPair = true;
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var cancelling = new PairAirPodsServices
+            {
+                Api = services.Api, Nodes = services.Nodes, Prompter = services.Prompter, Radio = services.Radio, Options = services.Options,
+                LockName = services.LockName, Marker = marker,
+                UiFactory = c =>
+                {
+                    rig.Ui.OnPick = () =>
+                    {
+                        rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(FixRig.NewAirPodsNodes()));
+                        c.Cancel();
+                    };
+                    return rig.Ui;
+                },
+            };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: cancelling);
+
+            Click(tray);
+
+            CardContent card = tray.Cards.Shown[^1].Content;
+            Assert.AreEqual(PairAirPodsText.LeftPaired, card.Status);
+            Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+            Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    // A run that stopped before the session still leaves its one history entry, with the step it stopped at and its time.
+    [TestMethod]
+    public void DecliningLookForAirPodsLeavesAHistoryEntry()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Prompter.SayCancel();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig), coordinatorServices: new CoordinatorServices { History = history });
+
+            Click(tray);
+
+            ConnectHistoryEntry entry = history.Read().Single();
+            Assert.AreEqual(ConnectHistoryOutcomes.Cancelled, entry.Outcome);
+            CollectionAssert.AreEqual(LookSteps, entry.Steps.Select(s => s.Name).ToArray());
+        });
+    }
+
+    // A Fix pressed while Pair AirPods runs would be refused by the lock with no window; the tray says why instead.
+    [TestMethod]
+    public void AFixPressedDuringAPairingIsRefusedWithACard()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            var launcher = new FakeFixLauncher();
+            TrayHarness? running = null;
+            rig.Prompter.OnAsk = _ => running!.Context.FixConnectionFromSettings();
+            rig.Prompter.SayCancel();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            running = tray;
+            tray.Context.FixLauncher = launcher;
+
+            Click(tray);
+
+            Assert.AreEqual(0, launcher.Started);
+            Assert.IsTrue(tray.Cards.Shown.Any(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage));
+        });
+    }
+
+    [TestMethod]
+    public void AFixThatEndedOnTheLockSaysSo()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected));
+
+            tray.Context.SayFixRefusedByTheLock();
+
+            Assert.AreEqual(FixRunLock.PairAlreadyRunningMessage, tray.Cards.Shown[^1].Content.Status);
+        });
+    }
+
+    [TestMethod]
+    public void TheRunFlagTheCoordinatorReadsIsUpOnlyWhileAPairingRuns()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            bool upDuringTheQuestion = false;
+            PairAirPodsServices services = Services(rig);
+            rig.Prompter.OnAsk = _ => upDuringTheQuestion = services.RunFlag.Active;
+            rig.Prompter.SayCancel();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: services);
+
+            Click(tray);
+
+            Assert.IsTrue(upDuringTheQuestion);
+            Assert.IsFalse(services.RunFlag.Active);
         });
     }
 

@@ -4,13 +4,36 @@ using Earshot.Pairing;
 namespace Earshot.Repair;
 
 // The part of the re-pair the person sees while it runs: a small window of its own with the instruction and a Cancel button,
-// and dialogs for the pick and the pairing numbers. It runs on the UI thread of the fix mode.
+// and dialogs for the pick and the pairing numbers. The pairing session resumes on pool threads after its awaits, so every call
+// is sent to the thread the window was made on (the fix mode's UI thread, or the tray's), where its form and dialogs live.
+// https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.windowsformssynchronizationcontext
 internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
 {
     private readonly CancellationTokenSource _cancel;
     private readonly string _title;
+    private readonly SynchronizationContext? _ui = SynchronizationContext.Current;
+    private readonly int _uiThread = Environment.CurrentManagedThreadId;
     private Form? _form;
     private Label? _label;
+
+    // Runs work on the window's own thread, waiting for it; at once when already there or when there is no context to send to.
+    private T OnUi<T>(Func<T> work)
+    {
+        if (_ui is null || Environment.CurrentManagedThreadId == _uiThread)
+        {
+            return work();
+        }
+
+        T result = default!;
+        _ui.Send(_ => result = work(), null);
+        return result;
+    }
+
+    private void OnUi(Action work) => OnUi(() =>
+    {
+        work();
+        return true;
+    });
 
     // cancel: cancelled when the person presses Cancel in the window. title: what the window and its dialogs are called, the Fix
     // connection title unless Pair AirPods is the one running.
@@ -25,6 +48,11 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     public void ShowInstruction(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+        OnUi(() => ShowInstructionHere(text));
+    }
+
+    private void ShowInstructionHere(string text)
+    {
         if (_form is null)
         {
             _form = new Form
@@ -54,7 +82,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     public Task<UnpairedDevice?> PickAsync(IReadOnlyList<UnpairedDevice> candidates)
     {
         ArgumentNullException.ThrowIfNull(candidates);
-        FixPromptAnswer answer = new TaskDialogPrompter().Ask(PickPrompt(candidates, _title));
+        FixPromptAnswer answer = OnUi(() => new TaskDialogPrompter().Ask(PickPrompt(candidates, _title)));
         return Task.FromResult<UnpairedDevice?>(answer.Answer == FixAnswer.Ok && answer.Chosen >= 0 ? candidates[answer.Chosen] : null);
     }
 
@@ -72,7 +100,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     }
 
     public Task<bool> ConfirmPinAsync(FixPairKind kind, string? pin) =>
-        Task.FromResult(new TaskDialogPrompter().Ask(PinPrompt(kind, pin, _title)).Answer == FixAnswer.Ok);
+        Task.FromResult(OnUi(() => new TaskDialogPrompter().Ask(PinPrompt(kind, pin, _title)).Answer == FixAnswer.Ok));
 
     internal static FixPrompt PinPrompt(FixPairKind kind, string? pin, string title = FixPromptText.Title) => kind == FixPairKind.ConfirmPinMatch
         ? new FixPrompt(title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")
@@ -83,7 +111,12 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     public bool ShowResult(string text, bool offerTrace)
     {
         ArgumentNullException.ThrowIfNull(text);
-        Close();
+        return OnUi(() => ShowResultHere(text, offerTrace));
+    }
+
+    private bool ShowResultHere(string text, bool offerTrace)
+    {
+        CloseHere();
         var page = new TaskDialogPage
         {
             Caption = _title,
@@ -101,7 +134,9 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         return TaskDialog.ShowDialog(page) == trace;
     }
 
-    public void Close()
+    public void Close() => OnUi(CloseHere);
+
+    private void CloseHere()
     {
         _form?.Close();
         _form?.Dispose();

@@ -85,6 +85,9 @@ internal static partial class Program
     // is async and continues on that thread after each await.
     private static int RunFix(IReadOnlyList<string> args, Paths paths, ILog log, TextWriter output)
     {
+        // The context is in place before the re-pair window is made, so the window knows the thread to send its calls to.
+        Application.EnableVisualStyles();
+        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         using var cancel = new CancellationTokenSource();
         using var ui = new FixRePairWindow(cancel);
         using var worker = new SystemWorker(log);
@@ -134,8 +137,6 @@ internal static partial class Program
     {
         FixHost host = CreateFixHost(paths, log, output, ui, worker, elevation);
 
-        Application.EnableVisualStyles();
-        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         using var context = new ApplicationContext();
         FixResult? result = null;
         EventHandler? idle = null;

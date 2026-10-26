@@ -448,6 +448,14 @@ internal sealed partial class BlockCoordinator : IDisposable
             return;
         }
 
+        // The tray is answering for a pairing that did not finish, with the device picker: a second card about the same pair
+        // would race it.
+        if (_services.TrayPairing.Active)
+        {
+            _log.Info("The tray is looking at a pairing that did not finish, so the check for AirPods that Earshot does not protect waits for the next start.");
+            return;
+        }
+
         try
         {
             ProtectionReading reading = await _services.Protection.ReadAsync(CancellationToken.None);

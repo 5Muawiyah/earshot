@@ -33,8 +33,12 @@ internal sealed class PairAirPodsServices
     // Written before a pairing and cleared at its adoption, so a run cut off in between is noticed at the next start.
     public IPairRecoveryMarker Marker { get; init; } = NoPairRecoveryMarker.Instance;
 
-    public static PairAirPodsServices CreateReal(Paths paths, ILog log)
+    // The flag the coordinator reads; the tray sets it for the length of a run.
+    public PairRunFlag RunFlag { get; init; } = new();
+
+    public static PairAirPodsServices CreateReal(Paths paths, ILog log, PairRunFlag runFlag)
     {
+        ArgumentNullException.ThrowIfNull(runFlag);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(log);
         return new PairAirPodsServices
@@ -46,6 +50,7 @@ internal sealed class PairAirPodsServices
             Radio = RadioCheck.CreateReal(log),
             LockName = FixRunLock.NameFor(paths),
             Marker = new PairRecoveryMarker(paths.LocalFolder, TimeProvider.System),
+            RunFlag = runFlag,
         };
     }
 }
@@ -71,6 +76,8 @@ internal static class PairAirPodsText
 
     public static string MarkerNotWritten(int code) =>
         "Earshot could not save its note of this pairing (code 0x" + code.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was paired. Try again.";
+
+    public const string LeftPaired = "The pairing stopped, but Windows paired these AirPods. Choose them if they are yours.";
 
     public const string RecoverChoose = "Earshot closed before it could start using the AirPods you paired. Choose them to finish.";
 

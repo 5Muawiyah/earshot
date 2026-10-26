@@ -76,9 +76,9 @@ internal static class MenuModel
     public const string ChooseDevice = "Choose device...";
     public const string SetUpEarshot = "Set up Earshot...";
     public const string RepairEarshot = "Repair Earshot...";
-    // Starts the fix run, which asks its own two questions on screen; it works whether or not Earshot is installed.
+    // Starts the fix run, which asks its own two questions on screen; with nothing to undo it works whether or not Earshot is installed.
     public const string FixConnection = "Fix connection...";
-    // Looks for AirPods in pairing mode and pairs the one the person chooses; asks its own two questions on screen.
+    // Looks for AirPods in pairing mode and pairs the one the person chooses; asks one question (Look for AirPods), then the pick.
     public const string PairAirPods = "Pair AirPods...";
     // Kept exactly as UpdateCopy has it, referenced rather than duplicated, so the menu and the update page never
     // word the same thing two ways.

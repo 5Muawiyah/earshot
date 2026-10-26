@@ -54,6 +54,12 @@ internal sealed partial class BlockCoordinator
                 return;
             }
 
+            if (_services.TrayPairing.Active)
+            {
+                _log.Info("A new device appeared while the tray's Pair AirPods runs; that run answers for it.");
+                return;
+            }
+
             // The tray looks at whether the pinned pair is still paired. When that look told the person something, it has said what
             // there is to say about the pairs, and a second card about the same new pair would only repeat it.
             if (NewDeviceHook is { } hook && await hook(CancellationToken.None))

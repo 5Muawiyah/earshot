@@ -314,6 +314,7 @@ internal static class FixConnection
         }
 
         StepOutcome? adoptStep = null;
+        long? adoptMs = null;
         if (repaired.Adoptable is { } candidate)
         {
             if (!state.Installed)
@@ -324,7 +325,9 @@ internal static class FixConnection
             else
             {
                 state.NewPairUnprotected = true;
+                var adoptWatch = System.Diagnostics.Stopwatch.StartNew();
                 FixGateResult adoption = await host.Gate.AdoptDeviceAsync(candidate.Address, ct).ConfigureAwait(false);
+                adoptMs = adoptWatch.ElapsedMilliseconds;
                 steps.AddRange(adoption.Steps);
                 state.Adopted = adoption.Ok;
                 state.NewPairUnprotected = !adoption.Ok;
@@ -335,21 +338,27 @@ internal static class FixConnection
             }
         }
 
-        RecordPairing(host, steps, repaired, adoptStep);
+        RecordPairing(host, steps, repaired, adoptStep, adoptMs);
 
         return repaired.Paired && repaired.Failure == RePairFailure.None && (state.Adopted || !state.Installed) ? FixOutcome.Done : FixOutcome.Failed;
     }
 
     // The one connect-history entry of this run's pairing, when the run has a history to write to and a pairing session ran (or
     // was refused by the radio check). Nothing in it names a device. A failed write is a step with its raw code.
-    private static void RecordPairing(FixHost host, List<StepOutcome> steps, RePairResult repaired, StepOutcome? adoptStep)
+    private static void RecordPairing(FixHost host, List<StepOutcome> steps, RePairResult repaired, StepOutcome? adoptStep, long? adoptMs)
     {
         if (host.History is null || repaired.Session is null)
         {
             return;
         }
 
-        ConnectHistoryEntry entry = repaired.Session.ToHistoryEntry(host.Time.GetUtcNow(), adoptStep is null ? null : [adoptStep]);
+        List<StepOutcome>? later = adoptStep is null ? null : [adoptStep];
+        if (later is not null && adoptMs is long ms)
+        {
+            later.Add(new StepOutcome("adopt-ms", true, (int)Math.Min(ms, int.MaxValue), "ms", null));
+        }
+
+        ConnectHistoryEntry entry = repaired.Session.ToHistoryEntry(host.Time.GetUtcNow(), later);
         steps.Add(host.History.Append(entry));
     }
 

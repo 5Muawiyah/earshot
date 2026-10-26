@@ -16,7 +16,8 @@ public sealed class PairingSessionTests
 {
     private const string AirPodsId = "unpaired-airpods";
 
-    private static readonly string[] DesignedSteps = ["radio-check", "scan", "scan-ms", "pair", "model-check", "adopt", "setup"];
+    // Every step with its code, and its time in the -ms step after it.
+    private static readonly string[] DesignedSteps = ["radio-check", "radio-check-ms", "scan", "scan-ms", "pair", "pair-ms", "model-check", "model-check-ms", "adopt", "setup"];
 
     private static readonly string[] Planted = ["Jonathan", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer.ToString(), "654321"];
 

@@ -83,6 +83,10 @@ internal sealed class CoordinatorServices
     // While a Fix connection run is pairing the AirPods again, the new link is not cut.
     public IRePairWindow RePair { get; init; } = NoRePairWindow.Instance;
 
+    // True while the tray's own Pair AirPods runs, or its start-time look at a pairing that did not finish is under way. That run
+    // answers for the new pair itself, so the checks for AirPods Earshot does not protect wait it out rather than race it.
+    public PairRunFlag TrayPairing { get; init; } = new();
+
     // AirPods that are paired and are not the ones Earshot protects, found when the coordinator starts. Only reported, never adopted.
     public IProtectionCheck Protection { get; init; } = NoProtectionCheck.Instance;
 

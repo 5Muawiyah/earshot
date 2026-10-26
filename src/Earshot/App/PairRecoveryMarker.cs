@@ -15,8 +15,8 @@ namespace Earshot.App;
 // %LOCALAPPDATA%\Earshot\pair-pending.json, per user like the pairing. It holds a time and a process id, no device.
 internal interface IPairRecoveryMarker
 {
-    // Before the pairing. A marker that could not be written is logged by the caller with its code; the pairing still runs,
-    // since not pairing would help nobody.
+    // Before the pairing. A marker that could not be written is logged by the caller with its code, and no pairing starts,
+    // since a crash after it would then go unnoticed.
     StepOutcome Write();
 
     StepOutcome Clear();

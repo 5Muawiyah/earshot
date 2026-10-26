@@ -37,9 +37,13 @@ internal sealed class FakePrompter : IFixPrompter
 
     public List<FixPrompt> Asked { get; } = new();
 
+    // Runs as a question is asked, before it is answered.
+    public Action<FixPrompt>? OnAsk { get; set; }
+
     public FixPromptAnswer Ask(FixPrompt prompt)
     {
         Asked.Add(prompt);
+        OnAsk?.Invoke(prompt);
         return Answers.Count > 0 ? Answers.Dequeue() : new FixPromptAnswer(FixAnswer.Cancel, -1);
     }
 

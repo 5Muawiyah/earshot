@@ -2719,7 +2719,7 @@ internal sealed partial class TrayContext : ApplicationContext
     // gate is asked first and the tray pins the device only once the gate has taken it: a refusal never leaves
     // the tray and the gate on different devices. Before setup there is no gate copy, and setup passes the
     // pinned device from settings. Internal so tests can drive it without the picker window.
-    internal async Task<DeviceChoiceResult> ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place)
+    internal async Task<DeviceChoiceResult> ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place, bool fromPairRun = false)
     {
         ArgumentNullException.ThrowIfNull(choice);
 
@@ -2785,7 +2785,7 @@ internal sealed partial class TrayContext : ApplicationContext
         // name the previous pair, so a recovery marker stays for the next start.
         if (status is not null)
         {
-            ClearPairMarker("a pair was chosen");
+            ClearPairMarker("a pair was chosen", fromPairRun);
         }
         _log.Info("Device chosen: " + choice.Name + " (" + choice.Address + ", container " + choice.ContainerId + "), match \"" + choice.Match + "\".");
         _ = RefreshSnapshotAsync();

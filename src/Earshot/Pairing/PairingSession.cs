@@ -142,6 +142,7 @@ internal sealed class PairingSession
         if (radio is not null)
         {
             history.Add(radio.ToStep());
+            history.Add(Ms("radio-check-ms", radio.ElapsedMs));
             steps.AddRange(radio.ReadCodes.Where(s => !s.Ok));
             if (radio.BlocksRepair)
             {
@@ -208,10 +209,13 @@ internal sealed class PairingSession
 
             // The scan has done its job; stop it before pairing starts.
             await pumpCts.CancelAsync().ConfigureAwait(false);
+            var pairTime = Stopwatch.StartNew();
             PairingCallResult pair = await PairWithTimeoutAsync(chosen.Id, ct).ConfigureAwait(false);
+            long pairMs = pairTime.ElapsedMilliseconds;
             string shown = nameUnread ? PairingText.NoName : chosen.Name;
             lines.Add("Pair " + shown + ": " + pair.Name + " (" + pair.Code.ToString(CultureInfo.InvariantCulture) + ")" + (pair.Detail is null ? "." : ", " + pair.Detail + "."));
             history.Add(new StepOutcome("pair", pair.Success, pair.Code, pair.Name, null));
+            history.Add(Ms("pair-ms", pairMs));
             _log.Info("pair: Windows answered " + pair.Name + " (" + pair.Code.ToString(CultureInfo.InvariantCulture) + ").");
             if (!pair.Success)
             {
@@ -232,6 +236,7 @@ internal sealed class PairingSession
             PairedDevice? newPaired = chosen.Address12.Length == 12 && now.Devices.Count(d => d.Address12 == chosen.Address12) == 1
                 ? now.Devices.Single(d => d.Address12 == chosen.Address12)
                 : null;
+            var checkTime = Stopwatch.StartNew();
             AirPodsCandidate? match = null;
             bool looked = false;
             if (newPaired is not null)
@@ -257,12 +262,14 @@ internal sealed class PairingSession
             if (match is null && !looked)
             {
                 history.Add(new StepOutcome("model-check", false, 2, "not-read", null));
+                history.Add(Ms("model-check-ms", checkTime.ElapsedMilliseconds));
                 lines.Add(shown + " is paired, but Earshot could not look at it to tell whether it is AirPods. Nothing was adopted.");
                 _log.Warn("pair: the paired device could not be looked at (" + (newPaired is null ? "the paired list did not hold it once" : "its nodes were not in the tree") + "), so it was neither adopted nor called not AirPods.");
                 return Finish(PairOutcome.Unverified, PairFailureReason.Unverified, true, null, pair, nameUnread, false, candidates.Count, scanMs, PairingText.Unverified);
             }
 
             history.Add(new StepOutcome("model-check", match is not null, match is null ? 1 : 0, match is null ? "not-airpods" : "airpods", null));
+            history.Add(Ms("model-check-ms", checkTime.ElapsedMilliseconds));
             if (match is null)
             {
                 // Not removed again: Earshot paired it in this run, but removing a pairing is the person's call (owner stand-in
@@ -287,6 +294,9 @@ internal sealed class PairingSession
             bool nameUnread, bool unreachable, int candidateCount, long scanMs, string? cardLine) =>
             new(outcome, reason, paired, adoptable, radio, status, nameUnread, unreachable, candidateCount, scanMs, watch.ElapsedMilliseconds, cardLine, lines, history, steps);
     }
+
+    // A step that carries how long the one before it took: its code is the milliseconds, as scan-ms has always been.
+    private static StepOutcome Ms(string step, long ms) => new(step, true, (int)Math.Min(ms, int.MaxValue), "ms", null);
 
     // Whether a node of the paired device is in the tree now: a node whose instance id carries its address, located without the
     // phantom flag. A read that fails is a step with its CONFIGRET and counts as not arrived.
@@ -377,6 +387,9 @@ internal sealed class PairingSession
 
             if (pump.IsCompleted || timeout.IsCancellationRequested)
             {
+                // A Cancel in the window ends the scan as a cancel: no pick is shown and "nothing found" is not said.
+                ct.ThrowIfCancellationRequested();
+
                 // One last look: events that arrived while the wait ended.
                 return CandidatesNow(seen, mark, baseline, exclude);
             }

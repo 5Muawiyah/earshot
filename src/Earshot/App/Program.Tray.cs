@@ -314,7 +314,7 @@ internal static partial class Program
     // data root, where the gate is never reached.
     internal static CoordinatorServices CreateCoordinatorServices(
         Paths paths, ISettingsStore settings, ILog log, ConnectHistory? history, TimeProvider time, Func<Widget.IWidgetStatus?> widget, ISystemWorker? worker,
-        Action? fixEnded = null, IFixLauncher? fixLauncher = null)
+        Action? fixEnded = null, IFixLauncher? fixLauncher = null, PairRunFlag? trayPairing = null)
     {
         var nodes = new CfgMgr32NodeReader();
         bool gateReachable = !paths.IsSafeMode && !paths.IsRedirected;
@@ -347,6 +347,7 @@ internal static partial class Program
             Protection = protection,
             PairedAirPods = new NodePairedAirPodsCheck(nodes),
             FixLauncher = fixLauncher ?? new OwnProgramFixLauncher(fixEnded),
+            TrayPairing = trayPairing ?? new PairRunFlag(),
         };
     }
 
@@ -446,6 +447,7 @@ internal static partial class Program
             IDisposable? exitSignal = null;
             FixEndedSignal? fixEndedSignal = null;
             TraceRequestSignal? traceRequestSignal = null;
+            var trayPairing = new PairRunFlag();
             SettingsFileWatcher? settingsWatcher = null;
             try
             {
@@ -470,13 +472,31 @@ internal static partial class Program
                 // makes the two one. A run started by Setup.exe or by the install script is heard through the event only.
                 fixEndedSignal = FixEndedSignal.Listen(
                     FixEndedSignal.NameFor(paths), () => registry.UiPost(() => coordinator?.RecheckProtectionAfterFix()), TimeProvider.System, log);
-                fixLauncher = new OwnProgramFixLauncher(() => fixEndedSignal?.Notify("the run the tray started"));
+                // The tray's own run ending: through the coalescing signal when there is one, and straight to the recheck when the
+                // event could not be made. A run that ended because another one held the lock says so on a card; that run printed
+                // it only to the log, having no console.
+                fixLauncher = new OwnProgramFixLauncher(() =>
+                {
+                    if (fixEndedSignal is { } signal)
+                    {
+                        signal.Notify("the run the tray started");
+                    }
+                    else
+                    {
+                        registry.UiPost(() => coordinator?.RecheckProtectionAfterFix());
+                    }
+
+                    if (fixLauncher?.LastExitCode == ExitCodes.AlreadyRunning)
+                    {
+                        registry.UiPost(() => context?.SayFixRefusedByTheLock());
+                    }
+                });
                 coordinator = new BlockCoordinator(
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon),
                     CreateCoordinatorServices(paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker,
-                        fixLauncher: fixLauncher));
+                        fixLauncher: fixLauncher, trayPairing: trayPairing));
 
                 // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
                 // constructed below): the toast route's AppUserModelID must be set before a window or a toast
@@ -508,7 +528,7 @@ internal static partial class Program
                     FrameLog = stallLog,
                     DataRootRedirected = paths.IsRedirected,
                     InstalledExePath = paths.InstalledExe,
-                    PairAirPods = paths.IsSafeMode ? null : PairAirPodsServices.CreateReal(paths, log),
+                    PairAirPods = paths.IsSafeMode ? null : PairAirPodsServices.CreateReal(paths, log, trayPairing),
                     TraceRecorder = CreateTraceRecorder(paths, log),
                     UpdateOutcome = paths.IsSafeMode || paths.IsRedirected
                         ? null
