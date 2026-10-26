@@ -450,7 +450,7 @@ public sealed class StalePinWiringTests
 
             // The read after the failure is quick; the look's own read, the one after it, is slow.
             int lookRead = radio.Checks + 2;
-            radio.OnCheck = n => radio.Wait = n == lookRead ? TimeSpan.FromSeconds(2) : TimeSpan.Zero;
+            radio.OnCheck = n => radio.Wait = n == lookRead ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
             tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
                 ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
 

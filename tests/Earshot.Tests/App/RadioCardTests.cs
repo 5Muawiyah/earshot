@@ -96,12 +96,13 @@ public sealed class RadioCardTests
             tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
                 ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
 
-            // The read after the failed connect lasts until the second click ends it, so the click always lands during the look.
-            // Run 124 found a two-second read that could end first on a busy runner; then the click was a plain new connect.
-            // Any other read (the start's own look) answers at once.
+            // The read after the failed connect does not answer until Exit has begun, cancel or not, so the looks are still running
+            // when Exit comes. Runs 124 and 126 found a read that ended on the click's own cancel, inline, so the click's request
+            // started before Exit and was a plain new connect. Any other read (the start's own look) answers at once.
             tray.PumpUntilIdle();
             int failureRead = radio.Checks + 1;
-            radio.OnCheck = n => radio.Wait = n == failureRead ? TimeSpan.FromSeconds(30) : TimeSpan.Zero;
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            radio.OnCheck = n => radio.HoldUntil = n == failureRead ? release.Task : null;
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             TrayHarness.PumpUntil(() => radio.Checks == failureRead, "The radio was not read after the failed connect.");
             now += 5000;
@@ -109,6 +110,7 @@ public sealed class RadioCardTests
             now += 5000;
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             tray.Context.ExitFromSignal();
+            release.TrySetResult();
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, tray.Connection.Calls.Count(c => c.Connect), string.Join(", ", tray.Connection.Calls));

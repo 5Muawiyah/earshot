@@ -501,6 +501,9 @@ internal sealed class FakeRadioCheck(RadioCheckResult result) : IRadioCheck
     // Called with the read's number as each read starts, so a test can make one read slow.
     public Action<int>? OnCheck { get; set; }
 
+    // A read that does not answer until this completes, whatever its token says, as a radio read that ignores a cancel.
+    public Task? HoldUntil { get; set; }
+
     public async Task<RadioCheckResult> CheckAsync(CancellationToken ct)
     {
         Checks++;
@@ -508,6 +511,11 @@ internal sealed class FakeRadioCheck(RadioCheckResult result) : IRadioCheck
         if (Wait > TimeSpan.Zero)
         {
             await Task.Delay(Wait, ct);
+        }
+
+        if (HoldUntil is { } hold)
+        {
+            await hold;
         }
 
         return result;
