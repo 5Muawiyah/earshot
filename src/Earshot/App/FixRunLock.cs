@@ -91,6 +91,23 @@ internal sealed class FixRunLock : IDisposable
     // it back, then releases it from this same thread.
     private static void Hold(string name, ILog log, TaskCompletionSource<bool> taken, ManualResetEventSlim release)
     {
+        // Whatever ends this thread, the caller that waits for the answer is answered: an unexpected throw counts as held.
+        try
+        {
+            HoldCore(name, log, taken, release);
+        }
+        catch (Exception ex)
+        {
+            log.Error("Fix lock: " + name + " could not be taken or held (" + Describe(ex) + "), so it is counted as held.", ex);
+        }
+        finally
+        {
+            taken.TrySetResult(false);
+        }
+    }
+
+    private static void HoldCore(string name, ILog log, TaskCompletionSource<bool> taken, ManualResetEventSlim release)
+    {
         Mutex mutex;
         try
         {

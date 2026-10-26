@@ -44,6 +44,21 @@ public sealed class StartupRegistrationTests
         Assert.IsTrue(log.Has(LogLevel.Warn, "read back after the write: " + PerUser + ", not what was written"));
     }
 
+    // A read-back that fails does not turn the write that was made into a failure.
+    [TestMethod]
+    public void AReadBackThatFailsLeavesTheWriteASuccessAndLogsTheCode()
+    {
+        var registry = new FakeStartupRegistry();
+        registry.AfterChange = () => registry.ReadFailure = new UnauthorizedAccessException("denied");
+        var log = new CapturingLog();
+
+        ControllerResult result = Create(registry, log).Apply(true);
+
+        Assert.IsTrue(result.IsSuccess, result.UserMessage);
+        Assert.AreEqual(Command, registry.Run["Earshot"]);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "could not be read back after the write"));
+    }
+
     [TestMethod]
     public void ADeleteIsReadBackToo()
     {

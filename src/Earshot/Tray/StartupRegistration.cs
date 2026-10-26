@@ -339,7 +339,19 @@ internal sealed class StartupRegistration
     // is read back: a value that differs from what was written is a warning naming what was read.
     private void LogReadBack(string change, string? written)
     {
-        string? back = _registry.ReadRunValue(ValueName);
+        string? back;
+        try
+        {
+            back = _registry.ReadRunValue(ValueName);
+        }
+        catch (Exception ex) when (IsRegistryError(ex))
+        {
+            // The change itself was made; only the look at it failed, so the result stays as it was and the code is logged.
+            _log.Warn("Open on startup: the value could not be read back after " + change + " (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ").", ex);
+            return;
+        }
+
         bool same = string.Equals(back, written, StringComparison.Ordinal);
         _log.Write(same ? LogLevel.Info : LogLevel.Warn,
             "Open on startup: read back after " + change + ": " + (back ?? "(none)") + (same ? "." : ", not what was written (" + (written ?? "(none)") + ")."));

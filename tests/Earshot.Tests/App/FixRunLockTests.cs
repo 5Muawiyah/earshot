@@ -79,6 +79,19 @@ public sealed class FixRunLockTests
         }
     }
 
+    // A name the runtime refuses outright (longer than a kernel object name may be, which throws ArgumentException) ends in an
+    // answer, not a throw or a wait that never ends: the lock counts as held and the code is logged.
+    [TestMethod]
+    public void ANameTheRuntimeRefusesIsCountedAsHeldWithoutHangingOrThrowing()
+    {
+        var log = new CapturingLog();
+        Task<FixRunLock?> asked = Task.Run(() => FixRunLock.TryAcquire(FixRunLock.BaseName + "." + new string('x', 400), log));
+
+        Assert.IsTrue(asked.Wait(TimeSpan.FromSeconds(10)), "TryAcquire did not answer.");
+        Assert.IsNull(asked.Result);
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("HRESULT 0x", StringComparison.Ordinal)), string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
     // The same thread asking twice is a second run, not a re-entry of the first: the tray's UI thread starts both.
     [TestMethod]
     public void TheSameThreadAskingTwiceIsRefusedTheSecondTime()
