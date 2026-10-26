@@ -87,6 +87,78 @@ public sealed class FixRecheckTests
         Assert.AreEqual(0, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
     }
 
+    // While the tray's Pair AirPods runs (or its look at a pairing that did not finish), a new device group is that run's to
+    // answer, so the check for unprotected AirPods does not run, and a card about the same pair does not race the run's own.
+    [TestMethod]
+    public void ANewDeviceGroupWhileTheTraysPairingRunsIsLeftToThatRun()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        Assert.AreEqual(1, h.ProtectionScan.Reads);
+
+        h.TrayPairing.Active = true;
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        DeviceSnapshot before = Devices.Idle(2);
+        h.Monitor.Publish(before with { AllGroups = [.. before.AllGroups, new DeviceModel(Guid.NewGuid(), "AirPods", ConnectionState.Disconnected, [])] });
+        h.Pump();
+        h.Advance(BlockCoordinator.NewDeviceSettle);
+
+        Assert.AreEqual(1, h.ProtectionScan.Reads);
+        Assert.AreEqual(0, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+    }
+
+    // A pairing that starts while the tray's pinned-pair look runs is seen too: the flag is read again after that look.
+    [TestMethod]
+    public void APairingThatStartsDuringTheTraysLookIsSeenAfterIt()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        h.Coordinator.NewDeviceHook = _ =>
+        {
+            h.TrayPairing.Active = true;
+            return Task.FromResult(false);
+        };
+
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        DeviceSnapshot before = Devices.Idle(2);
+        h.Monitor.Publish(before with { AllGroups = [.. before.AllGroups, new DeviceModel(Guid.NewGuid(), "AirPods", ConnectionState.Disconnected, [])] });
+        h.Pump();
+        h.Advance(BlockCoordinator.NewDeviceSettle);
+
+        Assert.AreEqual(1, h.ProtectionScan.Reads, "The pairing that started during the look answers for the new device.");
+    }
+
+    // At start, while the tray looks at a pairing that did not finish, the start check for unprotected AirPods waits; when that
+    // look showed nothing, the tray asks for the check and it runs then.
+    [TestMethod]
+    public void TheStartCheckWaitsForTheTraysRecoveryAndRunsWhenAskedAfterIt()
+    {
+        using var h = new CoordinatorHarness();
+        h.Block.Status = Statuses.Blocked();
+        h.Monitor.Set(Devices.Idle(1));
+        h.ProtectionScan.Reading = new ProtectionReading(true, true, 1);
+        h.TrayPairing.Active = true;
+        h.Start();
+
+        Assert.AreEqual(0, h.ProtectionScan.Reads, "The start check waited for the tray's recovery.");
+        Assert.AreEqual(0, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+
+        h.Coordinator.CheckProtectionAfterPairRecovery();
+        h.Pump();
+        Assert.AreEqual(0, h.ProtectionScan.Reads, "Not while the flag is still up.");
+
+        h.TrayPairing.Active = false;
+        h.Coordinator.CheckProtectionAfterPairRecovery();
+        h.Pump();
+
+        Assert.AreEqual(1, h.ProtectionScan.Reads);
+        Assert.AreEqual(1, h.Cards.Shown.Count(c => c.Content.Status == BlockCoordinator.NotProtectedMessage));
+    }
+
     [TestMethod]
     public void AfterClosingARecheckDoesNothing()
     {

@@ -191,6 +191,260 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // The pinned AirPods were removed in Windows first, as test 24 does: a different pair is still asked about. Before, the
+    // question came only while the pinned pair was in the device tree, so this adopted with no question.
+    [TestMethod]
+    public void APairingAfterThePinnedPairWasRemovedStillAsksBeforeUsingTheNewOne()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Where(n => n.Container != RecordedNodes.AirPodsContainer));
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig), settings: s =>
+            {
+                s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                s.PinnedAddress = RecordedNodes.AirPodsAddress;
+            });
+
+            Click(tray);
+
+            Assert.IsTrue(rig.Prompter.Asked.Any(q => q.Heading == PairAirPodsText.ReplaceHeading), "Asked before the different pair was used.");
+            Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
+        });
+    }
+
+    // The question timed out: nobody decided, so the new pair is offered and the marker stays for the next start.
+    [TestMethod]
+    public void AReplaceQuestionThatTimedOutKeepsTheMarkerAndOffersThePair()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayTimedOut();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+
+            Click(tray);
+
+            Assert.AreEqual(AirPodsContainer, tray.Settings.Current.PinnedContainerId);
+            Assert.IsTrue(marker.Exists(), "Kept: the question was not answered.");
+            Assert.AreEqual(PairAirPodsText.LeftPaired, tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual(PairAirPodsText.ChooseButton, tray.Cards.Shown[^1].Content.Action?.Label);
+        });
+    }
+
+    // Set-up after a pairing is handed the run straight from the pairing. Before, the pairing let it go and set-up looked at the
+    // pin first, so a Fix or an update pressed in between could start.
+    [TestMethod]
+    public void SetUpAfterAPairingTakesTheRunWithNoGapInBetween()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            bool paired = false;
+            var unclaimed = new List<string>();
+            TrayHarness? running = null;
+            Action<string> onPaired = rig.Pairing.OnPaired!;
+            rig.Pairing.OnPaired = id =>
+            {
+                onPaired(id);
+                paired = true;
+            };
+            rig.Pairing.OnListPaired = () =>
+            {
+                if (paired && running?.Context.ElevatedRunInProgress is null)
+                {
+                    unclaimed.Add("list-paired with no run claimed");
+                }
+            };
+            string? runAtSetUp = null;
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig),
+                arrange: h =>
+                {
+                    h.Block.Status = Block(BlockState.NotSetUp);
+                    h.Block.OnRunSetup = _ =>
+                    {
+                        runAtSetUp = running?.Context.ElevatedRunInProgress;
+                        return Task.FromResult(ControllerResult.Ok("Done"));
+                    };
+                });
+            running = tray;
+
+            Click(tray);
+
+            Assert.IsEmpty(unclaimed, string.Join(", ", unclaimed));
+            Assert.AreEqual(1, tray.Block.Calls.Count(c => c == "setup"));
+            Assert.IsNotNull(runAtSetUp);
+            Assert.IsNull(tray.Context.ElevatedRunInProgress, "The run is let go once set-up is done.");
+        });
+    }
+
+    // A start-time look at a marker that is still running when a pairing starts stops, rather than show the device picker over
+    // the pairing's own result.
+    [TestMethod]
+    public void ARecoveryThatFindsAPairingUnderWayLeavesThePairsToIt()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            TrayHarness? running = null;
+            rig.Prompter.OnAsk = q =>
+            {
+                if (q.Heading == PairAirPodsText.ReplaceHeading)
+                {
+                    running!.Context.StartPinnedPairCheck("start");
+                }
+            };
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker),
+                arrange: h => h.Block.OnSetDevice = async _ =>
+                {
+                    // The adoption takes a moment, so the recovery's own look ends while the pairing still runs.
+                    await Task.Delay(500, CancellationToken.None);
+                    return ControllerResult.Ok("Done");
+                });
+            running = tray;
+
+            Click(tray);
+
+            Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("stops, because a pairing has started", StringComparison.Ordinal)),
+                string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.RecoverChoose));
+        });
+    }
+
+    // Exit while the pairing runs: the run still leaves its history entry, and the marker stays for the next start.
+    [TestMethod]
+    public void ExitDuringAPairingWritesItsHistoryEntryAndKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Pairing.HangOnPair = true;
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig, marker: marker),
+                coordinatorServices: new CoordinatorServices { History = history });
+            rig.Ui.OnPick = () => tray.Ui.Post(_ => tray.ClickMenu(MenuModel.Exit), null);
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            Application.Run(tray.Context);
+
+            ConnectHistoryEntry entry = history.Read().Single();
+            Assert.AreEqual(ConnectHistoryOutcomes.Cancelled, entry.Outcome);
+            Assert.AreEqual("closing", entry.Steps[0].Name);
+            Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    // A marker an earlier run left (here, one the start-time look has not cleared) is that run's: a pairing that then pairs
+    // nothing keeps it, so the next start still looks at what the earlier run left.
+    [TestMethod]
+    public void APairingThatPairsNothingKeepsAMarkerAnEarlierRunLeft()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
+            rig.Pairing.PairResult = new PairingCallResult("Failed", PairReasons.Failed, false, null);
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+            marker.Present = true;
+
+            Click(tray);
+
+            CollectionAssert.Contains(marker.Calls, "write");
+            Assert.IsFalse(marker.Calls.Contains("clear"), "The earlier run's marker was cleared: " + string.Join(", ", marker.Calls));
+            Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    // What is paired could not be read after a pairing that failed: the card says only that, and the marker stays.
+    [TestMethod]
+    public void AFailedPairingWithTheDevicesUnreadSaysSoAndKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
+            rig.Pairing.PairResult = new PairingCallResult("Failed", PairReasons.Failed, false, null);
+            rig.Ui.OnPick = () => rig.Nodes.Inner.ListResult = CfgMgr32.CR_FAILURE;
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+
+            Click(tray);
+
+            Assert.AreEqual(PairAirPodsText.LeftUnread, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    // A radio that stops the pairing pairs nothing, so no marker is written and its own line is the one shown.
+    [TestMethod]
+    public void ARadioThatStopsThePairingWritesNoMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            var marker = new FakePairRecoveryMarker { WriteFails = true };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, RadioCheckState.Off, marker: marker));
+
+            Click(tray);
+
+            Assert.IsFalse(marker.Calls.Contains("write"));
+            Assert.AreEqual(RadioLines.Off, tray.Cards.Shown[^1].Content.Status);
+        });
+    }
+
+    // Something the run did not expect still leaves its one history entry, with the type and code of what stopped it.
+    [TestMethod]
+    public void AnUnexpectedThrowLeavesAHistoryEntryWithItsCode()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            var thrown = new InvalidOperationException("not expected");
+            var marker = new FakePairRecoveryMarker { WriteThrows = thrown };
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig, marker: marker),
+                coordinatorServices: new CoordinatorServices { History = history });
+
+            Click(tray);
+
+            ConnectHistoryEntry entry = history.Read().Single();
+            Assert.AreEqual(ConnectHistoryOutcomes.Failed, entry.Outcome);
+            Assert.AreEqual("unexpected", entry.Steps[0].Name);
+            Assert.AreEqual(thrown.HResult, entry.Steps[0].Code);
+        });
+    }
+
     [TestMethod]
     public void ADeviceThatFailsTheModelCheckIsNotAdoptedNorUnpaired()
     {
@@ -621,7 +875,7 @@ public sealed class PairAirPodsTests
                     return rig.Ui;
                 },
             };
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: cancelling, coordinatorServices: new CoordinatorServices { History = history });
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: cancelling, coordinatorServices: new CoordinatorServices { History = history });
 
             Click(tray);
 
@@ -679,7 +933,7 @@ public sealed class PairAirPodsTests
             rig.Prompter.SayCancel();
             using var folder = new TempFolder();
             var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
-            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig), coordinatorServices: new CoordinatorServices { History = history });
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig), coordinatorServices: new CoordinatorServices { History = history });
 
             Click(tray);
 
@@ -769,9 +1023,16 @@ internal sealed class FakePairRecoveryMarker : IPairRecoveryMarker
 
     public bool WriteFails { get; set; }
 
+    public Exception? WriteThrows { get; set; }
+
     public StepOutcome Write()
     {
         Calls.Add("write");
+        if (WriteThrows is { } thrown)
+        {
+            throw thrown;
+        }
+
         if (WriteFails)
         {
             return StepOutcomes.FromHResult("pair-marker-write", unchecked((int)0x80070005), "denied");

@@ -308,6 +308,15 @@ internal static partial class Program
         }
     }
 
+    // The tray's Pair AirPods, sharing the coordinator's own run flag, so the coordinator's checks for unprotected AirPods see
+    // a pairing or a recovery the tray runs. None in safe mode.
+    internal static PairAirPodsServices? PairAirPodsFor(Paths paths, ILog log, CoordinatorServices coordinatorServices)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(coordinatorServices);
+        return paths.IsSafeMode ? null : PairAirPodsServices.CreateReal(paths, log, coordinatorServices.TrayPairing);
+    }
+
     // What the tray's coordinator is given beyond its controllers. The widget is built later than the coordinator, so it is
     // reached through widget() when a hint is wanted. The three about Fix connection (answer a run that stopped half way, keep
     // the window of a re-pair, say when paired AirPods are not the protected ones) are inert in safe mode and with a redirected
@@ -447,7 +456,6 @@ internal static partial class Program
             IDisposable? exitSignal = null;
             FixEndedSignal? fixEndedSignal = null;
             TraceRequestSignal? traceRequestSignal = null;
-            var trayPairing = new PairRunFlag();
             SettingsFileWatcher? settingsWatcher = null;
             try
             {
@@ -491,12 +499,13 @@ internal static partial class Program
                         registry.UiPost(() => context?.SayFixRefusedByTheLock());
                     }
                 });
+                CoordinatorServices coordinatorServices = CreateCoordinatorServices(
+                    paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker, fixLauncher: fixLauncher);
                 coordinator = new BlockCoordinator(
                     registry.Monitor, registry.Connection, registry.Block, registry.Protection, registry.Settings,
                     registry.Cards, log, TimeProvider.System,
                     new CoordinatorOptions(paths.IsSafeMode, startedAtLogon),
-                    CreateCoordinatorServices(paths, registry.Settings, log, history, TimeProvider.System, () => registry.WidgetStatus, registry.SystemWorker,
-                        fixLauncher: fixLauncher, trayPairing: trayPairing));
+                    coordinatorServices);
 
                 // Before any UI is created (the tray's first window is TrayContext's own ShellMessageWindow,
                 // constructed below): the toast route's AppUserModelID must be set before a window or a toast
@@ -528,7 +537,7 @@ internal static partial class Program
                     FrameLog = stallLog,
                     DataRootRedirected = paths.IsRedirected,
                     InstalledExePath = paths.InstalledExe,
-                    PairAirPods = paths.IsSafeMode ? null : PairAirPodsServices.CreateReal(paths, log, trayPairing),
+                    PairAirPods = PairAirPodsFor(paths, log, coordinatorServices),
                     TraceRecorder = CreateTraceRecorder(paths, log),
                     UpdateOutcome = paths.IsSafeMode || paths.IsRedirected
                         ? null

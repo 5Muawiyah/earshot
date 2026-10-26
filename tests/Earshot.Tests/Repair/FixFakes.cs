@@ -197,9 +197,13 @@ internal sealed class FakePairing : IPairingApi
     // PairAsync waits until it is cancelled, as a pairing that never answers does.
     public bool HangOnPair { get; set; }
 
+    // Runs as the paired list is read, before it is answered.
+    public Action? OnListPaired { get; set; }
+
     public Task<PairedListResult> ListPairedAsync(CancellationToken ct)
     {
         Calls.Add("list-paired");
+        OnListPaired?.Invoke();
         return Task.FromResult(new PairedListResult(Paired.ToList(), ListSteps.ToList()));
     }
 

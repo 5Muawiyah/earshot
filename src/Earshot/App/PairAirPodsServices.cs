@@ -79,11 +79,13 @@ internal static class PairAirPodsText
 
     public const string LeftPaired = "The pairing stopped, but Windows paired these AirPods. Choose them if they are yours.";
 
-    public const string RecoverChoose = "Earshot closed before it could start using the AirPods you paired. Choose them to finish.";
+    public const string LeftUnread = "The pairing stopped, and Earshot can't see your devices now. Choose your AirPods if Windows paired them.";
+
+    public const string RecoverChoose = "Earshot closed while pairing. Choose the AirPods it should use.";
 
     public const string ReplaceHeading = "Use these AirPods instead?";
 
-    public const string ReplaceBody = "Earshot uses your other AirPods now. If you choose these, Earshot uses them instead, and your other AirPods stay paired.";
+    public const string ReplaceBody = "Earshot is set to use other AirPods. If you choose these, Earshot uses them instead. Nothing is removed from Windows.";
 
     public const string ReplaceButton = "Use these";
 

@@ -30,6 +30,21 @@ public sealed class TrayFixServicesTests
         Assert.IsInstanceOfType<NodePairedAirPodsCheck>(services.PairedAirPods);
     }
 
+    // The coordinator's checks for unprotected AirPods wait while the tray pairs or recovers a pairing, which they can only see
+    // when both hold the same flag.
+    [TestMethod]
+    public void ThePairingServicesShareTheCoordinatorsRunFlag()
+    {
+        Paths paths = Paths.FromEnvironment(_ => null);
+        CoordinatorServices services = Build(paths, null);
+
+        PairAirPodsServices? pairing = Program.PairAirPodsFor(paths, new CapturingLog(), services);
+
+        Assert.IsNotNull(pairing);
+        Assert.AreSame(services.TrayPairing, pairing.RunFlag);
+        Assert.IsNull(Program.PairAirPodsFor(Paths.FromEnvironment(name => name == Paths.SafeModeVariable ? "1" : null), new CapturingLog(), services));
+    }
+
     [TestMethod]
     public void TheReadOnlyPairedCheckIsRealEvenWhereTheGateIsNeverReached()
     {

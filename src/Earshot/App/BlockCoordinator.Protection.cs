@@ -68,6 +68,13 @@ internal sealed partial class BlockCoordinator
                 return;
             }
 
+            // A pairing the tray started while its hook looked answers for the new device itself.
+            if (_services.TrayPairing.Active || _closing || _disposed)
+            {
+                _log.Info("A new device appeared while the tray's Pair AirPods runs; that run answers for it.");
+                return;
+            }
+
             _log.Info("A new device appeared; the check for AirPods that Earshot does not protect runs again.");
             ProtectionReading reading = await _services.Protection.ReadAsync(CancellationToken.None);
             if (reading.AnyUnprotected)

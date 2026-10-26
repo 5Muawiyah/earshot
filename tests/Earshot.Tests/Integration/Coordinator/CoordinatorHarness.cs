@@ -48,7 +48,7 @@ internal sealed class CoordinatorHarness : IDisposable
 
         Coordinator = new BlockCoordinator(Monitor, Connection, Block, Protection, Settings, Cards, Log, Time,
             new CoordinatorOptions(safeMode, startedAtLogon),
-            new CoordinatorServices { Link = Link, Session = Session, Hints = hints ?? Hints, Launcher = Launcher, History = History, FixOffer = FixOffer, Recovery = Recovery, RePair = RePair, Protection = ProtectionScan, PairedAirPods = PairedAirPods, FixLauncher = FixLauncher });
+            new CoordinatorServices { Link = Link, Session = Session, Hints = hints ?? Hints, Launcher = Launcher, History = History, FixOffer = FixOffer, Recovery = Recovery, RePair = RePair, Protection = ProtectionScan, PairedAirPods = PairedAirPods, FixLauncher = FixLauncher, TrayPairing = TrayPairing });
     }
 
     private readonly string _historyFolder;
@@ -64,6 +64,9 @@ internal sealed class CoordinatorHarness : IDisposable
     public FakeStartRecovery Recovery { get; } = new();
 
     public FakeRePairWindow RePair { get; } = new();
+
+    // The tray's Pair AirPods flag, which the coordinator's checks for unprotected AirPods read.
+    public PairRunFlag TrayPairing { get; } = new();
 
     public FakeProtectionCheck ProtectionScan { get; } = new();
 

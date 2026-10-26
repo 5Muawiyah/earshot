@@ -2141,16 +2141,22 @@ internal sealed partial class TrayContext : ApplicationContext
 
         try
         {
-            ControllerResult? result = await WithElevatedProgramAsync(
-                () => RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place));
-            if (result is { IsSuccess: true } && !_closing)
-            {
-                PointStartupAtInstalledCopy();
-            }
+            await RunSetupClaimedAsync(place);
         }
         finally
         {
             EndElevatedRun(SetupRun);
+        }
+    }
+
+    // Set-up itself, once the set-up run is this tray's: by RunSetupAsync, or handed over from a pairing that just adopted a pair.
+    private async Task RunSetupClaimedAsync(CardPlace place)
+    {
+        ControllerResult? result = await WithElevatedProgramAsync(
+            () => RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place));
+        if (result is { IsSuccess: true } && !_closing)
+        {
+            PointStartupAtInstalledCopy();
         }
     }
 
