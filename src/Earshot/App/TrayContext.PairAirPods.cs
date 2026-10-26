@@ -373,6 +373,8 @@ internal sealed partial class TrayContext
                     {
                         case RadioSays.Shown:
                             return false;
+                        case RadioSays.Unsure:
+                            return true;
                         case RadioSays.Stop:
                             return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
                     }
@@ -388,6 +390,8 @@ internal sealed partial class TrayContext
                 {
                     case RadioSays.Shown:
                         return false;
+                    case RadioSays.Unsure:
+                        return true;
                     case RadioSays.Stop:
                         return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
                 }
@@ -433,6 +437,10 @@ internal sealed partial class TrayContext
         Nothing,
         Shown,
 
+        // The radio could not be read (a read that threw, or ran past its budget): the PC's Bluetooth may be the cause, so the
+        // look cannot tell, says nothing and keeps the readings, as a failed paired-list read does.
+        Unsure,
+
         // Closing, the look's token cancelled, or a pairing started during the read: nothing more is shown.
         Stop,
     }
@@ -462,6 +470,12 @@ internal sealed partial class TrayContext
         if (_closing || _elevatedRun == PairRun)
         {
             return RadioSays.Stop;
+        }
+
+        if (result.State == RadioCheckState.Unknown)
+        {
+            _log.Info("Pairing check (" + reason + "): the radio could not be read, so whether the pairs are gone cannot be told.");
+            return RadioSays.Unsure;
         }
 
         if (!result.BlocksRepair || result.State == RadioCheckState.Unreachable)

@@ -148,6 +148,22 @@ public sealed class StalePinWiringTests
         });
     }
 
+    // A radio read that did not answer (cold at sign-in, or a failing adapter) cannot rule out the PC's Bluetooth as the cause:
+    // the look says nothing and keeps the readings, as a failed paired-list read does.
+    [TestMethod]
+    public void AStalePinWithTheRadioUnreadSaysNothingAndForgetsNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig, radio: RadioCheckState.Unknown), settings: PinTheRigsPair);
+
+            Assert.IsEmpty(tray.Cards.Shown, string.Join(" | ", tray.Cards.Statuses));
+            Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.Contains("last readings and link are dropped", StringComparison.Ordinal)));
+        });
+    }
+
     [TestMethod]
     public void NothingPairedOnAPcWithBluetoothOffShowsTheRadioLineNotNoAirPods()
     {
