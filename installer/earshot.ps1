@@ -1025,7 +1025,7 @@ $LASTEXITCODE
 4. If the AirPods show a problem code, are disabled, are missing, or hang on "Connecting", run Fix.
 5. If no AirPods are paired with this PC, tell the person to choose Pair AirPods in the Earshot menu.
 6. If Doctor shows Bluetooth off, a problem code on the radio, no adapter, or an adapter without Classic Bluetooth, the fault is this PC's Bluetooth, not the AirPods: tell the person what Doctor shows and to open Bluetooth settings. Do not run Fix for it.
-7. If nothing will pair with this PC although it finds devices, the PC's Bluetooth driver may be the cause: a driver update can stop the PC reaching devices. Tell the person they can roll the driver back in Device Manager (Bluetooth, the adapter, Properties, Driver, Roll Back Driver). Do not do it yourself.
+7. If nothing will pair with this PC although it finds devices, the PC's Bluetooth driver may be the cause: on one PC a driver update stopped it reaching devices. Earshot has not shown this is the cause on any other PC. Tell the person they can try rolling the driver back in Device Manager (Bluetooth, the adapter, Properties, Driver, Roll Back Driver), and that a rollback also gives up the newer driver's fixes. Do not do it yourself.
 8. If Doctor shows a filter driver from another Bluetooth program on the AirPods or on the RFCOMM node, tell the person which program it is and that it can get in the way. Do not remove it yourself.
 9. If the person wants a setting changed, use Earshot.exe settings.
 10. Run Doctor again to confirm the result, and tell the person what changed.

@@ -350,10 +350,11 @@ See [docs/overview.md](docs/overview.md#the-airpods-widget) and
 If no Bluetooth device will pair with this PC, while the PC still finds them,
 the PC's Bluetooth driver may be the cause: on one PC a Bluetooth driver update
 left it able to find devices but not reach them, and going back to the driver
-the PC maker supplied fixed it at once. Roll the driver back in Device
+the PC maker supplied fixed it at once. Earshot has not shown that this is
+the cause on any other PC. You can try rolling the driver back in Device
 Manager: open Bluetooth, right-click the Bluetooth adapter, choose
-Properties, then Driver, then Roll Back Driver. Earshot does not change
-drivers. On that PC a hand-made Bluetooth trace showed where the pairing
+Properties, then Driver, then Roll Back Driver. A rollback also gives up the
+newer driver's fixes. Earshot does not change drivers. On that PC a hand-made Bluetooth trace showed where the pairing
 stopped; Earshot's Record a Bluetooth trace records the Bluetooth stack too, and
 has not had a live run yet.
 
