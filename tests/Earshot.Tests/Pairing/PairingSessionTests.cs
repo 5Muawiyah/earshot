@@ -678,6 +678,14 @@ public sealed class PairingSessionTests
 
     // ---- the real watcher's reading of one event ----
 
+    // The paired list the tray reads at rest asks only for the address and the container it matches on: not IsPresent ("live and
+    // discovered"), and not the scan's class of device. Before, it asked for the scan's whole list.
+    [TestMethod]
+    public void ThePairedListAsksOnlyForTheAddressAndTheContainer()
+    {
+        CollectionAssert.AreEquivalent(new[] { WinRtPairingApi.AddressProperty, WinRtPairingApi.ContainerProperty }, WinRtPairingApi.PairedListProperties);
+    }
+
     [TestMethod]
     public void TheWatcherEventIsReadForClassPresenceAndName()
     {

@@ -135,6 +135,11 @@ internal sealed partial class WinRtPairingApi : IPairingApi
 
     private static readonly string[] RequestedProperties = [AddressProperty, ContainerProperty, MajorClassProperty, MinorClassProperty, IsPresentProperty, NameProperty];
 
+    // The paired list, read by the tray at every start, new device group and failed connect, asks only for what it matches on.
+    // IsPresent is "live and discovered over the network or wireless protocol", and the class of device is the scan's, so
+    // neither is asked for at rest.
+    internal static readonly string[] PairedListProperties = [AddressProperty, ContainerProperty];
+
     [GeneratedRegex(@"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", RegexOptions.CultureInvariant)]
     private static partial Regex MacInId();
 
@@ -161,7 +166,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
         {
             string selector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
             CallsMade.Add("FindAllAsync(paired-only selector)");
-            DeviceInformationCollection found = await DeviceInformation.FindAllAsync(selector, RequestedProperties).AsTask(ct).ConfigureAwait(false);
+            DeviceInformationCollection found = await DeviceInformation.FindAllAsync(selector, PairedListProperties).AsTask(ct).ConfigureAwait(false);
             foreach (DeviceInformation info in found)
             {
                 string address = AddressOf(info);
