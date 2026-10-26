@@ -38,8 +38,8 @@ internal enum FixOutcome
 
 internal sealed record FixResult(FixOutcome Outcome, IReadOnlyList<string> Lines, IReadOnlyList<StepOutcome> Steps)
 {
-    // The re-pair found the AirPods and this PC could not reach them: the one result that points at this PC's Bluetooth where a
-    // trace can show where it stopped, as the tray's card for the same line offers.
+    // The re-pair found the AirPods with no name read and the pairing then did not finish (Unreachable): the one result Earshot
+    // reads as this PC's Bluetooth, where a trace can show where it stopped, as the tray's card for the same line offers.
     public bool OfferTrace { get; init; }
 
     public int ExitCode => Outcome switch
@@ -147,7 +147,7 @@ internal static class FixConnection
 
         public bool Installed { get; init; }
 
-        // The re-pair found the AirPods and could not reach them.
+        // The re-pair's pairing was Unreachable: found with no name read, then not finished.
         public bool PcBluetoothUnreachable { get; set; }
     }
 

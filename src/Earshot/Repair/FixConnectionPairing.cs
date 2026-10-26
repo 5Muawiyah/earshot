@@ -99,7 +99,8 @@ internal interface IUnpairedWatch : IDisposable
 
 internal interface IPairingApi
 {
-    // The paired-only list, from the cache: no inquiry.
+    // The paired-only list (DeviceInformation.FindAllAsync on the paired selector). Believed to read Windows' own list without an
+    // inquiry or a page; checked at rest by the PC checklist's HCI trace, not yet run.
     Task<PairedListResult> ListPairedAsync(CancellationToken ct);
 
     Task<PairingCallResult> UnpairAsync(string deviceId, CancellationToken ct);

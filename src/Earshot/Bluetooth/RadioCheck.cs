@@ -117,7 +117,7 @@ internal static class RadioLines
     // changed from a program. https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
     public const string SwitchedOff = "Bluetooth is turned off by a switch, the firmware or a policy on this PC.";
     public const string NoAdapter = "Windows finds no Bluetooth on this PC.";
-    public const string NoClassic = "Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound.";
+    public const string NoClassic = "Bluetooth on this PC can't do Classic Bluetooth, which Earshot uses to connect AirPods.";
     // Says what was seen and no more: Windows' status for the pairing (NotPaired, AuthenticationTimeout or Failed) does not say
     // the device answered, and does not say this PC failed to reach it either.
     public const string Unreachable = "This PC found the headphones, but the pairing didn't finish.";
@@ -242,8 +242,8 @@ internal sealed class RadioCheck : IRadioCheck
             return Result(RadioCheckState.NoAdapter, adapter, null, codes, watch);
         }
 
-        // An adapter that does only Bluetooth Low Energy: the AirPods' sound needs Classic Bluetooth, and there is no setting to
-        // change, so no button.
+        // An adapter that does only Bluetooth Low Energy: Earshot connects the AirPods through their Classic Bluetooth device nodes
+        // (BTHENUM) and audio endpoints, and there is no setting to change, so no button.
         if (!adapter.ClassicSupported)
         {
             return Result(RadioCheckState.NoClassic, adapter, null, codes, watch);

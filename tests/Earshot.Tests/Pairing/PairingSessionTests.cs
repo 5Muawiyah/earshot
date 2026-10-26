@@ -355,7 +355,7 @@ public sealed class PairingSessionTests
         Assert.AreEqual(PairOutcome.Unverified, result.Outcome);
     }
 
-    // NotReadyToPair is the device not in pairing mode: with no name read it is still not the PC that could not reach it.
+    // NotReadyToPair is the device not in pairing mode: with no name read it is still not read as this PC's side.
     [TestMethod]
     public async Task AnUnreadNameWithADeviceNotReadyToPairIsNotUnreachable()
     {

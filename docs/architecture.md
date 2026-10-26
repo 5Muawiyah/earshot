@@ -1452,12 +1452,14 @@ https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
 | Switched off | Bluetooth is turned off by a switch, the firmware or a policy on this PC. | Bluetooth settings |
 | Problem | Bluetooth on this PC isn't working. Windows reports problem code N. | Bluetooth settings |
 | No adapter | Windows finds no Bluetooth on this PC. | Bluetooth settings |
-| No Classic Bluetooth | Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound. | None |
+| No Classic Bluetooth | Bluetooth on this PC can't do Classic Bluetooth, which Earshot uses to connect AirPods. | None |
 | Unreachable | This PC found the headphones, but the pairing didn't finish (Windows status N). | Record a Bluetooth trace |
 
 Each line claims only what was read. In these states the card offers nothing
-for the AirPods: no Fix connection, no Connect in Windows, no reset advice,
-because the fault is this PC's. An Ok or unread radio leaves the failure's own
+for the AirPods: no Fix connection, no Connect in Windows, no reset advice. In
+the radio's states the fault is this PC's; Unreachable is Earshot's reading of
+one sitting, and its line says only what was seen. The connect history records
+Unreachable as the PcSide class, that same reading, not an observation. An Ok or unread radio leaves the failure's own
 offers, and so does a read of the default adapter that threw or that this
 Windows cannot make: it is Unknown, with its code in the history, not "no
 Bluetooth". Unreachable comes from a pairing, never from these reads: the

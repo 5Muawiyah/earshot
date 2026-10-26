@@ -269,7 +269,8 @@ public sealed class TraceTrayTests
         });
     }
 
-    // A pairing that found the AirPods but could not reach them gets a card with the trace button; pressing it records.
+    // A pairing that found the AirPods with no name read and then did not finish gets a card with the trace button; pressing it
+    // records.
     [TestMethod]
     public void ThePairingCardForAnUnreachablePairOffersAndStartsARecording()
     {

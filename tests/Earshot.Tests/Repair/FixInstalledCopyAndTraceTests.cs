@@ -78,7 +78,7 @@ public sealed class FixInstalledCopyAndTraceTests
         Assert.AreEqual(FixOutcome.Declined, result.Outcome);
     }
 
-    // The AirPods were found with no name read and the pairing failed: the PC could not reach them.
+    // The AirPods were found with no name read and the pairing failed with a status that does not say they answered (Unreachable).
     private static void ArrangeUnreachable(FixRig rig)
     {
         FixRePairTests.ArrangeHappyPairing(rig);

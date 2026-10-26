@@ -129,7 +129,7 @@ public sealed class RadioCheckTests
         RadioCheckResult r = await Check(Adapter(RadioStateValues.On, classic: false), Node()).CheckAsync(CancellationToken.None);
 
         Assert.AreEqual(RadioCheckState.NoClassic, r.State);
-        Assert.AreEqual("Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound.", r.Line);
+        Assert.AreEqual("Bluetooth on this PC can't do Classic Bluetooth, which Earshot uses to connect AirPods.", r.Line);
         Assert.AreEqual(RadioAction.None, r.Action);
         Assert.IsTrue(r.BlocksRepair);
     }

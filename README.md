@@ -155,13 +155,14 @@ Startup on is not covered.
   off by a switch, the firmware or a policy on this PC.", "Bluetooth on this PC isn't
   working. Windows reports problem code N." or "Windows finds no Bluetooth on
   this PC.", each with a Bluetooth settings button, or "Bluetooth on this PC
-  can't do Classic Bluetooth, which AirPods need for sound.", with no button,
+  can't do Classic Bluetooth, which Earshot uses to connect AirPods.", with no button,
   and no fix for the AirPods. A read of the Bluetooth adapter that fails says
   nothing. When headphones with no name read were found and Windows' answer to
   the pairing does not say they answered, it says "This PC found the headphones, but the pairing didn't finish
   (Windows status N)." with
-  a Record a Bluetooth trace button. That reading of the PC as the cause rests
-  on one sitting, on 25 October.
+  a Record a Bluetooth trace button. Earshot takes that as this PC's side, and
+  offers no fix for the AirPods, from one sitting on 25 October; the line itself
+  says only what was seen.
   `Earshot.exe doctor` reports the driver's version and date, the problem code,
   the radio state and the last pairing attempts.
 - **Record a Bluetooth trace**, new in 1.6.0, on the settings page and on that
