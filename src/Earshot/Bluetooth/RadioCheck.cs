@@ -167,7 +167,11 @@ internal sealed class RadioCheck : IRadioCheck
         var watch = Stopwatch.StartNew();
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         Task<AdapterReading> read = _api.ReadAsync(cts.Token);
-        Task finished = await Task.WhenAny(read, Task.Delay(_budget, ct)).ConfigureAwait(false);
+
+        // The budget's timer is its own source, cancelled as soon as either side ends, so a read that wins leaves no timer behind.
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        Task finished = await Task.WhenAny(read, Task.Delay(_budget, budget.Token)).ConfigureAwait(false);
+        await budget.CancelAsync().ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
         if (finished != read)
         {

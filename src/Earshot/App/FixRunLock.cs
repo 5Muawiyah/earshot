@@ -111,7 +111,19 @@ internal sealed class FixRunLock : IDisposable
         Mutex mutex;
         try
         {
+            // MutexAcl.Create opens a mutex that is already there with full access, so the account that runs Earshot is given full
+            // control: a second run of the same account then opens it and is refused as held, and a run whose last owner died
+            // takes it over. Everyone else may wait on it and release it, so an elevated Setup.exe under Administrator protection
+            // is refused too (it cannot open it with full access, which counts as held).
             var security = new MutexSecurity();
+            using (WindowsIdentity self = WindowsIdentity.GetCurrent())
+            {
+                if (self.User is { } user)
+                {
+                    security.AddAccessRule(new MutexAccessRule(user, MutexRights.FullControl, AccessControlType.Allow));
+                }
+            }
+
             security.AddAccessRule(new MutexAccessRule(
                 new SecurityIdentifier(WellKnownSidType.WorldSid, null), MutexRights.Synchronize | MutexRights.Modify, AccessControlType.Allow));
             mutex = MutexAcl.Create(false, name, out _, security);

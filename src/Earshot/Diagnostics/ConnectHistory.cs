@@ -134,9 +134,54 @@ internal sealed class ConnectHistory
 
     // Appends the entry and drops what is older than Keep. A failure is logged with its code and returned as a step; the
     // switch it describes is never held up by it.
+    //
+    // The tray and a fix run both append, from different threads and processes, and an append reads, adds and writes the whole
+    // file: a named mutex for this file keeps two appends from losing each other's entry, and each writes its own temp file.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutex
     public StepOutcome Append(ConnectHistoryEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        using var mutex = new Mutex(false, MutexName(_path));
+        bool owned;
+        try
+        {
+            owned = mutex.WaitOne(AppendWait);
+        }
+        catch (AbandonedMutexException)
+        {
+            // The writer that held it ended part way; the file it left is read like any other.
+            owned = true;
+        }
+
+        if (!owned)
+        {
+            _log.Warn("The connect history is busy after " + AppendWait.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s, so this entry is written without waiting longer.");
+        }
+
+        try
+        {
+            return AppendLocked(entry);
+        }
+        finally
+        {
+            if (owned)
+            {
+                mutex.ReleaseMutex();
+            }
+        }
+    }
+
+    private static readonly TimeSpan AppendWait = TimeSpan.FromSeconds(5);
+
+    // One name per history file, in this session's namespace, from a hash of its path so no path text is in the name.
+    private static string MutexName(string path)
+    {
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(System.IO.Path.GetFullPath(path).ToLowerInvariant()));
+        return @"Local\Earshot.ConnectHistory." + Convert.ToHexString(hash, 0, 8);
+    }
+
+    private StepOutcome AppendLocked(ConnectHistoryEntry entry)
+    {
         try
         {
             string? folder = System.IO.Path.GetDirectoryName(_path);
@@ -152,7 +197,7 @@ internal sealed class ConnectHistory
                 lines.RemoveAt(0);
             }
 
-            string temp = _path + ".tmp";
+            string temp = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllLines(temp, lines, new UTF8Encoding(false));
             File.Move(temp, _path, overwrite: true);
             return StepOutcomes.FromWin32("connect-history", 0, "written");

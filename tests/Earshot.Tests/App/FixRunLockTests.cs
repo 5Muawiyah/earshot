@@ -25,6 +25,8 @@ public sealed class FixRunLockTests
         Task.Run(() => second = FixRunLock.TryAcquire(name, log)).GetAwaiter().GetResult();
 
         Assert.IsNull(second, "The lock was taken twice.");
+        Assert.IsFalse(log.Entries.Any(e => e.Level == Earshot.Contracts.LogLevel.Warn), "A held lock is refused as held, not as a lock that could not be opened: " +
+            string.Join(" | ", log.Entries.Select(e => e.Message)));
     }
 
     [TestMethod]

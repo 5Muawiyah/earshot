@@ -29,6 +29,25 @@ public sealed class ConnectHistoryTests
         Assert.AreEqual("ks-reconnect", read.Steps.Single().Name);
     }
 
+    // The tray and a fix run append to the same file. Each append reads, adds and writes it all, so two at once must not lose
+    // each other's entry or trip over one temp file.
+    [TestMethod]
+    public void TwoWritersAppendingAtOnceLoseNothing()
+    {
+        using var temp = new TempFolder();
+        var time = new ManualTime();
+        string file = Path.Combine(temp.Path, "connect-history.jsonl");
+        var log = new CapturingLog();
+        var tray = new ConnectHistory(file, time, log);
+        var fix = new ConnectHistory(file, time, log);
+
+        Parallel.For(0, 80, new ParallelOptions { MaxDegreeOfParallelism = 8 }, i =>
+            Assert.IsTrue((i % 2 == 0 ? tray : fix).Append(Entry(time.GetUtcNow())).Ok));
+
+        Assert.HasCount(80, tray.Read());
+        Assert.IsFalse(log.Entries.Any(e => e.Level == LogLevel.Warn), string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
     [TestMethod]
     public void EntriesOlderThanFourteenDaysAreDroppedWhenALineIsWritten()
     {

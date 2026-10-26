@@ -65,7 +65,6 @@ public sealed class FileLogTests
         Assert.IsLessThanOrEqualTo(4096L, new FileInfo(log.RolledFilePath).Length);
     }
 
-    // An elevated run logging under a user's profile never renames or replaces a file there.
     // The log of an install run must survive a day of logging after it: one backup of 1 MB was rolled away within hours, which is
     // how the lines of the 13 October install were lost. Two backups keep the file and the two before it.
     [TestMethod]
@@ -101,6 +100,7 @@ public sealed class FileLogTests
 
     private static int LineNumber(string entry) => int.Parse(entry[^4..], System.Globalization.CultureInfo.InvariantCulture);
 
+    // An elevated run logging under a user's profile never renames or replaces a file there.
     [TestMethod]
     public void ALogThatDoesNotRollOnlyAppends()
     {
