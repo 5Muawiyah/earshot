@@ -18,9 +18,10 @@ namespace Earshot.App;
 // released by a thread of the lock's own, which does nothing else, and Dispose asks that thread to release it from whichever
 // thread Dispose is called on. Each acquire is its own thread, so the same caller asking twice is refused the second time.
 //
-// The account that runs Earshot has full control of the name and Administrators may wait on it, because a Setup.exe run is
-// elevated and under Administrator protection that is another account than the signed-in one, though always in Administrators.
-// No other account can open it, so a standard user signed in elsewhere cannot hold it. A mutex in the Global namespace can still
+// The account that runs Earshot has full control of the name, and Administrators get wait and release only. Earshot opens it with
+// full access, which that entry does not give, so it lets no Earshot run in: a Setup.exe run under Administrator protection is
+// another account and is refused as held (see HoldCore). No other account can open it, so a standard user signed in elsewhere
+// cannot hold it. A mutex in the Global namespace can still
 // be made first by anyone, with a DACL of their own, and then counts as held: that is accepted, and is in the log. A lock that
 // cannot be opened is logged with its code; a lock that is held is logged as held, by a run or by whatever else holds the name,
 // since which it is cannot be told.

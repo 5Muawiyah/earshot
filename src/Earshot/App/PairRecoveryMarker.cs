@@ -64,8 +64,9 @@ internal sealed class PairRecoveryMarker : IPairRecoveryMarker
                 Directory.CreateDirectory(folder);
             }
 
-            // Written through to the disk before the move, so a power loss between the pairing and the adoption (this PC lost its
-            // log's tail that way on 25 October) does not leave the marker unwritten.
+            // The data is written through to the disk before the move, for a power loss between the pairing and the adoption
+            // (this PC lost its log's tail that way on 25 October). The rename itself is not written through, so a power loss just
+            // after it can still lose the marker.
             // https://learn.microsoft.com/en-us/dotnet/api/system.io.fileoptions
             byte[] bytes = Encoding.UTF8.GetBytes(text);
             using (var stream = new FileStream(Temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))

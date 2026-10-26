@@ -148,9 +148,8 @@ internal sealed class ConnectHistory
     //
     // The tray and a fix run both append, from different threads and processes, and an append reads, adds and writes the whole
     // file: a named mutex for this file keeps two appends from losing each other's entry, and each writes its own temp file.
-    // The mutex gives the account that runs Earshot full control, so an elevated fix run of the same account makes one the tray
-    // can still open. One that cannot be opened (another account's, under Administrator protection) is logged with its code
-    // and the entry is written without it.
+    // The mutex gives the account that runs Earshot full control. One that cannot be opened (another account's, under
+    // Administrator protection) is logged with its code and the entry is written without it.
     // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutex
     // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutexacl.create
     public StepOutcome Append(ConnectHistoryEntry entry)
