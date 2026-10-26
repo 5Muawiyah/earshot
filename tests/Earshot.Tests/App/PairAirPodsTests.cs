@@ -887,6 +887,47 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // Exit while the gate is given the new pair: the entry says Earshot closed, not that the adoption failed, and the marker is
+    // kept for the next start.
+    [TestMethod]
+    public void ExitDuringTheAdoptionIsRecordedAsClosing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            var marker = new FakePairRecoveryMarker();
+            TrayHarness? running = null;
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig, marker: marker),
+                coordinatorServices: new CoordinatorServices { History = history },
+                arrange: h => h.Block.OnSetDevice = async ct =>
+                {
+                    running!.Ui.Post(_ => running.ClickMenu(MenuModel.Exit), null);
+                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    return ControllerResult.Ok("Device set");
+                });
+            running = tray;
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            RunUntilClosed(tray);
+
+            string[] names = history.Read().Single().Steps.Select(s => s.Name).ToArray();
+            CollectionAssert.Contains(names, "closing", string.Join(", ", names));
+            CollectionAssert.DoesNotContain(names, "adopt", string.Join(", ", names));
+            CollectionAssert.Contains(names, "adopt-ms", string.Join(", ", names));
+            Assert.IsTrue(marker.Exists(), "The marker is kept for the next start.");
+        });
+    }
+
     // Exit while the first question is up closes it: the entry says Earshot closed, not that the person said no.
     [TestMethod]
     public void ExitWhileTheFirstQuestionIsUpIsRecordedAsClosing()

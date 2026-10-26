@@ -797,6 +797,7 @@ internal sealed partial class TrayContext
         {
             later.Add(end.Adoption switch
             {
+                _ when !adopted && end.AdoptClosed => new StepOutcome("closing", false, NativeCodes.NotAttempted, "exit", null),
                 DeviceChoiceResult.Applied => new StepOutcome("adopt", true, 0, "S_OK", null),
                 DeviceChoiceResult.AppliedGateNotRepinned => new StepOutcome("adopt", false, 1, "gate-not-repinned", null),
                 _ when !adopted && end.AdoptRefusal is { } refused => new StepOutcome("adopt", false, refused.Code, refused.CodeName, refused.Step),
@@ -852,6 +853,9 @@ internal sealed partial class TrayContext
 
         // The gate's first failing step when it refused the new pair, for the adopt step's code.
         public StepOutcome? AdoptRefusal { get; init; }
+
+        // Exit came during the adoption, so nothing was adopted and the step is Earshot closing, not a failed adoption.
+        public bool AdoptClosed { get; init; }
 
         // The answer to "use these instead?", when it was asked, and how long it took.
         public StepOutcome? Replace { get; init; }
@@ -1059,6 +1063,7 @@ internal sealed partial class TrayContext
                 AdoptMs = adoptMs,
                 Adoption = adoption,
                 AdoptRefusal = adopted ? null : _lastGateRefusal,
+                AdoptClosed = !adopted && _closing,
                 Replace = replace is null ? null : new StepOutcome("replace", true, 0, FixAnswer.Ok.ToString(), null),
                 ReplaceMs = replaceMs,
             };
