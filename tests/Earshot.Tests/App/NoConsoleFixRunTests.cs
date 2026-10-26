@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using Earshot.Boot.Gate;
+using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Repair;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -25,7 +27,21 @@ public sealed class NoConsoleFixRunTests
         }
 
         using var temp = new TempFolder();
-        string logFile = Path.Combine(temp.File("data"), "Local", "Earshot", "logs", "earshot.log");
+        string personsLog = Path.Combine(temp.File("data"), "Local", "Earshot", "logs", "earshot.log");
+        string logFile = personsLog;
+
+        // Run as an elevated administrator (as a hosted runner is, and as Setup.exe runs it), Fix writes nothing under the
+        // person's profile: its log goes to the machine folder's log, which is used only when that folder is administrators'
+        // own. The folder is made that way here, as Setup makes the real one.
+        bool elevated = Program.HoldsFixLog(WindowsProcessToken.Current());
+        if (elevated)
+        {
+            string machineFolder = Paths.FromEnvironment(n => n == Paths.DataRootVariable ? temp.File("data") : n == Paths.SafeModeVariable ? "1" : null).MachineFolder;
+            StepOutcome made = new NtfsFolderSecurity().CreateHardened(machineFolder);
+            Assert.IsTrue(made.Ok, made.CodeName + " " + made.Detail);
+            logFile = Path.Combine(machineFolder, "logs", "earshot.log");
+        }
+
         var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe")) { UseShellExecute = false, CreateNoWindow = true };
         foreach (string argument in new[] { "/c", "start", "", exe, "fix" })
         {
@@ -43,6 +59,10 @@ public sealed class NoConsoleFixRunTests
 
         Assert.IsFalse(log.Contains("no console to write to", StringComparison.Ordinal), "Fix found nowhere to write its output: " + log);
         Assert.IsTrue(log.Contains("fix output: " + FixConnection.PlanOnlyNote, StringComparison.Ordinal), log);
+        if (elevated)
+        {
+            Assert.IsFalse(ReadShared(personsLog).Contains("fix output: ", StringComparison.Ordinal), "An elevated Fix wrote into the person's log.");
+        }
     }
 
     private static string WaitForLog(string file, params string[] anyOf)
