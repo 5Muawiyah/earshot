@@ -1040,8 +1040,8 @@ public sealed class PairAirPodsTests
         });
     }
 
-    // Block at boot and Protect audio quality while Pair AirPods runs are refused the same way: both are gate changes that would
-    // race the run's adoption. Before, they ran.
+    // Block at boot, Protect audio quality and the microphone off switch while Pair AirPods runs are refused the same way: all
+    // are gate changes that would race the run's adoption. Before, they ran.
     [TestMethod]
     public void GateChangesWhilePairAirPodsRunsAreRefused()
     {
@@ -1053,17 +1053,20 @@ public sealed class PairAirPodsTests
             rig.Ui.HoldPick = TimeSpan.FromSeconds(2);
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
             bool protectBefore = tray.Settings.Current.ProtectAudioQuality;
+            bool microphoneOffBefore = tray.Settings.Current.HandsFreeMicrophoneOffMode;
             rig.Ui.OnPick = () => tray.Ui.Post(_ =>
             {
                 tray.ClickMenu(MenuModel.BlockAtBoot);
                 tray.ClickMenu(MenuModel.ProtectAudioQuality);
+                tray.Context.SetHandsFreeMicrophoneOff(!microphoneOffBefore, CardPlace.NearTray);
             }, null);
 
             Click(tray);
 
             Assert.IsFalse(tray.Block.Calls.Any(c => c.StartsWith("setboot", StringComparison.Ordinal) || c.StartsWith("protect", StringComparison.Ordinal)), string.Join(", ", tray.Block.Calls));
             Assert.AreEqual(protectBefore, tray.Settings.Current.ProtectAudioQuality, "The setting was not flipped.");
-            Assert.AreEqual(2, tray.Cards.Shown.Count(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage), string.Join(" | ", tray.Cards.Statuses));
+            Assert.AreEqual(microphoneOffBefore, tray.Settings.Current.HandsFreeMicrophoneOffMode, "The microphone off switch was not flipped.");
+            Assert.AreEqual(3, tray.Cards.Shown.Count(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage), string.Join(" | ", tray.Cards.Statuses));
         });
     }
 

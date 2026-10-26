@@ -31,7 +31,7 @@ internal sealed partial class TrayContext
         }
 
         // Before the setting is saved: a refused change must not leave the saved setting flipped with nothing applied.
-        if (RefusedAtSessionEnd("microphone off mode", TrayStatus.AppName, place))
+        if (RefusedAtSessionEnd("microphone off mode", TrayStatus.AppName, place) || RefusedWhilePairing("Microphone off mode", place))
         {
             return;
         }
