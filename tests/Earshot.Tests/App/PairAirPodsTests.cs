@@ -1399,6 +1399,30 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // A start-time recovery that throws showed nothing about the pairs, so the coordinator's own start check still runs.
+    [TestMethod]
+    public void ARecoveryThatThrowsDoesNotHoldBackTheCoordinatorsStartCheck()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.OnListPaired = () => throw new IOException("the paired list failed");
+            var marker = new FakePairRecoveryMarker { Present = true };
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(),
+                pairAirPods: services,
+                coordinatorServices: new CoordinatorServices { Protection = protection, TrayPairing = services.RunFlag },
+                settings: s =>
+                {
+                    s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                    s.PinnedAddress = RecordedNodes.AirPodsAddress;
+                });
+            TrayHarness.PumpUntil(() => protection.Reads > 0, "The coordinator's start check was held back by a recovery that threw.");
+        });
+    }
+
     [TestMethod]
     public void AMarkerLeftAtStartWithNoOtherPairIsClearedAndSaysNothing()
     {

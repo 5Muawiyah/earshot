@@ -124,6 +124,13 @@ internal sealed partial class TrayContext
                 {
                     answered = await RecoverPairingAsync(services, CardPlace.NearTray);
                 }
+                catch
+                {
+                    // A look that threw showed nothing about the pairs (the error card says what failed), so the coordinator's
+                    // start check is not held back by it.
+                    answered = false;
+                    throw;
+                }
                 finally
                 {
                     recovered.TrySetResult(answered);
