@@ -125,4 +125,18 @@ public sealed class FixApplyModeTests
         // Not elevated, the run is the person's own program and changes nothing itself: its elevated step makes the check.
         Assert.IsFalse(Program.FixEnvironmentRefused(FakeToken.PlainUser, ["DOTNET_STARTUP_HOOKS"], new CapturingLog()));
     }
+
+    // The fix verb itself makes that check first: the run ends refused before its arguments, its output, its lock or any question.
+    [TestMethod]
+    public void TheFixVerbEndsRefusedBeforeAnythingElseWhenTheEnvironmentIsUnsafe()
+    {
+        var log = new CapturingLog();
+        var ctx = new Program.RunContext { Args = ["fix", "--out"] };
+
+        Program.TryRunFix(ctx, Earshot.Infra.Paths.FromEnvironment(_ => null), FakeToken.ElevatedUser, log, ["DOTNET_STARTUP_HOOKS"]);
+
+        Assert.AreEqual(ExitCodes.Refused, ctx.ExitCode);
+        Assert.IsTrue(log.Has(LogLevel.Warn, "DOTNET_STARTUP_HOOKS"));
+        Assert.HasCount(1, log.Entries, "Nothing else ran: " + string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
 }

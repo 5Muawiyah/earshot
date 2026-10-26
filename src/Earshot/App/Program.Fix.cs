@@ -102,9 +102,10 @@ internal static partial class Program
         return HoldsFixLog(token) && EnvironmentRefusal("fix", environmentNames, log) is not null;
     }
 
-    private static void TryRunFix(RunContext ctx, Paths paths, IProcessToken token, ILog log)
+    internal static void TryRunFix(RunContext ctx, Paths paths, IProcessToken token, ILog log, IEnumerable<string>? environmentNames = null)
     {
-        if (FixEnvironmentRefused(token, null, log))
+        ArgumentNullException.ThrowIfNull(ctx);
+        if (FixEnvironmentRefused(token, environmentNames, log))
         {
             ctx.ExitCode = ExitCodes.Refused;
             return;
