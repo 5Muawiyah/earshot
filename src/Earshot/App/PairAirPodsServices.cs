@@ -30,6 +30,9 @@ internal sealed class PairAirPodsServices
     // The named lock of FixRunLock; a test gives a name of its own.
     public required string LockName { get; init; }
 
+    // Written before a pairing and cleared at its adoption, so a run cut off in between is noticed at the next start.
+    public IPairRecoveryMarker Marker { get; init; } = NoPairRecoveryMarker.Instance;
+
     public static PairAirPodsServices CreateReal(Paths paths, ILog log)
     {
         ArgumentNullException.ThrowIfNull(paths);
@@ -42,6 +45,7 @@ internal sealed class PairAirPodsServices
             UiFactory = cancel => new FixRePairWindow(cancel, PairAirPodsText.Title),
             Radio = RadioCheck.CreateReal(log),
             LockName = FixRunLock.NameFor(paths),
+            Marker = new PairRecoveryMarker(paths.LocalFolder, TimeProvider.System),
         };
     }
 }
@@ -64,6 +68,8 @@ internal static class PairAirPodsText
     public const string ChooseButton = "Choose AirPods";
 
     public const string StaleChosen = "Your AirPods were removed in Windows. Choose which pair Earshot should use.";
+
+    public const string RecoverChoose = "Earshot closed before it could start using the AirPods you paired. Choose them to finish.";
 
     // The first question, before anything is scanned: three lines, each its own step.
     public static string FirstQuestionBody =>

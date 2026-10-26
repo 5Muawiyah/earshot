@@ -2780,6 +2780,7 @@ internal sealed partial class TrayContext : ApplicationContext
 
         _pinAttemptedFor = choice.ContainerId;
         ForgetPreviousPairIfDifferent(previousPair, choice.ContainerId);
+        ClearPairMarker("a pair was chosen");
         _log.Info("Device chosen: " + choice.Name + " (" + choice.Address + ", container " + choice.ContainerId + "), match \"" + choice.Match + "\".");
         _ = RefreshSnapshotAsync();
 

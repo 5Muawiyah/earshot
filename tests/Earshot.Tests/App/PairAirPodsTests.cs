@@ -42,8 +42,9 @@ public sealed class PairAirPodsTests
         rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
     }
 
-    private static PairAirPodsServices Services(FixRig rig, RadioCheckState radio = RadioCheckState.Ok, string? lockName = null) => new()
+    private static PairAirPodsServices Services(FixRig rig, RadioCheckState radio = RadioCheckState.Ok, string? lockName = null, IPairRecoveryMarker? marker = null) => new()
     {
+        Marker = marker ?? NoPairRecoveryMarker.Instance,
         Api = rig.Pairing,
         Nodes = rig.Nodes,
         Prompter = rig.Prompter,
@@ -297,4 +298,155 @@ public sealed class PairAirPodsTests
             Assert.AreEqual(MenuModel.SafeMode, tray.Cards.Shown[^1].Content.Status);
         });
     }
+
+    // The time between the pairing and the adoption is covered by a marker written before anything is paired.
+    [TestMethod]
+    public void TheRecoveryMarkerIsThereWhileThePairIsPairedAndGoneOnceItIsAdopted()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            var marker = new FakePairRecoveryMarker();
+            bool markedWhenPaired = false;
+            Action<string> paired = rig.Pairing.OnPaired!;
+            rig.Pairing.OnPaired = id =>
+            {
+                markedWhenPaired = marker.Exists();
+                paired(id);
+            };
+            rig.Prompter.SayOk();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+
+            Click(tray);
+
+            Assert.IsTrue(markedWhenPaired, "The marker was written before the pairing.");
+            Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
+            Assert.IsFalse(marker.Exists(), "Cleared once the pair was adopted: " + string.Join(", ", marker.Calls));
+        });
+    }
+
+    [TestMethod]
+    public void APairingThatFailedClearsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
+            rig.Pairing.PairResult = new PairingCallResult("Failed", PairReasons.Failed, false, null);
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+
+            Click(tray);
+
+            CollectionAssert.Contains(marker.Calls, "write");
+            Assert.IsFalse(marker.Exists());
+        });
+    }
+
+    // The gate refused the new pair, so it is paired and not adopted: the marker stays for the next start to offer it again.
+    [TestMethod]
+    public void AnAdoptionThatDidNotHappenKeepsTheMarker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker),
+                arrange: h => h.Block.OnSetDevice = _ => Task.FromResult(ControllerResult.Fail("refused", [])));
+
+            Click(tray);
+
+            Assert.AreNotEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
+            Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    // A tray that stopped between the pairing and the adoption: at the next start the new pair is paired and not pinned, so the
+    // device picker is offered for it. Nothing is adopted by itself.
+    [TestMethod]
+    public void AMarkerLeftAtStartWithAnUnpinnedPairOffersTheDevicePicker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(FixRig.NewAirPodsNodes()));
+            rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+            var marker = new FakePairRecoveryMarker { Present = true };
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig, marker: marker), settings: s =>
+            {
+                s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                s.PinnedAddress = RecordedNodes.AirPodsAddress;
+            });
+
+            CardContent card = tray.Cards.Shown[^1].Content;
+            Assert.AreEqual(PairAirPodsText.RecoverChoose, card.Status);
+            Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+            Assert.AreEqual(RecordedNodes.AirPodsContainer, tray.Settings.Current.PinnedContainerId, "Nothing was adopted by itself.");
+            Assert.IsTrue(marker.Exists(), "Kept until a pair is chosen.");
+            Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)));
+        });
+    }
+
+    [TestMethod]
+    public void AMarkerLeftAtStartWithNoOtherPairIsClearedAndSaysNothing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            var marker = new FakePairRecoveryMarker { Present = true };
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig, marker: marker), settings: s =>
+            {
+                s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                s.PinnedAddress = RecordedNodes.AirPodsAddress;
+            });
+
+            Assert.IsEmpty(tray.Cards.Shown);
+            Assert.IsFalse(marker.Exists());
+        });
+    }
+
+    [TestMethod]
+    public void TheRealMarkerIsWrittenReadAndClearedAndNamesNoDevice()
+    {
+        using var folder = new TempFolder();
+        var marker = new PairRecoveryMarker(folder.Path, TimeProvider.System);
+
+        Assert.IsFalse(marker.Exists());
+        Assert.IsTrue(marker.Write().Ok);
+        Assert.IsTrue(marker.Exists());
+        string text = File.ReadAllText(Path.Combine(folder.Path, PairRecoveryMarker.FileName));
+        StringAssert.Contains(text, "OpenedUtc");
+        Assert.IsFalse(text.Contains(FixRig.NewAirPodsAddress, StringComparison.OrdinalIgnoreCase));
+        Assert.IsTrue(marker.Clear().Ok);
+        Assert.IsFalse(marker.Exists());
+        Assert.IsTrue(marker.Clear().Ok, "Clearing a marker that is not there is not a failure.");
+    }
+}
+
+internal sealed class FakePairRecoveryMarker : IPairRecoveryMarker
+{
+    public bool Present { get; set; }
+
+    public List<string> Calls { get; } = [];
+
+    public StepOutcome Write()
+    {
+        Calls.Add("write");
+        Present = true;
+        return new StepOutcome("pair-marker-write", true, 0, "ERROR_SUCCESS", null);
+    }
+
+    public StepOutcome Clear()
+    {
+        Calls.Add("clear");
+        Present = false;
+        return new StepOutcome("pair-marker-clear", true, 0, "ERROR_SUCCESS", null);
+    }
+
+    public bool Exists() => Present;
 }

@@ -12,7 +12,9 @@ namespace Earshot.App;
 // no AirPods are paired at all. It runs in the tray, unelevated (pairing is per user), through the pairing session Fix
 // connection's re-pair shares: the radio is read first, the person presses Look for AirPods, picks the device and presses Pair,
 // and a pair that passes the model check is pinned and then set up. Nothing is unpaired: a device that is not AirPods is left
-// as it is. One run at a time with a Fix connection (FixRunLock) and with an elevated run of the tray's own.
+// as it is. One run at a time with a Fix connection (FixRunLock) and with an elevated run of the tray's own. A marker covers the
+// time between the pairing and the adoption (PairRecoveryMarker): one left by a tray that did not get that far is answered at
+// the next start with the stale-pin check and the device picker for the pair it left.
 internal sealed partial class TrayContext
 {
     internal const string PairRun = "pairing";
@@ -59,12 +61,61 @@ internal sealed partial class TrayContext
     // is, or when that cannot be told.
     internal void StartPinnedPairCheck(string reason)
     {
-        if (_closing || _pairServices is null || _registry.SafeMode)
+        if (_closing || _pairServices is not { } services || _registry.SafeMode)
         {
             return;
         }
 
+        if (reason == "start" && services.Marker.Exists())
+        {
+            Launch("recover a pairing", () => RecoverPairingAsync(services, CardPlace.NearTray), CardPlace.NearTray);
+            return;
+        }
+
         Launch("check the pinned pair", () => CheckPinnedPairAsync(reason, CardPlace.NearTray), CardPlace.NearTray);
+    }
+
+    // A marker from a run that paired and did not adopt. The stale-pin check comes first and says what it found; then a pair of
+    // AirPods that is paired and not the pinned one is offered through the device picker, never adopted by itself. The marker
+    // stays until a pair is chosen, or until no such pair is left.
+    private async Task RecoverPairingAsync(PairAirPodsServices services, CardPlace place)
+    {
+        _log.Warn("Pair AirPods: an earlier pairing ended before its AirPods were adopted, so they may be paired, unpinned and unblocked.");
+        if (!await CheckPinnedPairAsync("pairing recovery", place) || _closing)
+        {
+            return;
+        }
+
+        AirPodsDiscoveryResult found = await Task.Run(() => AirPodsDiscovery.Find(services.Nodes), _lifetime.Token);
+        if (!found.Listed)
+        {
+            _log.Warn("Pair AirPods: the devices could not be listed, so the pairing that did not finish is looked at again next start.");
+            return;
+        }
+
+        Guid pinned = _registry.Settings.Current.PinnedContainerId;
+        int left = found.Candidates.Count(c => c.DevicePresent && c.ContainerId != pinned);
+        if (left == 0)
+        {
+            ClearPairMarker("no paired AirPods other than the pinned ones are left");
+            return;
+        }
+
+        _log.Info("Pair AirPods: " + left.ToString(System.Globalization.CultureInfo.InvariantCulture) + " paired set(s) of AirPods are not the pinned ones, so the device picker is offered.");
+        ShowCardWithButton(
+            TrayStatus.AppName, PairAirPodsText.RecoverChoose, PairAirPodsText.ChooseButton,
+            () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
+    }
+
+    private void ClearPairMarker(string why)
+    {
+        if (_pairServices is not { } services || !services.Marker.Exists())
+        {
+            return;
+        }
+
+        StepOutcome cleared = services.Marker.Clear();
+        _log.Write(cleared.Ok ? LogLevel.Info : LogLevel.Warn, "Pair AirPods: recovery marker cleared (" + why + "): " + cleared.CodeName + " " + cleared.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
     }
 
     // Whether the AirPods Earshot has pinned are still paired, read only. True means go on: the pin is fine, or nothing could be
@@ -300,15 +351,23 @@ internal sealed partial class TrayContext
                 }
             }
 
+            // Written before anything can be paired, so the time between the pairing and the adoption is always covered.
+            StepOutcome marked = services.Marker.Write();
+            _log.Write(marked.Ok ? LogLevel.Info : LogLevel.Warn, "Pair AirPods: recovery marker written: " + marked.CodeName + " " + marked.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
             PairingSessionResult result = await session.RunAsync(excludeAlreadyListed: false, cancel.Token, radio);
             _log.Info("Pair AirPods: " + result.Outcome + ", " + result.Reason + ".");
             if (result.Outcome != PairOutcome.Paired || result.Adoptable is not { } found)
             {
+                ClearPairMarker("the pairing left no AirPods to adopt");
                 ShowPairResult(result, radio, place);
                 return new PairRunEnd(result, null, false);
             }
 
             bool adopted = await AdoptPairedAirPodsAsync(found, place);
+            if (!adopted)
+            {
+                _log.Warn("Pair AirPods: the recovery marker is kept, so the next start offers these AirPods again.");
+            }
             bool setUp = false;
             if (adopted)
             {
