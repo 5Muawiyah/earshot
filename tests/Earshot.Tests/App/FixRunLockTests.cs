@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Security.AccessControl;
+using System.Security.Principal;
 using Earshot.App;
 using Earshot.Infra;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -100,6 +101,27 @@ public sealed class FixRunLockTests
         Assert.IsNull(asked.Result);
         Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("HRESULT 0x" + thrown.HResult.ToString("X8", CultureInfo.InvariantCulture), StringComparison.Ordinal)),
             string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
+    // The name gives this account full control and Administrators wait-and-release, and nothing to Everyone, so another
+    // account that is not an administrator cannot open and hold it.
+    [TestMethod]
+    public void TheLockIsOpenToThisAccountAndAdministratorsOnly()
+    {
+        string name = UniqueName();
+        using FixRunLock? held = FixRunLock.TryAcquire(name, new CapturingLog());
+        Assert.IsNotNull(held);
+        using Mutex opened = MutexAcl.OpenExisting(name, MutexRights.ReadPermissions);
+
+        var rules = opened.GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<MutexAccessRule>().ToList();
+
+        var world = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+        var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        using WindowsIdentity self = WindowsIdentity.GetCurrent();
+        Assert.IsFalse(rules.Any(r => r.IdentityReference.Equals(world)), "Everyone has no access.");
+        Assert.IsTrue(rules.Any(r => r.IdentityReference.Equals(admins) && r.MutexRights.HasFlag(MutexRights.Synchronize | MutexRights.Modify)));
+        Assert.IsTrue(rules.Any(r => r.IdentityReference.Equals(self.User) && r.MutexRights.HasFlag(MutexRights.FullControl)));
+        Assert.HasCount(2, rules, string.Join(", ", rules.Select(r => r.IdentityReference + " " + r.MutexRights)));
     }
 
     // The same thread asking twice is a second run, not a re-entry of the first: the tray's UI thread starts both.
