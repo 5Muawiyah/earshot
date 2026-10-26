@@ -204,6 +204,29 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // A device picker left open when Pair AirPods started: its choice is not applied while the pairing runs, since a pin made
+    // then would race the pairing's adoption.
+    [TestMethod]
+    public void AChoiceFromAPickerOpenBeforePairAirPodsIsNotAppliedWhileItRuns()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            TrayHarness? running = null;
+            var other = new Earshot.Tray.PickerChoice("Other", "Other", "AABBCCDDEEFF", Guid.NewGuid());
+            rig.Prompter.OnAsk = q => _ = running!.Context.ApplyPickedChoiceAsync(other, CardPlace.NearTray);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            running = tray;
+            Guid pinnedBefore = tray.Settings.Current.PinnedContainerId;
+
+            Click(tray);
+
+            Assert.AreEqual(pinnedBefore, tray.Settings.Current.PinnedContainerId);
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Choose device: the choice is not applied, because Pair AirPods started while the picker was open."));
+        });
+    }
+
     // With nothing valid pinned there is nothing to replace, so the pick is the only choice and no second question is asked.
     [TestMethod]
     public void APairingWithNothingPinnedAsksOnlyLookForAirPods()

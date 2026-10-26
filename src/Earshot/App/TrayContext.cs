@@ -2713,6 +2713,18 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
+        await ApplyPickedChoiceAsync(choice, place);
+    }
+
+    // The choice made in a picker that was open, applied. A Pair AirPods started while the picker was open answers for the pairs:
+    // a pin made now would race its adoption, so the choice is not applied.
+    internal async Task ApplyPickedChoiceAsync(PickerChoice choice, CardPlace place)
+    {
+        if (RefusedWhilePairing())
+        {
+            return;
+        }
+
         // A different device is a new intent: a connect or disconnect in flight for the old one is cancelled,
         // and the pin waits for its clean-up, so any re-block still acts on the device the gate pins now.
         if (_toggle is not null)
@@ -2730,9 +2742,21 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        if (!_closing)
+        if (!_closing && !RefusedWhilePairing())
         {
             await ApplyDeviceChoiceAsync(choice, place);
+        }
+
+        bool RefusedWhilePairing()
+        {
+            if (_elevatedRun != PairRun)
+            {
+                return false;
+            }
+
+            _log.Info("Choose device: the choice is not applied, because Pair AirPods started while the picker was open.");
+            ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, place);
+            return true;
         }
     }
 
