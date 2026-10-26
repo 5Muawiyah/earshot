@@ -65,20 +65,20 @@ internal static class PairReasons
         return value switch
         {
             Paired or AlreadyPaired => PairedLine,
-            NotReadyToPair => "Windows says the device isn't ready to pair. Put the case in pairing mode and try again.",
+            NotReadyToPair => "The device isn't in a state where it can be paired.",
             NotPaired => "Windows didn't pair the device.",
             ConnectionRejected => "The device turned down the connection.",
             TooManyConnections => "The device can't take another connection right now.",
-            HardwareFailure => "Windows reports a hardware failure.",
+            HardwareFailure => "The device reported a hardware failure.",
             AuthenticationTimeout => "Pairing took too long and stopped.",
             AuthenticationNotAllowed or ProtectionLevelCouldNotBeMet or InvalidCeremonyData or RequiredHandlerNotRegistered =>
                 "Windows couldn't complete the pairing (code " + number + ").",
             AuthenticationFailure => "Pairing failed because the authentication was turned down.",
-            NoSupportedProfiles => "Windows found nothing it can use on this device.",
+            NoSupportedProfiles => "Windows found no profiles this device can use.",
             AccessDenied => "Windows didn't allow Earshot to pair.",
             PairingCanceled or RejectedByHandler => "Pairing was cancelled.",
-            OperationAlreadyInProgress => "Windows is already pairing a device. Try again in a moment.",
-            RemoteDeviceHasAssociation => "Windows says the device is already set up with something else.",
+            OperationAlreadyInProgress => "The device is already pairing or unpairing. Try again in a moment.",
+            RemoteDeviceHasAssociation => "The device already has an association.",
             _ => "Windows couldn't pair the device (code " + number + ").",
         };
     }
