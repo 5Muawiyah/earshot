@@ -31,6 +31,10 @@ public sealed class PairAirPodsTests
 
     private static readonly string[] StepsBeforeTheSession = ["look", "look-ms", "pair-marker-write"];
 
+    private static readonly string[] ClosingSteps = ["closing", "closing-ms"];
+
+    private static readonly string[] StepsBeforeAThrow = ["look", "look-ms", "unexpected", "unexpected-ms"];
+
     private static void ArrangePairs(FixRig rig, bool airPods = true)
     {
         rig.Pairing.OnPaired = _ =>
@@ -417,6 +421,36 @@ public sealed class PairAirPodsTests
             Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("stops, because a pairing has started", StringComparison.Ordinal)),
                 string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
             Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.RecoverChoose));
+
+            // The check for AirPods Earshot does not protect waited for the look, which gave way: it runs once the pairing has
+            // ended. Before, it was skipped for the whole session.
+            const string Owed = "The check for AirPods that Earshot does not protect runs now: a pairing started during the look at one that did not finish";
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            while (!tray.Log.Has(LogLevel.Info, Owed) && watch.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                tray.PumpUntilIdle();
+                Thread.Sleep(5);
+            }
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, Owed), string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
+        });
+    }
+
+    // The end of a pairing tells the coordinator, which reads the state again at once instead of after its doubled wait.
+    [TestMethod]
+    public void TheEndOfAPairingTellsTheCoordinatorToReadAgain()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayCancel();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+
+            Click(tray);
+
+            Assert.IsTrue(tray.Log.Has(LogLevel.Info, "The tray's pairing has ended, so the state is read again now."),
+                string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
         });
     }
 
@@ -447,8 +481,47 @@ public sealed class PairAirPodsTests
 
             ConnectHistoryEntry entry = history.Read().Single();
             Assert.AreEqual(ConnectHistoryOutcomes.Cancelled, entry.Outcome);
-            Assert.AreEqual("closing", entry.Steps[0].Name);
+            // The steps taken before Exit stay in the entry: before, only the closing step was kept.
+            string[] names = entry.Steps.Select(s => s.Name).ToArray();
+            CollectionAssert.AreEqual(StepsBeforeTheSession, names.Take(3).ToArray(), string.Join(", ", names));
+            CollectionAssert.Contains(names, "scan");
+            CollectionAssert.AreEqual(ClosingSteps, names.TakeLast(2).ToArray(), string.Join(", ", names));
             Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    // Exit while the first question is up closes it: the entry says Earshot closed, not that the person said no.
+    [TestMethod]
+    public void ExitWhileTheFirstQuestionIsUpIsRecordedAsClosing()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayCancel();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history });
+            rig.Prompter.OnAsk = q =>
+            {
+                if (q.Heading == PairAirPodsText.FirstQuestion.Heading)
+                {
+                    tray.ClickMenu(MenuModel.Exit);
+                }
+            };
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            Application.Run(tray.Context);
+
+            ConnectHistoryEntry entry = history.Read().Single();
+            CollectionAssert.AreEqual(ClosingSteps, entry.Steps.Select(s => s.Name).ToArray());
+            Assert.IsFalse(tray.Log.Has(LogLevel.Info, "the person did not press Look for AirPods"));
         });
     }
 
@@ -567,6 +640,7 @@ public sealed class PairAirPodsTests
             rig.Prompter.SayOk();
             var thrown = new InvalidOperationException("not expected");
             var marker = new FakePairRecoveryMarker { WriteThrows = thrown };
+            rig.Prompter.OnAsk = _ => Thread.Sleep(40);
             using var folder = new TempFolder();
             var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
             var protection = new FakeProtectionCheck();
@@ -579,8 +653,10 @@ public sealed class PairAirPodsTests
 
             ConnectHistoryEntry entry = history.Read().Single();
             Assert.AreEqual(ConnectHistoryOutcomes.Failed, entry.Outcome);
-            Assert.AreEqual("unexpected", entry.Steps[0].Name);
-            Assert.AreEqual(thrown.HResult, entry.Steps[0].Code);
+            // The steps taken before the throw stay, and the run is timed: before, the entry had only the throw, at 0 ms.
+            CollectionAssert.AreEqual(StepsBeforeAThrow, entry.Steps.Select(s => s.Name).ToArray());
+            Assert.AreEqual(thrown.HResult, entry.Steps.Single(s => s.Name == "unexpected").Code);
+            Assert.IsGreaterThanOrEqualTo(40L, entry.DurationMs, "The run took at least as long as its first question.");
             // Windows may have paired before the throw, so the check against the gate's own device runs once the run has let go.
             Assert.AreEqual(readsBefore + 1, protection.Reads, string.Join(" | ", tray.Log.Entries.Select(e => e.Message)));
         });
@@ -848,6 +924,7 @@ public sealed class PairAirPodsTests
             CardContent card = tray.Cards.Shown[^1].Content;
             Assert.AreEqual(PairAirPodsText.RecoverChoose, card.Status);
             Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+            Assert.IsTrue(card.StaysUp, "Shown at sign-in, the card must not go after twelve seconds.");
             Assert.AreEqual(RecordedNodes.AirPodsContainer, tray.Settings.Current.PinnedContainerId, "Nothing was adopted by itself.");
             Assert.IsTrue(marker.Exists(), "Kept until a pair is chosen.");
             Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)));
@@ -923,6 +1000,7 @@ public sealed class PairAirPodsTests
             CardContent card = tray.Cards.Shown[^1].Content;
             Assert.AreEqual(PairAirPodsText.RecoverUnread, card.Status);
             Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+            Assert.IsTrue(card.StaysUp, "Shown at sign-in, the card must not go after twelve seconds.");
             Assert.IsTrue(marker.Exists());
         });
     }

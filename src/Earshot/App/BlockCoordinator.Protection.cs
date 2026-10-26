@@ -1,4 +1,5 @@
 using Earshot.Contracts;
+using Earshot.Tray;
 
 namespace Earshot.App;
 
@@ -106,6 +107,34 @@ internal sealed partial class BlockCoordinator
 
         _log.Info("The check for AirPods that Earshot does not protect runs now: " + why + ".");
         _ = CheckProtectionAsync();
+    }
+
+    // The tray's Pair AirPods, or its look at a pairing that did not finish, has let go. While it ran the idle rule read
+    // Unsettled and its rechecks doubled, so the next read could be up to IdleRetryLimit away with the nodes enabled; the state
+    // is read now instead, and the start-up block a look held back is tried again. UI thread only.
+    public void TrayPairingEnded()
+    {
+        if (_closing || _disposed || !_started || _services.TrayPairing.Active)
+        {
+            return;
+        }
+
+        _log.Info("The tray's pairing has ended, so the state is read again now.");
+        StopRechecks(settled: true);
+        _ = ReadAgainAfterTrayPairingAsync();
+    }
+
+    private async Task ReadAgainAfterTrayPairingAsync()
+    {
+        try
+        {
+            await RefreshStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            StepOutcome step = StepOutcomes.FromHResult("recheck", ex.HResult, ex.GetType().Name + ": " + ex.Message, ok: false);
+            _log.Error("Reading the state again after the tray's pairing failed. " + TrayReport.DescribeStep(step), ex);
+        }
     }
 
     // A Fix connection run started from the tray has ended. It may have left a run half done or a new pair Earshot does not

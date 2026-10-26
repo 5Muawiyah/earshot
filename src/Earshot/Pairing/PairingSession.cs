@@ -132,11 +132,18 @@ internal sealed class PairingSession
     // excludeAlreadyListed: true for Fix, whose removal happens before the scan so the removed pair still shows up and must not
     // be offered back; false for Pair AirPods, where the person starts the scan, so whatever is present is offered.
     // checkedRadio: the result of a CheckRadioAsync the caller already made, so the radio is not read twice.
+    // The history steps of the last run so far, for a caller whose run was cut off (cancelled, closed or thrown out of) before
+    // the result was returned. Read only once that run has ended.
+    internal IReadOnlyList<StepOutcome> StepsSoFar => Volatile.Read(ref _stepsSoFar) is { } steps ? [.. steps] : [];
+
+    private List<StepOutcome>? _stepsSoFar;
+
     public async Task<PairingSessionResult> RunAsync(bool excludeAlreadyListed, CancellationToken ct, RadioCheckResult? checkedRadio = null)
     {
         var watch = Stopwatch.StartNew();
         var lines = new List<string>();
         var history = new List<StepOutcome>();
+        Volatile.Write(ref _stepsSoFar, history);
         var steps = new List<StepOutcome>();
 
         RadioCheckResult? radio = checkedRadio ?? await CheckRadioAsync(ct).ConfigureAwait(false);

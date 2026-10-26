@@ -110,6 +110,25 @@ public sealed class FixStartTests
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
     }
 
+    // The end of the tray's pairing reads the state again at once. Before, the idle rule's rechecks had doubled while the
+    // pairing ran and the next read came only when the last wait ended, up to IdleRetryLimit later, with the pinned pair's
+    // nodes enabled and idle all that time.
+    [TestMethod]
+    public void TheEndOfTheTraysPairingReadsTheStateAgainAtOnce()
+    {
+        using CoordinatorHarness h = Idle();
+        h.TrayPairing.Active = true;
+        h.Start();
+        h.Advance(TimeSpan.FromMinutes(8));
+        Assert.IsEmpty(h.Block.Calls);
+
+        h.TrayPairing.Active = false;
+        h.Coordinator.TrayPairingEnded();
+        h.Advance(BlockCoordinator.IdleGrace + BlockCoordinator.IdleGrace);
+
+        CollectionAssert.AreEqual(BlockOnly, h.Block.Calls, "The block waited for the doubled recheck.");
+    }
+
     [TestMethod]
     public void AWindowThatOpensDuringTheIdleCountdownStopsTheBlock()
     {

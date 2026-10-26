@@ -36,6 +36,31 @@ internal sealed partial class TrayContext
 
     private bool KeptThePinnedPairJustNow() => _keptPinnedPairAt is { } at && _time.GetUtcNow() - at < KeptPairQuiet;
 
+    // The start-time look at a pairing that did not finish gave way to a Pair AirPods pressed while it looked, so the check for
+    // AirPods Earshot does not protect, which waited for that look, is owed once the pairing ends.
+    private bool _protectionCheckOwed;
+
+    // The pairing flag is dropped: the coordinator reads the state again now, and a check the look owed runs (not over the line
+    // that says the new pair is kept unprotected, just shown). UI thread only.
+    private void DropPairRunFlag(PairAirPodsServices services, bool keep)
+    {
+        services.RunFlag.Active = keep;
+        if (keep || _closing)
+        {
+            return;
+        }
+
+        _coordinator.TrayPairingEnded();
+        if (_protectionCheckOwed)
+        {
+            _protectionCheckOwed = false;
+            if (!KeptThePinnedPairJustNow())
+            {
+                _coordinator.CheckProtectionAfterTrayPairing("a pairing started during the look at one that did not finish");
+            }
+        }
+    }
+
     private void WirePairAirPods(TrayStartOptions options)
     {
         _pairServices = options.PairAirPods;
@@ -93,7 +118,7 @@ internal sealed partial class TrayContext
                 finally
                 {
                     _recoveringPair = false;
-                    services.RunFlag.Active = _elevatedRun == PairRun;
+                    DropPairRunFlag(services, keep: _elevatedRun == PairRun);
                 }
 
                 // The coordinator's check for AirPods Earshot does not protect waited while this ran. When nothing was shown, it
@@ -112,8 +137,9 @@ internal sealed partial class TrayContext
 
     // A marker from a run that paired and did not adopt. The stale-pin check comes first and says what it found; then a pair of
     // AirPods that is paired and not the pinned one is offered through the device picker, never adopted by itself. The marker
-    // stays until a pair is chosen, or until no such pair is left. True when the person was shown something (or Earshot is
-    // closing); false when nothing was shown, so the coordinator's own check runs after it.
+    // stays until a pair is chosen, or until no such pair is left. True when the person was shown something, Earshot is closing,
+    // or a pairing that started meanwhile owes the check; false when nothing was shown, so the coordinator's own check runs
+    // after it.
     private async Task<bool> RecoverPairingAsync(PairAirPodsServices services, CardPlace place)
     {
         _log.Warn("Pair AirPods: an earlier pairing ended before its AirPods were adopted, so they may be paired, unpinned and unblocked.");
@@ -133,11 +159,12 @@ internal sealed partial class TrayContext
         }
 
         // A Pair AirPods pressed while this looked answers for the pairs itself, and a card from here would race its own. Nothing
-        // was shown, so the coordinator's own check is asked for (it waits while the pairing runs), and the marker stays.
+        // was shown, so the coordinator's own check is owed once that pairing ends (DropPairRunFlag), and the marker stays.
         if (_elevatedRun == PairRun || _closing)
         {
             _log.Info("Pair AirPods: the look at the pairing that did not finish stops, because a pairing has started.");
-            return _closing;
+            _protectionCheckOwed = !_closing;
+            return true;
         }
 
         if (!found.Listed)
@@ -161,8 +188,10 @@ internal sealed partial class TrayContext
         return true;
     }
 
+    // The card stays up until it is used or replaced: it is shown at sign-in, while the desktop loads, and while it is missed the
+    // new pair stays paired, unpinned and unblocked.
     private void OfferChooseLeftPair(string line, CardPlace place) =>
-        ShowCardWithButton(TrayStatus.AppName, line, PairAirPodsText.ChooseButton, () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
+        ShowCardWithButton(TrayStatus.AppName, line, PairAirPodsText.ChooseButton, () => Launch("choose device", () => ChooseDeviceAsync(place), place), place, staysUp: true);
 
     // The paired AirPods that are not the pinned ones, by container; null when the device list could not be read.
     private async Task<HashSet<Guid>?> UnpinnedAirPodsAsync(PairAirPodsServices services)
@@ -421,6 +450,7 @@ internal sealed partial class TrayContext
         PairRunEnd end = PairRunEnd.Nothing;
         var setupSteps = new List<StepOutcome>();
         System.Runtime.ExceptionServices.ExceptionDispatchInfo? unexpected = null;
+        var runWatch = System.Diagnostics.Stopwatch.StartNew();
         services.RunFlag.Active = true;
         try
         {
@@ -454,7 +484,7 @@ internal sealed partial class TrayContext
             }
             else
             {
-                _coordinator.WriteHistory(EndedEarly(stopped, ConnectHistoryOutcomes.Failed, 0).Early!);
+                _coordinator.WriteHistory(EndedEarly(stopped, ConnectHistoryOutcomes.Failed, runWatch.ElapsedMilliseconds, _pairRunSession?.StepsSoFar).Early!);
             }
 
             unexpected = System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex);
@@ -464,7 +494,7 @@ internal sealed partial class TrayContext
         {
             EndElevatedRun(PairRun);
             EndElevatedRun(SetupRun);
-            services.RunFlag.Active = _recoveringPair;
+            DropPairRunFlag(services, keep: _recoveringPair);
         }
 
         // Windows may have paired before the run stopped on something unexpected: a new pair may be paired and not protected, and
@@ -496,6 +526,9 @@ internal sealed partial class TrayContext
     // time, so one list; each run starts it again.
     private readonly List<StepOutcome> _pairRunSteps = [];
 
+    // The session of the run under way, so a run that throws out of it still records the steps it had taken.
+    private PairingSession? _pairRunSession;
+
     // Each step after the session's own, with its code and how long it took.
     private static List<StepOutcome> StepsAfterTheSession(PairRunEnd end)
     {
@@ -521,11 +554,13 @@ internal sealed partial class TrayContext
     }
 
     // The one history entry of a run that ended before the session gave one: the step it stopped at, with its code and the time.
-    private PairRunEnd EndedEarly(StepOutcome stoppedAt, string outcome, long ms) => new(null, null, false)
+    // A run that ended before its session's own entry: the steps it had taken (Look for AirPods, the marker, and those of a
+    // session that was cut off), then the step it stopped at and how long the run had taken by then.
+    private PairRunEnd EndedEarly(StepOutcome stoppedAt, string outcome, long ms, IReadOnlyList<StepOutcome>? sessionSteps = null) => new(null, null, false)
     {
         Early = new ConnectHistoryEntry(
             _time.GetUtcNow(), ConnectHistoryActions.Pair, "none", "custom-pairing",
-            ConnectHistory.FromSteps([stoppedAt, Milliseconds(stoppedAt.Step + "-ms", ms)]),
+            ConnectHistory.FromSteps([.. _pairRunSteps, .. sessionSteps ?? [], stoppedAt, Milliseconds(stoppedAt.Step + "-ms", ms)]),
             false, outcome, FailureClass.None.ToString(), ms),
     };
 
@@ -567,6 +602,8 @@ internal sealed partial class TrayContext
 
     private async Task<PairRunEnd> PairAndAdoptAsync(PairAirPodsServices services, CardPlace place)
     {
+        _pairRunSteps.Clear();
+        _pairRunSession = null;
         using FixRunLock? runLock = FixRunLock.TryAcquire(services.LockName, _log);
         if (runLock is null)
         {
@@ -578,8 +615,8 @@ internal sealed partial class TrayContext
         using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         IFixRePairUi ui = services.UiFactory(cancel);
         var watch = System.Diagnostics.Stopwatch.StartNew();
-        _pairRunSteps.Clear();
         HashSet<Guid>? before = null;
+        PairingSession? session = null;
         bool marked = false;
 
         // A marker an earlier run left is that run's: this run may write over it, but only a recovery that has looked at what it
@@ -587,11 +624,20 @@ internal sealed partial class TrayContext
         bool earlierMarker = services.Marker.Exists();
         try
         {
-            var session = new PairingSession(services.Api, services.Nodes, ui, services.Options, _log, services.Radio);
+            session = new PairingSession(services.Api, services.Nodes, ui, services.Options, _log, services.Radio);
+            _pairRunSession = session;
             RadioCheckResult? radio = await session.CheckRadioAsync(cancel.Token);
             if (radio is not { BlocksRepair: true })
             {
                 FixPromptAnswer answer = services.Prompter.Ask(PairAirPodsText.FirstQuestion, _lifetime.Token);
+
+                // Exit closed the question: that is Earshot closing, not the person saying no.
+                if (_closing || _lifetime.IsCancellationRequested)
+                {
+                    _log.Info("Pair AirPods: Earshot is closing, so the first question was closed and nothing was scanned.");
+                    return EndedEarly(new StepOutcome("closing", false, NativeCodes.NotAttempted, "exit", null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds);
+                }
+
                 if (answer.Answer != FixAnswer.Ok)
                 {
                     _log.Info("Pair AirPods: the person did not press Look for AirPods, so nothing was scanned.");
@@ -743,7 +789,7 @@ internal sealed partial class TrayContext
         {
             // The run still leaves its history entry. The marker stays, so the next start looks at whatever was paired.
             _log.Info("Pair AirPods: cancelled because Earshot is closing; the recovery marker is kept.");
-            return EndedEarly(new StepOutcome("closing", false, NativeCodes.NotAttempted, "exit", null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds);
+            return EndedEarly(new StepOutcome("closing", false, NativeCodes.NotAttempted, "exit", null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds, session?.StepsSoFar);
         }
         catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
@@ -762,7 +808,7 @@ internal sealed partial class TrayContext
                 ShowCard(TrayStatus.AppName, PairingText.Cancelled, place);
             }
 
-            return EndedEarly(new StepOutcome("cancelled", false, NativeCodes.NotAttempted, "by-person", null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds);
+            return EndedEarly(new StepOutcome("cancelled", false, NativeCodes.NotAttempted, "by-person", null), ConnectHistoryOutcomes.Cancelled, watch.ElapsedMilliseconds, session?.StepsSoFar);
         }
         finally
         {
