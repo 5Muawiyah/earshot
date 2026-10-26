@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Security.AccessControl;
 using Earshot.App;
 using Earshot.Infra;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -81,17 +83,23 @@ public sealed class FixRunLockTests
         }
     }
 
-    // A name the runtime refuses outright (longer than a kernel object name may be, which throws ArgumentException) ends in an
-    // answer, not a throw or a wait that never ends: the lock counts as held and the code is logged.
+    // A throw the lock does not expect from making the mutex (here ArgumentException and InvalidOperationException, neither of
+    // which the named catch takes) ends in an answer, not a throw or a wait that never ends: the lock counts as held and the code
+    // is logged. A long name does not do this on Windows, which takes a 400-character name, so the throw is made on purpose.
     [TestMethod]
-    public void ANameTheRuntimeRefusesIsCountedAsHeldWithoutHangingOrThrowing()
+    [DataRow("argument")]
+    [DataRow("invalid-operation")]
+    public void AnUnexpectedThrowFromMakingTheMutexIsCountedAsHeldWithoutHangingOrThrowing(string kind)
     {
         var log = new CapturingLog();
-        Task<FixRunLock?> asked = Task.Run(() => FixRunLock.TryAcquire(FixRunLock.BaseName + "." + new string('x', 400), log));
+        Exception thrown = kind == "argument" ? new ArgumentException("refused") : new InvalidOperationException("refused");
+        FixRunLock.CreateMutex create = (bool initiallyOwned, string name, out bool createdNew, MutexSecurity security) => throw thrown;
+        Task<FixRunLock?> asked = Task.Run(() => FixRunLock.TryAcquire(UniqueName(), log, create));
 
         Assert.IsTrue(asked.Wait(TimeSpan.FromSeconds(10)), "TryAcquire did not answer.");
         Assert.IsNull(asked.Result);
-        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("HRESULT 0x", StringComparison.Ordinal)), string.Join(" | ", log.Entries.Select(e => e.Message)));
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("HRESULT 0x" + thrown.HResult.ToString("X8", CultureInfo.InvariantCulture), StringComparison.Ordinal)),
+            string.Join(" | ", log.Entries.Select(e => e.Message)));
     }
 
     // The same thread asking twice is a second run, not a re-entry of the first: the tray's UI thread starts both.

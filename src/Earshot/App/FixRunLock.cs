@@ -35,6 +35,9 @@ internal sealed class FixRunLock : IDisposable
     // in practice; if it is, the wait is logged and the thread is left to finish on its own.
     private static readonly TimeSpan ReleaseWait = TimeSpan.FromSeconds(10);
 
+    // The shape of MutexAcl.Create.
+    internal delegate Mutex CreateMutex(bool initiallyOwned, string name, out bool createdNew, MutexSecurity security);
+
     private readonly Thread _holder;
     private readonly ManualResetEventSlim _release;
     private readonly string _name;
@@ -66,16 +69,20 @@ internal sealed class FixRunLock : IDisposable
     // The lock when it was free, otherwise null. A mutex that its last owner ended while holding is taken over (the run that
     // held it is gone), and the takeover is logged. A mutex that cannot be created or opened at all is reported as held, with
     // the code in the log: not knowing is not a reason to start a second run.
-    public static FixRunLock? TryAcquire(string name, ILog log)
+    public static FixRunLock? TryAcquire(string name, ILog log) => TryAcquire(name, log, MutexAcl.Create);
+
+    // The same, with the call that makes the mutex given, so a test can make it throw what the real call never throws on demand.
+    internal static FixRunLock? TryAcquire(string name, ILog log, CreateMutex create)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(create);
         var taken = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new ManualResetEventSlim(false);
 
         // A background thread, so a lock that is still held never keeps the process alive; when the process ends the system
         // frees the mutex as abandoned, and the next run takes it over.
-        var holder = new Thread(() => Hold(name, log, taken, release)) { IsBackground = true, Name = "Earshot fix lock" };
+        var holder = new Thread(() => Hold(name, log, create, taken, release)) { IsBackground = true, Name = "Earshot fix lock" };
         holder.Start();
         if (taken.Task.GetAwaiter().GetResult())
         {
@@ -89,12 +96,12 @@ internal sealed class FixRunLock : IDisposable
 
     // The holding thread: takes the mutex without waiting, says whether it did, and when it did, holds it until Dispose asks for
     // it back, then releases it from this same thread.
-    private static void Hold(string name, ILog log, TaskCompletionSource<bool> taken, ManualResetEventSlim release)
+    private static void Hold(string name, ILog log, CreateMutex create, TaskCompletionSource<bool> taken, ManualResetEventSlim release)
     {
         // Whatever ends this thread, the caller that waits for the answer is answered: an unexpected throw counts as held.
         try
         {
-            HoldCore(name, log, taken, release);
+            HoldCore(name, log, create, taken, release);
         }
         catch (Exception ex)
         {
@@ -106,7 +113,7 @@ internal sealed class FixRunLock : IDisposable
         }
     }
 
-    private static void HoldCore(string name, ILog log, TaskCompletionSource<bool> taken, ManualResetEventSlim release)
+    private static void HoldCore(string name, ILog log, CreateMutex create, TaskCompletionSource<bool> taken, ManualResetEventSlim release)
     {
         Mutex mutex;
         try
@@ -126,7 +133,7 @@ internal sealed class FixRunLock : IDisposable
 
             security.AddAccessRule(new MutexAccessRule(
                 new SecurityIdentifier(WellKnownSidType.WorldSid, null), MutexRights.Synchronize | MutexRights.Modify, AccessControlType.Allow));
-            mutex = MutexAcl.Create(false, name, out _, security);
+            mutex = create(false, name, out _, security);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException or IOException)
         {
