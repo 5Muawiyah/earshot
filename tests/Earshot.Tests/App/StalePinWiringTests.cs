@@ -466,6 +466,32 @@ public sealed class StalePinWiringTests
         });
     }
 
+    // The looks at the pinned pair only read: at start, on a new device group and after a failed connect, each asks Windows for
+    // the paired list and nothing else (no watch, no pair, no unpair) and changes no device node. Whether reading that list
+    // pages anything is for the PC's at-rest trace.
+    [TestMethod]
+    public void TheLooksAtThePinnedPairOnlyReadThePairedList()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            tray.PumpUntilIdle();
+
+            Task<bool> newDevice = tray.Coordinator.NewDeviceHook!(CancellationToken.None);
+            TrayHarness.PumpUntil(() => newDevice.IsCompleted, "The new device's look did not end.");
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+            tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+            tray.PumpUntilIdle();
+
+            Assert.IsGreaterThanOrEqualTo(3, rig.Pairing.Calls.Count, string.Join(", ", rig.Pairing.Calls));
+            Assert.IsTrue(rig.Pairing.Calls.All(c => c == "list-paired"), string.Join(", ", rig.Pairing.Calls));
+            Assert.IsEmpty(rig.Gate.Nodes.Calls, "No device node was changed.");
+        });
+    }
+
     [TestMethod]
     public void SetUpWithAPairThatIsStillThereGoesAhead()
     {
