@@ -408,7 +408,7 @@ internal sealed class RealDoctorSource(Paths paths, ILog log) : IDoctorSource
             Outcome = entry.Outcome,
             Status = pair?.CodeName,
             StatusValue = pair?.Code,
-            ModelCheck = model is null ? null : model.Code == 0 ? "airpods" : "not-airpods",
+            ModelCheck = model is null ? null : model.Code == 0 ? "airpods" : model.CodeName == "not-read" ? "not-read" : "not-airpods",
             DurationMs = entry.DurationMs,
         };
     }

@@ -5,6 +5,7 @@ using Earshot.Bluetooth;
 using Earshot.Boot;
 using Earshot.Contracts;
 using Earshot.Diagnostics;
+using Earshot.Interop;
 using Earshot.Repair;
 
 namespace Earshot.Pairing;
@@ -35,6 +36,10 @@ internal enum PairOutcome
     Failed,
     Cancelled,
     NotAirPods,
+
+    // Paired, and Earshot could not look at the device: the paired list did not hold it once, or its nodes were not in the tree
+    // when the wait ended. It is not called AirPods or not AirPods.
+    Unverified,
 }
 
 internal enum PairFailureReason
@@ -46,6 +51,7 @@ internal enum PairFailureReason
     PairFailed,
     TimedOut,
     NotAirPods,
+    Unverified,
 }
 
 internal sealed record PairingSessionResult(
@@ -75,6 +81,7 @@ internal sealed record PairingSessionResult(
             PairOutcome.Paired => ConnectHistoryOutcomes.Paired,
             PairOutcome.Cancelled => ConnectHistoryOutcomes.Cancelled,
             PairOutcome.NotAirPods => ConnectHistoryOutcomes.NotAirPods,
+            PairOutcome.Unverified => ConnectHistoryOutcomes.Unverified,
             _ => ConnectHistoryOutcomes.Failed,
         };
         // PcSide only for the one signal of the pairing debug run (an unread name, then a failed pairing); never DeviceSide.
@@ -226,6 +233,7 @@ internal sealed class PairingSession
                 ? now.Devices.Single(d => d.Address12 == chosen.Address12)
                 : null;
             AirPodsCandidate? match = null;
+            bool looked = false;
             if (newPaired is not null)
             {
                 for (TimeSpan waited = TimeSpan.Zero; ; waited += TimeSpan.FromSeconds(1))
@@ -233,6 +241,7 @@ internal sealed class PairingSession
                     AirPodsDiscoveryResult found = AirPodsDiscovery.Find(_nodes);
                     steps.AddRange(found.Steps.Where(s => !s.Ok));
                     match = found.Candidates.FirstOrDefault(c => c.Address == newPaired.Address12 && c.ContainerId == newPaired.ContainerId);
+                    looked = found.Listed && NodesArrived(newPaired.Address12, steps);
                     if (match is not null || waited >= _options.PostPairWait)
                     {
                         break;
@@ -240,6 +249,17 @@ internal sealed class PairingSession
 
                     await _options.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
                 }
+            }
+
+            // "Not AirPods" needs the device's own nodes to have been read and to lack the AirPods identity. A device the paired
+            // list did not hold, or whose nodes were not in the tree by the end of the wait, could not be looked at, and saying it
+            // is not AirPods would be a claim nobody checked.
+            if (match is null && !looked)
+            {
+                history.Add(new StepOutcome("model-check", false, 2, "not-read", null));
+                lines.Add(shown + " is paired, but Earshot could not look at it to tell whether it is AirPods. Nothing was adopted.");
+                _log.Warn("pair: the paired device could not be looked at (" + (newPaired is null ? "the paired list did not hold it once" : "its nodes were not in the tree") + "), so it was neither adopted nor called not AirPods.");
+                return Finish(PairOutcome.Unverified, PairFailureReason.Unverified, true, null, pair, nameUnread, false, candidates.Count, scanMs, PairingText.Unverified);
             }
 
             history.Add(new StepOutcome("model-check", match is not null, match is null ? 1 : 0, match is null ? "not-airpods" : "airpods", null));
@@ -266,6 +286,29 @@ internal sealed class PairingSession
             PairOutcome outcome, PairFailureReason reason, bool paired, AirPodsCandidate? adoptable, PairingCallResult? status,
             bool nameUnread, bool unreachable, int candidateCount, long scanMs, string? cardLine) =>
             new(outcome, reason, paired, adoptable, radio, status, nameUnread, unreachable, candidateCount, scanMs, watch.ElapsedMilliseconds, cardLine, lines, history, steps);
+    }
+
+    // Whether a node of the paired device is in the tree now: a node whose instance id carries its address, located without the
+    // phantom flag. A read that fails is a step with its CONFIGRET and counts as not arrived.
+    // https://learn.microsoft.com/en-us/windows/win32/api/cfgmgr32/nf-cfgmgr32-cm_locate_devnodew
+    private bool NodesArrived(string address12, List<StepOutcome> steps)
+    {
+        uint cr = _nodes.ListDeviceIds(out string[] ids);
+        if (cr != CfgMgr32.CR_SUCCESS)
+        {
+            steps.Add(StepOutcomes.FromConfigRet("cm-list", cr, "The device list could not be read."));
+            return false;
+        }
+
+        foreach (string id in ids.Where(i => i.Contains(address12, StringComparison.OrdinalIgnoreCase)))
+        {
+            if (_nodes.Locate(id, includeNonPresent: false, out _) == CfgMgr32.CR_SUCCESS)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // The name PairingCallResult carries for a pairing this build cancelled after PairTimeout. 1460 is ERROR_TIMEOUT.

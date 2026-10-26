@@ -61,13 +61,16 @@ internal static class PairAirPodsText
 
     public const string PairedAndUsing = "Paired. Earshot now uses these AirPods.";
 
-    public const string PairedNotAdopted = "Paired, but Earshot could not switch to these AirPods. Choose them from the menu.";
+    public const string PairedNotAdopted = "Paired, but Earshot could not switch to these AirPods, so they are not protected yet. Choose them from the menu.";
 
     public const string NoAirPodsPaired = Tray.TrayStatus.NotFoundMessage;
 
     public const string ChooseButton = "Choose AirPods";
 
     public const string StaleChosen = "Your AirPods were removed in Windows. Choose which pair Earshot should use.";
+
+    public static string MarkerNotWritten(int code) =>
+        "Earshot could not save its note of this pairing (code 0x" + code.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was paired. Try again.";
 
     public const string RecoverChoose = "Earshot closed before it could start using the AirPods you paired. Choose them to finish.";
 

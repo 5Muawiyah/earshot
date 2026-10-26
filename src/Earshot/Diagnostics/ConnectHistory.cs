@@ -30,6 +30,9 @@ internal static class ConnectHistoryOutcomes
 
     // The pairing worked, but the device is not AirPods by Earshot's rule, so nothing was adopted.
     public const string NotAirPods = "not-airpods";
+
+    // The pairing worked, and the device could not be looked at, so it was neither adopted nor called not AirPods.
+    public const string Unverified = "unverified";
 }
 
 // One step of a switch as the history keeps it: what kind of step, and the raw code. Never an instance id, an address, a

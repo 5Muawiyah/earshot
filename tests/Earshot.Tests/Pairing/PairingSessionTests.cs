@@ -289,6 +289,38 @@ public sealed class PairingSessionTests
         Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "model-check" && s.Code == 0));
     }
 
+    // A pairing whose device could not be looked at is not called "not AirPods": the paired list did not hold it, or its nodes
+    // had not arrived when the wait ended. Before, both read as NotAirPods, the card said "That was not AirPods", and the tray
+    // cleared its recovery marker, so real AirPods could stay paired, unpinned and unblocked with nothing to offer them again.
+    [TestMethod]
+    public async Task APairWhoseNodesHaveNotArrivedIsUnverifiedNotNotAirPods()
+    {
+        using var rig = new FixRig();
+        rig.Pairing.OnPaired = _ => rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+        AirPodsAppear(rig);
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.AreEqual(PairOutcome.Unverified, result.Outcome);
+        Assert.IsTrue(result.Paired);
+        Assert.IsNull(result.Adoptable);
+        Assert.AreEqual(PairingText.Unverified, result.CardLine);
+        Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "model-check" && s.CodeName == "not-read"));
+    }
+
+    [TestMethod]
+    public async Task APairTheListDoesNotHoldIsUnverified()
+    {
+        using var rig = new FixRig();
+        rig.Pairing.OnPaired = _ => rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(FixRig.NewAirPodsNodes()));
+        AirPodsAppear(rig);
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.AreEqual(PairOutcome.Unverified, result.Outcome);
+        Assert.AreEqual(PairingText.Unverified, result.CardLine);
+    }
+
     [TestMethod]
     public async Task ADeviceThatIsNotAirPodsIsNotUnpairedAdoptedNorHiddenAndTheResultSaysSo()
     {

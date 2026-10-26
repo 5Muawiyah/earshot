@@ -410,6 +410,69 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // A pair Earshot could not look at keeps the marker, and the card offers the device picker instead of saying "not AirPods".
+    [TestMethod]
+    public void APairThatCouldNotBeCheckedKeepsTheMarkerAndOffersThePicker()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(UnpairedId, "AirPods Pro", FixRig.NewAirPodsAddress, true, 6, null)));
+            rig.Pairing.OnPaired = _ => rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+
+            Click(tray);
+
+            CardContent card = tray.Cards.Shown[^1].Content;
+            Assert.AreEqual(PairingText.Unverified, card.Status);
+            Assert.AreEqual(PairAirPodsText.ChooseButton, card.Action?.Label);
+            Assert.IsTrue(marker.Exists(), "Kept, so the next start looks again.");
+        });
+    }
+
+    // The block status could not be read at the adoption, so the gate was not given the new pair: the new AirPods are not
+    // blocked at rest. Before, the card then said "Paired. Earshot now uses these AirPods." over the warning, and the marker was
+    // cleared.
+    [TestMethod]
+    public void AnAdoptionWithTheBlockStatusUnreadKeepsTheMarkerAndTheGateWarning()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker();
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+            tray.Block.StatusFailure = new IOException("The status could not be read.");
+
+            Click(tray);
+
+            Assert.AreEqual(TrayContext.GateNotRepinnedMessage, tray.Cards.Shown[^1].Content.Status);
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.PairedAndUsing));
+            Assert.IsTrue(marker.Exists());
+        });
+    }
+
+    [TestMethod]
+    public void NoPairingStartsWhenTheRecoveryMarkerCannotBeWritten()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            var marker = new FakePairRecoveryMarker { WriteFails = true };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig, marker: marker));
+
+            Click(tray);
+
+            StringAssert.StartsWith(tray.Cards.Shown[^1].Content.Status, "Earshot could not save its note of this pairing");
+            Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("pair:", StringComparison.Ordinal)), string.Join(", ", rig.Pairing.Calls));
+        });
+    }
+
     [TestMethod]
     public void TheRealMarkerIsWrittenReadAndClearedAndNamesNoDevice()
     {
@@ -434,9 +497,16 @@ internal sealed class FakePairRecoveryMarker : IPairRecoveryMarker
 
     public List<string> Calls { get; } = [];
 
+    public bool WriteFails { get; set; }
+
     public StepOutcome Write()
     {
         Calls.Add("write");
+        if (WriteFails)
+        {
+            return StepOutcomes.FromHResult("pair-marker-write", unchecked((int)0x80070005), "denied");
+        }
+
         Present = true;
         return new StepOutcome("pair-marker-write", true, 0, "ERROR_SUCCESS", null);
     }

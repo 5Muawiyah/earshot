@@ -111,6 +111,8 @@ internal static class PairingText
 
     public const string NotAirPods = "That was not AirPods, so Earshot adopted nothing. It is still paired in Windows; remove it there if you don't want it.";
 
+    public const string Unverified = "Paired, but Earshot couldn't check that these are AirPods. If they are yours, choose them.";
+
     public const string Cancelled = "Pairing was cancelled.";
 
     public const string TimedOut = "Pairing took too long and was stopped.";

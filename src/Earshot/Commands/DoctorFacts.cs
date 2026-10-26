@@ -167,7 +167,7 @@ internal sealed class PairingFact
 
     public long? StatusValue { get; set; }
 
-    // "airpods", "not-airpods", or null when the run ended before the check.
+    // "airpods", "not-airpods", "not-read" (the device could not be looked at), or null when the run ended before the check.
     public string? ModelCheck { get; set; }
 
     public long? DurationMs { get; set; }

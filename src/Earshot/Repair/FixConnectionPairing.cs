@@ -374,6 +374,9 @@ internal enum RePairFailure
     PairFailed,
     NotAirPodsAfterPair,
     RadioNotReady,
+
+    // Paired, and the device could not be looked at, so nothing was adopted.
+    UnverifiedAfterPair,
 }
 
 // Touched: something was removed or a scan began, so the normal block must follow. Session is the pairing session's result when
@@ -494,6 +497,7 @@ internal sealed class RePairer
             PairFailureReason.NoDevice => RePairFailure.NoDevice,
             PairFailureReason.Cancelled => RePairFailure.Cancelled,
             PairFailureReason.NotAirPods => RePairFailure.NotAirPodsAfterPair,
+            PairFailureReason.Unverified => RePairFailure.UnverifiedAfterPair,
             PairFailureReason.RadioNotReady => RePairFailure.RadioNotReady,
             _ => RePairFailure.PairFailed,
         };

@@ -29,9 +29,10 @@ internal sealed class NoPairRecoveryMarker : IPairRecoveryMarker
 {
     public static NoPairRecoveryMarker Instance { get; } = new();
 
-    public StepOutcome Write() => StepOutcomes.NotAvailable("pair-marker-write", "No marker in this tray.");
+    // A tray with no marker file (a test) is not stopped from pairing: the write counts as done, and says there is nothing kept.
+    public StepOutcome Write() => new("pair-marker-write", true, 0, "no-marker", "No marker in this tray.");
 
-    public StepOutcome Clear() => StepOutcomes.NotAvailable("pair-marker-clear", "No marker in this tray.");
+    public StepOutcome Clear() => new("pair-marker-clear", true, 0, "no-marker", "No marker in this tray.");
 
     public bool Exists() => false;
 }

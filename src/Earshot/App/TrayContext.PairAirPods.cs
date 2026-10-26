@@ -352,10 +352,27 @@ internal sealed partial class TrayContext
             }
 
             // Written before anything can be paired, so the time between the pairing and the adoption is always covered.
+            // Without it a crash between the pairing and the adoption would go unnoticed, so no pairing starts when it cannot be written.
             StepOutcome marked = services.Marker.Write();
             _log.Write(marked.Ok ? LogLevel.Info : LogLevel.Warn, "Pair AirPods: recovery marker written: " + marked.CodeName + " " + marked.Code.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".");
+            if (!marked.Ok)
+            {
+                ShowCard(TrayStatus.AppName, PairAirPodsText.MarkerNotWritten(marked.Code), place);
+                return PairRunEnd.Nothing;
+            }
+
             PairingSessionResult result = await session.RunAsync(excludeAlreadyListed: false, cancel.Token, radio);
             _log.Info("Pair AirPods: " + result.Outcome + ", " + result.Reason + ".");
+            if (result.Outcome == PairOutcome.Unverified)
+            {
+                // Paired and not looked at: maybe AirPods. The marker stays, so the next start looks again, and the picker is
+                // offered now; nothing is adopted without the person's choice.
+                _log.Warn("Pair AirPods: the paired device could not be checked, so the recovery marker is kept and the device picker is offered.");
+                ShowCardWithButton(TrayStatus.AppName, PairingText.Unverified, PairAirPodsText.ChooseButton,
+                    () => Launch("choose device", () => ChooseDeviceAsync(place), place), place);
+                return new PairRunEnd(result, null, false);
+            }
+
             if (result.Outcome != PairOutcome.Paired || result.Adoptable is not { } found)
             {
                 ClearPairMarker("the pairing left no AirPods to adopt");
@@ -363,11 +380,21 @@ internal sealed partial class TrayContext
                 return new PairRunEnd(result, null, false);
             }
 
-            bool adopted = await AdoptPairedAirPodsAsync(found, place);
+            DeviceChoiceResult adoption = await AdoptPairedAirPodsAsync(found, place);
+            if (adoption == DeviceChoiceResult.AppliedGateNotRepinned)
+            {
+                // Pinned in the tray only: the gate still names the previous pair, so the new one is not blocked at rest. Its own card
+                // says so, and the marker stays for the next start's check.
+                _log.Warn("Pair AirPods: the boot block status could not be read, so the gate was not given the new pair; the recovery marker is kept.");
+                return new PairRunEnd(result, false, false);
+            }
+
+            bool adopted = adoption == DeviceChoiceResult.Applied;
             if (!adopted)
             {
                 _log.Warn("Pair AirPods: the recovery marker is kept, so the next start offers these AirPods again.");
             }
+
             bool setUp = false;
             if (adopted)
             {
@@ -429,12 +456,25 @@ internal sealed partial class TrayContext
 
     // The pair the person has just paired is the one they chose, so it is adopted at once: pinned, given to the gate when
     // Earshot is set up, and the previous pair's readings and link dropped.
-    private async Task<bool> AdoptPairedAirPodsAsync(AirPodsCandidate found, CardPlace place)
+    private async Task<DeviceChoiceResult> AdoptPairedAirPodsAsync(AirPodsCandidate found, CardPlace place)
     {
         string name = string.IsNullOrWhiteSpace(found.Name) ? "AirPods" : found.Name;
-        await ApplyDeviceChoiceAsync(new PickerChoice(name, name, found.Address, found.ContainerId), place);
-        bool adopted = _registry.Settings.Current.PinnedContainerId == found.ContainerId;
-        _log.Info(adopted ? "Pair AirPods: the new pair is the one Earshot uses." : "Pair AirPods: the new pair was not adopted.");
-        return adopted;
+        DeviceChoiceResult applied = await ApplyDeviceChoiceAsync(new PickerChoice(name, name, found.Address, found.ContainerId), place);
+        _log.Info("Pair AirPods: the new pair " + applied switch
+        {
+            DeviceChoiceResult.Applied => "is the one Earshot uses.",
+            DeviceChoiceResult.AppliedGateNotRepinned => "is pinned in the tray, and the gate was not given it.",
+            _ => "was not adopted.",
+        });
+        return applied;
     }
+}
+
+// What applying a device choice did: nothing, a pin the gate took (or no gate to take it), or a pin in the tray only because the
+// boot block status could not be read, so the gate may still name the previous pair.
+internal enum DeviceChoiceResult
+{
+    NotApplied,
+    Applied,
+    AppliedGateNotRepinned,
 }

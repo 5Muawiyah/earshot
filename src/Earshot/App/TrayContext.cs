@@ -2719,14 +2719,14 @@ internal sealed partial class TrayContext : ApplicationContext
     // gate is asked first and the tray pins the device only once the gate has taken it: a refusal never leaves
     // the tray and the gate on different devices. Before setup there is no gate copy, and setup passes the
     // pinned device from settings. Internal so tests can drive it without the picker window.
-    internal async Task ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place)
+    internal async Task<DeviceChoiceResult> ApplyDeviceChoiceAsync(PickerChoice choice, CardPlace place)
     {
         ArgumentNullException.ThrowIfNull(choice);
 
         // Asked here as well as in RunOperationAsync: before setup the device is only saved, with no operation.
         if (RefusedAtSessionEnd(GateVerbs.SetDevice, choice.Name, place))
         {
-            return;
+            return DeviceChoiceResult.NotApplied;
         }
 
         BootBlockStatus? status;
@@ -2736,12 +2736,12 @@ internal sealed partial class TrayContext : ApplicationContext
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
-            return;
+            return DeviceChoiceResult.NotApplied;
         }
 
         if (_closing)
         {
-            return;
+            return DeviceChoiceResult.NotApplied;
         }
 
         Guid previousPair = _registry.Settings.Current.PinnedContainerId;
@@ -2754,7 +2754,7 @@ internal sealed partial class TrayContext : ApplicationContext
                 // The refusal or failure is already logged and on a card; the tray keeps the device it had.
                 _log.Warn("Device not changed to " + choice.Name + " (" + choice.Address + "): the boot block did not take it" +
                     (result is null ? "." : " (" + result.Status + ")."));
-                return;
+                return DeviceChoiceResult.NotApplied;
             }
 
             gateRepinned = true;
@@ -2775,12 +2775,18 @@ internal sealed partial class TrayContext : ApplicationContext
                 _log.Warn("The boot block now uses " + choice.Address + ", but the tray could not save it, so a connect that needs an allow is refused until the device is chosen again.");
             }
 
-            return;
+            return DeviceChoiceResult.NotApplied;
         }
 
         _pinAttemptedFor = choice.ContainerId;
         ForgetPreviousPairIfDifferent(previousPair, choice.ContainerId);
-        ClearPairMarker("a pair was chosen");
+
+        // A pair the gate was given, or one with no gate to give it to, is adopted. With the status unread the gate may still
+        // name the previous pair, so a recovery marker stays for the next start.
+        if (status is not null)
+        {
+            ClearPairMarker("a pair was chosen");
+        }
         _log.Info("Device chosen: " + choice.Name + " (" + choice.Address + ", container " + choice.ContainerId + "), match \"" + choice.Match + "\".");
         _ = RefreshSnapshotAsync();
 
@@ -2793,6 +2799,8 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             _log.Info("Boot block is not set up, so there is no gate copy of the device to update.");
         }
+
+        return status is null ? DeviceChoiceResult.AppliedGateNotRepinned : DeviceChoiceResult.Applied;
     }
 
     private async Task LoadDevicesAsync(DevicePickerForm form)
