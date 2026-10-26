@@ -191,9 +191,27 @@ public sealed class TraceRealTests
         string destination = Path.Combine(root.Path, "Local", "Earshot", "traces");
         Assert.IsNull(files.Copy(nonce, "bluetooth-20261025T143005Z.etl", destination, out string copied));
         Assert.AreEqual("trace", File.ReadAllText(copied));
+        Assert.IsEmpty(Directory.GetFiles(destination, "*.partial"), "The copy is made under a temporary name and renamed once whole.");
         Assert.IsNotNull(files.Copy(nonce, "bluetooth-20261025T143005Z.etl", destination, out _), "An existing file is not overwritten.");
         Assert.IsNotNull(files.Copy(nonce, @"..\result.txt", destination, out _));
         Assert.IsNotNull(files.Copy(nonce, "result.txt", destination, out _), "Only .etl files are copied.");
+    }
+
+    // A copy that Exit cut off is under its temporary name; the start removes it and nothing else.
+    [TestMethod]
+    public void PartialCopiesAreRemovedAndWholeTracesKept()
+    {
+        using var root = new TempFolder();
+        string destination = Path.Combine(root.Path, "traces");
+        Directory.CreateDirectory(destination);
+        File.WriteAllText(Path.Combine(destination, "bluetooth-20261025T143005Z.etl.partial"), "cut");
+        File.WriteAllText(Path.Combine(destination, "bluetooth-20261024T101010Z.etl"), "whole");
+        var files = new TraceUserFiles(root.Path, new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
+
+        Assert.AreEqual(1, files.RemovePartialCopies(destination));
+        Assert.IsEmpty(Directory.GetFiles(destination, "*.partial"));
+        Assert.IsTrue(File.Exists(Path.Combine(destination, "bluetooth-20261024T101010Z.etl")));
+        Assert.AreEqual(0, files.RemovePartialCopies(Path.Combine(root.Path, "no-such-folder")));
     }
 
     [TestMethod]

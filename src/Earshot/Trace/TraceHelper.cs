@@ -46,6 +46,9 @@ internal interface ITraceSignals
     // Blocks until the tray asks to stop, the tray process exits, or max passes.
     TraceStopReason WaitForStop(TimeSpan max);
 
+    // True when the tray has already asked to stop (Stop pressed while the administrator prompt was up). Does not wait.
+    bool StopAsked();
+
     void SignalDone();
 
     // True when the tray said it has finished with the run folder.
@@ -189,9 +192,16 @@ internal static class TraceHelper
             return TraceOutcome.WprMissing;
         }
 
+        // Stop pressed while the administrator prompt was up: the person wanted no recording, so none is started.
+        if (signals.StopAsked())
+        {
+            log.Info("trace: Stop was pressed before the recording started, so nothing was recorded.");
+            return TraceOutcome.StoppedBeforeStart;
+        }
+
         // A session an earlier helper left behind would make -start fail. The cancel names Earshot's own instance, which by
-        // wpr's page should keep it to Earshot's own recording (not yet seen in a real one). "No trace running" is the normal answer, so the code is recorded and nothing is
-        // concluded from it.
+        // wpr's page should keep it to Earshot's own recording (not yet seen in a real one). "No trace running" is the normal
+        // answer, so the code is recorded and nothing is concluded from it.
         ProcessRun cancel = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit);
         log.Info("trace: wpr -cancel " + Describe(cancel));
 
@@ -265,7 +275,7 @@ internal static class TraceHelper
 
     public static int ExitCodeFor(TraceOutcome outcome) => outcome switch
     {
-        TraceOutcome.Saved or TraceOutcome.SavedInPlace or TraceOutcome.Discarded => ExitCodes.Ok,
+        TraceOutcome.Saved or TraceOutcome.SavedInPlace or TraceOutcome.Discarded or TraceOutcome.StoppedBeforeStart => ExitCodes.Ok,
         TraceOutcome.CopyKept => ExitCodes.IoError,
         TraceOutcome.Refused => ExitCodes.Refused,
         TraceOutcome.WprMissing => ExitCodes.Unavailable,

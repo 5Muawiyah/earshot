@@ -103,6 +103,9 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
         };
     }
 
+    // The stop event is manual-reset, so a Stop pressed before this helper existed is still set.
+    public bool StopAsked() => _stop?.WaitOne(0) == true;
+
     public void SignalDone() => _done?.Set();
 
     public bool WaitCopied(TimeSpan max)

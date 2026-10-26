@@ -48,6 +48,9 @@ internal interface ITraceUserFiles
     // How many run folders of earlier recordings the trace folder holds.
     int LeftoverRunFolders();
 
+    // Removes copies an Exit cut off, left under their temporary name in destinationFolder; how many were removed.
+    int RemovePartialCopies(string destinationFolder);
+
     string? ReadResult(string nonce);
 
     // Copies the saved trace to destinationFolder (made if missing). Null when copied; otherwise why not.
@@ -125,8 +128,18 @@ internal sealed class TraceRecorder : ITraceRecorder
                 return Fail(TraceOutcome.Refused, TraceCopy.AlreadyRecording);
             }
 
-            // The events exist before the helper is asked for, so the helper has something to open.
-            signals = _signalsFactory.Create(nonce);
+            // The events exist before the helper is asked for, so the helper has something to open. One that cannot be made (a
+            // name already there, or refused) ends the run with nothing asked.
+            try
+            {
+                signals = _signalsFactory.Create(nonce);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+            {
+                _log.Warn("trace: the events for the helper could not be made: " + ex.GetType().Name + " (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + ").");
+                return Fail(TraceOutcome.Refused, TraceCopy.NotStarted);
+            }
+
             _signals = signals;
             _state = TraceState.Recording;
         }
@@ -251,6 +264,10 @@ internal sealed class TraceRecorder : ITraceRecorder
                 signals.SetCopied();
                 return Task.FromResult(Fail(TraceOutcome.WprMissing, TraceCopy.WprMissing));
 
+            case TraceOutcome.StoppedBeforeStart:
+                signals.SetCopied();
+                return Task.FromResult(Fail(TraceOutcome.StoppedBeforeStart, TraceCopy.StoppedBeforeStart));
+
             default:
                 signals.SetCopied();
                 return Task.FromResult(Fail(result.Outcome,
@@ -327,6 +344,13 @@ internal sealed class TraceRecorder : ITraceRecorder
 
     public string? LeftoverNotice()
     {
+        // A copy cut off by Exit holds addresses and is no use, so it goes at the next start; it never had the trace's own name.
+        int partial = _files.RemovePartialCopies(_options.DestinationFolder);
+        if (partial > 0)
+        {
+            _log.Info("trace: " + partial.ToString(System.Globalization.CultureInfo.InvariantCulture) + " copy(ies) cut off by an earlier exit were removed.");
+        }
+
         int count = _files.LeftoverRunFolders();
         return count > 0 ? TraceCopy.Leftover(count) : null;
     }
@@ -435,17 +459,79 @@ internal sealed class TraceUserFiles : ITraceUserFiles
             return "The trace file's name is not one Earshot made.";
         }
 
+        // Copied under a temporary name and renamed once whole, so an Exit part way leaves no file that looks like a trace; the
+        // next start removes the temporary one (RemovePartialCopies).
+        string partial = "";
         try
         {
             Directory.CreateDirectory(destinationFolder);
             copiedTo = Path.Combine(destinationFolder, fileName);
-            File.Copy(Path.Combine(RunFolder(nonce), fileName), copiedTo, overwrite: false);
+            if (File.Exists(copiedTo))
+            {
+                return copiedTo + " is already there.";
+            }
+
+            partial = copiedTo + PartialSuffix;
+            File.Copy(Path.Combine(RunFolder(nonce), fileName), partial, overwrite: true);
+            File.Move(partial, copiedTo, overwrite: false);
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-            return Describe(ex);
+            return Describe(ex) + DeletePartial(partial);
         }
+    }
+
+    internal const string PartialSuffix = ".partial";
+
+    // "" when there is nothing to delete or it went; otherwise what stopped it, after the copy's own failure.
+    private static string DeletePartial(string partial)
+    {
+        if (partial.Length == 0 || !File.Exists(partial))
+        {
+            return "";
+        }
+
+        try
+        {
+            File.Delete(partial);
+            return "";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return " The part copied could not be removed: " + Describe(ex);
+        }
+    }
+
+    public int RemovePartialCopies(string destinationFolder)
+    {
+        int removed = 0;
+        try
+        {
+            if (!Directory.Exists(destinationFolder))
+            {
+                return 0;
+            }
+
+            foreach (string partial in Directory.EnumerateFiles(destinationFolder, "*.etl" + PartialSuffix))
+            {
+                try
+                {
+                    File.Delete(partial);
+                    removed++;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _log.Warn("trace: a copy cut off by an earlier exit could not be removed: " + Describe(ex));
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.Warn("trace: the traces folder could not be read for copies cut off by an earlier exit: " + Describe(ex));
+        }
+
+        return removed;
     }
 
     // The trace is already saved when this runs, so a folder window that does not open is logged and nothing more.

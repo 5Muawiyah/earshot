@@ -14,6 +14,9 @@ internal enum TraceOutcome
     // The tray exited while the recording ran, so nobody would collect a file: the session was cancelled and nothing was saved.
     Discarded,
 
+    // Stop was pressed while the administrator prompt was still up, so no recording was started.
+    StoppedBeforeStart,
+
     // Helper side only, after the tray copied the trace: the helper's own copy in the administrators-only folder could not be
     // deleted. The helper exits with ExitCodes.IoError and the tray says where that copy is.
     CopyKept,
@@ -233,6 +236,10 @@ internal static class TraceCopy
 
     public static string SavedIn(string folder) => "Trace saved in " + folder + ". Delete it when you're done.";
     public const string WprMissing = "Windows Performance Recorder isn't on this PC.";
+
+    public const string NotStarted = "The Bluetooth trace could not be started. Try again in a moment.";
+
+    public const string StoppedBeforeStart = "Stop was pressed before the recording started, so nothing was recorded.";
     public const string Declined = "The Windows prompt was declined, so no trace was recorded.";
     public const string SafeMode = "A Bluetooth trace can't be recorded in safe mode.";
     public const string AlreadyRecording = "A Bluetooth trace is already being recorded.";

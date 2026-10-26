@@ -49,10 +49,12 @@ internal sealed class FakeTraySignalFactory : ITrayTraceSignalsFactory
     public List<string> Calls { get; }
     public FakeTraySignalFactory(List<string> calls) => Calls = calls;
 
+    public Exception? Throws { get; set; }
+
     public ITrayTraceSignals Create(string nonce)
     {
         Calls.Add("create " + nonce);
-        return Signals;
+        return Throws is null ? Signals : throw Throws;
     }
 }
 
@@ -69,6 +71,13 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     public List<string> Calls { get; } = [];
     public string? TrustProblem() => Untrusted;
     public int LeftoverRunFolders() => Leftovers;
+    public int PartialCopies { get; set; }
+
+    public int RemovePartialCopies(string destinationFolder)
+    {
+        Calls.Add("remove partial copies in " + destinationFolder);
+        return PartialCopies;
+    }
 
     public string? ReadResult(string nonce)
     {
@@ -155,6 +164,39 @@ public sealed class TraceRecorderTests
         rig.Files.ResultText = Saved;
         rig.Launcher.Completion.SetResult(new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0)));
         await run;
+    }
+
+    // The events could not be made (one of the names is already there): a result that says so, not an exception out of the
+    // recorder, and nothing is asked.
+    [TestMethod]
+    public async Task EventsThatCannotBeMadeEndTheRunWithAResult()
+    {
+        var rig = new Rig();
+        rig.Factory.Throws = new InvalidOperationException("The event already exists.");
+
+        TraceResult result = await rig.Recorder.RecordAsync(CancellationToken.None);
+
+        Assert.AreEqual(TraceOutcome.Refused, result.Outcome);
+        Assert.AreEqual("The Bluetooth trace could not be started. Try again in a moment.", result.Message);
+        Assert.AreEqual(TraceState.Idle, rig.Recorder.State);
+        Assert.IsFalse(rig.Calls.Any(c => c.StartsWith("launch ", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task AStopBeforeTheRecordingStartedSaysNothingWasRecorded()
+    {
+        var rig = new Rig();
+        Task<TraceResult> run = rig.Recorder.RecordAsync(CancellationToken.None);
+        await Rig.Until(() => rig.Calls.Count >= 2);
+        rig.Files.ResultText = TraceResultFile.Serialize(new TraceResultFile(TraceOutcome.StoppedBeforeStart, "", 0));
+        rig.Factory.Signals.Finish();
+        rig.Launcher.Completion.SetResult(new ElevatedRun(0, StepOutcomes.FromWin32("runas", 0)));
+
+        TraceResult result = await run;
+
+        Assert.AreEqual(TraceOutcome.StoppedBeforeStart, result.Outcome);
+        Assert.AreEqual("Stop was pressed before the recording started, so nothing was recorded.", result.Message);
+        Assert.IsTrue(rig.Factory.Signals.CopiedSet);
     }
 
     [TestMethod]
@@ -290,6 +332,18 @@ public sealed class TraceRecorderTests
 
         Assert.AreEqual(TraceCopy.Leftover(2), rig.Recorder.LeftoverNotice());
         StringAssert.Contains(TraceCopy.Leftover(2), "2 earlier Bluetooth trace folder");
+    }
+
+    // A copy cut off by Exit is left under a temporary name, never as a trace that looks whole; the start removes it.
+    [TestMethod]
+    public void TheStartRemovesCopiesThatWereCutOff()
+    {
+        var rig = new Rig();
+        rig.Files.PartialCopies = 1;
+
+        rig.Recorder.LeftoverNotice();
+
+        CollectionAssert.Contains(rig.Files.Calls, "remove partial copies in " + rig.Recorder.DestinationFolder);
     }
 
     [TestMethod]

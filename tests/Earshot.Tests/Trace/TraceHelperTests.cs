@@ -70,6 +70,13 @@ internal sealed class FakeTraceSignals : ITraceSignals
     public string? OpenProblem { get; set; }
     public bool TrayAlive { get; set; } = true;
     public TraceStopReason Reason { get; set; } = TraceStopReason.StopRequested;
+    public bool StopAskedFirst { get; set; }
+
+    public bool StopAsked()
+    {
+        Calls.Add("stop asked?");
+        return StopAskedFirst;
+    }
     public bool CopiedSet { get; set; } = true;
     public TimeSpan? WaitedForStop { get; private set; }
     public TimeSpan? WaitedForCopy { get; private set; }
@@ -115,7 +122,7 @@ internal sealed class FakeRunner : IProcessRunner
 public sealed class TraceHelperTests
 {
     private const string Nonce = "0123456789abcdef0123456789abcdef";
-    private static readonly string[] ExpectedSignalOrder = ["open", "wait", "done", "wait copied"];
+    private static readonly string[] ExpectedSignalOrder = ["open", "stop asked?", "wait", "done", "wait copied"];
     private static readonly DateTime Now = new(2026, 10, 25, 14, 30, 5, DateTimeKind.Utc);
 
     private static (TraceOutcome Outcome, FakeTraceMachine Machine, FakeTraceSignals Signals, FakeRunner Runner, CapturingLog Log) Run(
@@ -228,6 +235,20 @@ public sealed class TraceHelperTests
 
         Assert.AreEqual(TimeSpan.FromMinutes(10), signals.WaitedForStop);
         Assert.AreEqual(TimeSpan.FromMinutes(10), TraceHelper.MaxRecording);
+    }
+
+    // Stop pressed while the administrator prompt was still up: nothing is recorded. Before, the stop event was already set,
+    // so the helper started wpr, saw the stop at once and saved a few seconds of trace, which holds addresses.
+    [TestMethod]
+    public void AStopPressedBeforeTheRecordingStartsRecordsNothing()
+    {
+        var (outcome, _, signals, runner, _) = Run((_, s, _) => s.StopAskedFirst = true);
+
+        Assert.AreEqual(TraceOutcome.StoppedBeforeStart, outcome);
+        Assert.IsFalse(runner.Calls.Any(c => c.StartsWith("-start ", StringComparison.Ordinal)), string.Join(" | ", runner.Calls));
+        Assert.IsFalse(runner.Calls.Any(c => c.StartsWith("-stop ", StringComparison.Ordinal)));
+        CollectionAssert.Contains(signals.Calls, "wait copied", "The tray is still there to read the result.");
+        Assert.AreEqual(ExitCodes.Ok, TraceHelper.ExitCodeFor(outcome));
     }
 
     [TestMethod]
