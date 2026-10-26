@@ -23,8 +23,9 @@ internal sealed partial class TrayContext
     internal const string RepairRun = "repair";
     internal const string UpdateRun = "update";
 
-    // The elevated operation under way, or null. Claimed on the UI thread before anything awaits, so two clicks cannot both
-    // start one.
+    // The elevated operation under way, or null. Claimed on the UI thread with no await between the check and the claim, so two
+    // clicks cannot both start one. Set-up looks at the pinned pair first (up to the paired list's 5 seconds and a second for
+    // the radio) and claims the run after that look.
     private string? _elevatedRun;
 
     // Completed when the elevated program of a setup or repair has ended or been given up on: it covers the administrator
