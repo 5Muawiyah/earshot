@@ -190,6 +190,59 @@ public sealed class RadioCheckTests
         Assert.IsTrue(seen.IsCancellationRequested, "The abandoned read is told to stop.");
     }
 
+    // A read that ends after the budget is not waited for, but what it ended with is logged: before, a late fault, with its
+    // HRESULT, and a late reading's failed steps were dropped and only the timeout was in the log.
+    [TestMethod]
+    public async Task AReadThatEndsLateIsLoggedWithItsCodes()
+    {
+        var release = new TaskCompletionSource();
+        var api = new FakeRadioApi(async _ =>
+        {
+            await release.Task;
+            throw new IOException("radio gone", unchecked((int)0x8007048F));
+        });
+        var log = new CapturingLog();
+        var check = new RadioCheck(api, new FakeNodes(Node()), TimeSpan.FromMilliseconds(50), log);
+
+        RadioCheckResult r = await check.CheckAsync(CancellationToken.None);
+        Assert.AreEqual(RadioCheckState.Unknown, r.State);
+        release.SetResult();
+
+        DateTime until = DateTime.UtcNow.AddSeconds(10);
+        while (!log.Entries.Any(e => e.Message.Contains("0x8007048F", StringComparison.Ordinal)) && DateTime.UtcNow < until)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("after the time limit", StringComparison.Ordinal) && e.Message.Contains("IOException", StringComparison.Ordinal) && e.Message.Contains("0x8007048F", StringComparison.Ordinal)),
+            string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
+    [TestMethod]
+    public async Task AReadingThatArrivesLateIsLoggedWithItsFailedSteps()
+    {
+        var release = new TaskCompletionSource();
+        var api = new FakeRadioApi(async _ =>
+        {
+            await release.Task;
+            return new AdapterReading(true, true, null, RadioNode, [StepOutcomes.FromHResult("bluetooth-radio", unchecked((int)0x80070005), "GetRadioAsync", ok: false)]);
+        });
+        var log = new CapturingLog();
+        var check = new RadioCheck(api, new FakeNodes(Node()), TimeSpan.FromMilliseconds(50), log);
+
+        await check.CheckAsync(CancellationToken.None);
+        release.SetResult();
+
+        DateTime until = DateTime.UtcNow.AddSeconds(10);
+        while (!log.Entries.Any(e => e.Message.Contains("bluetooth-radio", StringComparison.Ordinal)) && DateTime.UtcNow < until)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("after the time limit", StringComparison.Ordinal) && e.Message.Contains("bluetooth-radio", StringComparison.Ordinal)),
+            string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
     [TestMethod]
     public async Task TheCheckIsTimedInTheLog()
     {

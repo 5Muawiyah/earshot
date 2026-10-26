@@ -56,6 +56,32 @@ internal sealed record PairedListResult(IReadOnlyList<PairedDevice> Devices, IRe
 // instead: Name is then the exception type and Code its HRESULT, not a status.
 internal sealed record PairingCallResult(string Name, int Code, bool Success, string? Detail, bool Threw = false);
 
+// The first failure of the pairing request's answer, from the request event, whose task nobody awaits. A pairing whose handler
+// failed is that, with the type and HRESULT, not the RejectedByHandler Windows then reports, which would read as a cancel.
+internal sealed class PairingHandlerFailure
+{
+    internal const string Name = "handler-failed";
+
+    private Exception? _first;
+
+    public void Record(Exception? failure)
+    {
+        if (failure is not null)
+        {
+            _ = Interlocked.CompareExchange(ref _first, failure, null);
+        }
+    }
+
+    public PairingCallResult Apply(PairingCallResult windows)
+    {
+        ArgumentNullException.ThrowIfNull(windows);
+        Exception? failure = Volatile.Read(ref _first);
+        return failure is null
+            ? windows
+            : new PairingCallResult(Name, failure.HResult, false, failure.GetType().Name + ", HRESULT 0x" + failure.HResult.ToString("X8", CultureInfo.InvariantCulture) + "; Windows answered " + windows.Name, Threw: true);
+    }
+}
+
 internal interface IPairingPrompt
 {
     Task<bool> ConfirmAsync(FixPairKind kind, string? pin);
@@ -238,7 +264,8 @@ internal sealed partial class WinRtPairingApi : IPairingApi
             CallsMade.Add("Custom.PairAsync");
             DeviceInformation info = await DeviceInformation.CreateFromIdAsync(deviceId).AsTask(ct).ConfigureAwait(false);
             DeviceInformationCustomPairing custom = info.Pairing.Custom;
-            void OnRequested(DeviceInformationCustomPairing sender, DevicePairingRequestedEventArgs args) => _ = AnswerAsync(args, prompt);
+            var failure = new PairingHandlerFailure();
+            void OnRequested(DeviceInformationCustomPairing sender, DevicePairingRequestedEventArgs args) => _ = AnswerAsync(args, prompt, failure);
             custom.PairingRequested += OnRequested;
             try
             {
@@ -246,7 +273,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
                     DevicePairingKinds.ConfirmOnly | DevicePairingKinds.ConfirmPinMatch | DevicePairingKinds.DisplayPin,
                     DevicePairingProtectionLevel.Default).AsTask(ct).ConfigureAwait(false);
                 DevicePairingResultStatus status = result.Status;
-                return new PairingCallResult(status.ToString(), (int)status, status is DevicePairingResultStatus.Paired or DevicePairingResultStatus.AlreadyPaired, null);
+                return failure.Apply(new PairingCallResult(status.ToString(), (int)status, status is DevicePairingResultStatus.Paired or DevicePairingResultStatus.AlreadyPaired, null));
             }
             finally
             {
@@ -259,22 +286,52 @@ internal sealed partial class WinRtPairingApi : IPairingApi
         }
     }
 
-    // The request is answered after the person has seen it, so the event is held open with a deferral.
+    // The request is answered after the person has seen it, so the event is held open with a deferral. Nothing awaits this
+    // task, so a failure is kept in failure, never thrown.
     [SupportedOSPlatform("windows10.0.19041.0")]
-    private static async Task AnswerAsync(DevicePairingRequestedEventArgs args, IPairingPrompt prompt)
+    private static async Task AnswerAsync(DevicePairingRequestedEventArgs args, IPairingPrompt prompt, PairingHandlerFailure failure)
     {
-        using Windows.Foundation.Deferral deferral = args.GetDeferral();
-        FixPairKind kind = args.PairingKind switch
+        try
         {
-            DevicePairingKinds.ConfirmOnly => FixPairKind.ConfirmOnly,
-            DevicePairingKinds.ConfirmPinMatch => FixPairKind.ConfirmPinMatch,
-            DevicePairingKinds.DisplayPin => FixPairKind.DisplayPin,
-            _ => FixPairKind.Other,
-        };
-        bool accept = await prompt.ConfirmAsync(kind, args.Pin).ConfigureAwait(false);
-        if (accept)
+            using Windows.Foundation.Deferral deferral = args.GetDeferral();
+            FixPairKind kind = args.PairingKind switch
+            {
+                DevicePairingKinds.ConfirmOnly => FixPairKind.ConfirmOnly,
+                DevicePairingKinds.ConfirmPinMatch => FixPairKind.ConfirmPinMatch,
+                DevicePairingKinds.DisplayPin => FixPairKind.DisplayPin,
+                _ => FixPairKind.Other,
+            };
+            failure.Record(await AnswerRequestAsync(kind, args.Pin, prompt, args.Accept).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
         {
-            args.Accept();
+            // GetDeferral, PairingKind or Pin.
+            failure.Record(ex);
+        }
+    }
+
+    // The question and the accept, apart from the WinRT event. A failure of either is returned, with nothing accepted after it.
+    internal static async Task<Exception?> AnswerRequestAsync(FixPairKind kind, string? pin, IPairingPrompt prompt, Action accept)
+    {
+        ArgumentNullException.ThrowIfNull(prompt);
+        ArgumentNullException.ThrowIfNull(accept);
+        try
+        {
+            if (await prompt.ConfirmAsync(kind, pin).ConfigureAwait(false))
+            {
+                accept();
+            }
+
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            // The attempt ended while the question was up: nothing is accepted, and Windows' own answer says how it ended.
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return ex;
         }
     }
 

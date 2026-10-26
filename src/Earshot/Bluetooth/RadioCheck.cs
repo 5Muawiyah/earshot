@@ -168,6 +168,26 @@ internal sealed class RadioCheck : IRadioCheck
         return result;
     }
 
+    // The end of a read that ran past the budget: a fault with its type and HRESULT, or the steps of a late reading that
+    // failed. The card has already said Unknown; this is for the log only.
+    private void LogLate(Task<AdapterReading> read)
+    {
+        if (read.IsFaulted)
+        {
+            Exception ex = read.Exception!.GetBaseException();
+            _log?.Warn("radio check: the read ended after the time limit with " + ex.GetType().Name + " (HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ").");
+        }
+        else if (read.IsCanceled)
+        {
+            _log?.Info("radio check: the read was cancelled after the time limit.");
+        }
+        else
+        {
+            IEnumerable<string> failed = read.Result.Steps.Where(s => !s.Ok).Select(s => s.Step + " " + s.CodeName + " (" + s.Code.ToString(CultureInfo.InvariantCulture) + ")");
+            _log?.Info("radio check: the read ended after the time limit: adapter " + (read.Result.Found ? "found" : "not found") + "; failed steps: " + (failed.Any() ? string.Join(", ", failed) : "none") + ".");
+        }
+    }
+
     private async Task<RadioCheckResult> CheckCoreAsync(CancellationToken ct)
     {
         var watch = Stopwatch.StartNew();
@@ -181,9 +201,9 @@ internal sealed class RadioCheck : IRadioCheck
         ct.ThrowIfCancellationRequested();
         if (finished != read)
         {
-            // The WinRT read is abandoned, not waited for: the card must not hang behind it. Its late result is dropped.
+            // The WinRT read is abandoned, not waited for: the card must not hang behind it. What it ends with is logged.
             await cts.CancelAsync().ConfigureAwait(false);
-            _ = read.ContinueWith(static t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            _ = read.ContinueWith(LogLate, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             var late = new[] { StepOutcomes.FromWin32("radio-read", 1460, "The radio did not answer within " + _budget.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms.", ok: false) };
             _log?.Warn("radio check: the read did not finish in time (ERROR_TIMEOUT).");
             return Result(RadioCheckState.Unknown, null, null, late, watch);
