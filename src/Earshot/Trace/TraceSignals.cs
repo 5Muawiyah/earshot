@@ -104,6 +104,25 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
         }
     }
 
+    public SecurityIdentifier? TrayUser(out string? problem)
+    {
+        if (_tray is null)
+        {
+            problem = "Open() has not succeeded.";
+            return null;
+        }
+
+        try
+        {
+            return Tracing.TrayUser.SidOf(_tray.SafeHandle, _request.TrayPid, out problem);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException)
+        {
+            problem = ex.GetType().Name + " (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message;
+            return null;
+        }
+    }
+
     public TraceStopReason WaitForStop(TimeSpan max)
     {
         if (_stop is null || _trayExit is null)

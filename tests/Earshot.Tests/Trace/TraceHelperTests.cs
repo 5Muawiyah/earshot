@@ -57,9 +57,9 @@ internal sealed class FakeTraceMachine : ITraceMachine
         return DeleteFolderProblem;
     }
 
-    public string? GrantRead(string path, int trayPid)
+    public string? GrantRead(string path, System.Security.Principal.SecurityIdentifier trayUser)
     {
-        Calls.Add("grant " + Path.GetFileName(path) + " " + trayPid);
+        Calls.Add("grant " + Path.GetFileName(path) + " " + trayUser.Value);
         return GrantProblem;
     }
 }
@@ -92,6 +92,16 @@ internal sealed class FakeTraceSignals : ITraceSignals
     public bool SameSession { get; set; } = true;
 
     public bool TrayInThisSession() => SameSession;
+
+    // The tray's account as the helper reads it from the tray's handle; null when it cannot be read.
+    public System.Security.Principal.SecurityIdentifier? User { get; set; } = new("S-1-5-21-1-2-3-1001");
+
+    public System.Security.Principal.SecurityIdentifier? TrayUser(out string? problem)
+    {
+        Calls.Add("tray user");
+        problem = User is null ? "OpenProcessToken failed (Win32 error 5)" : null;
+        return User;
+    }
 
     public TraceStopReason WaitForStop(TimeSpan max)
     {
@@ -136,7 +146,7 @@ internal sealed class FakeRunner : IProcessRunner
 public sealed class TraceHelperTests
 {
     private const string Nonce = "0123456789abcdef0123456789abcdef";
-    private static readonly string[] ExpectedSignalOrder = ["open", "stop asked?", "wait", "done", "wait copied"];
+    private static readonly string[] ExpectedSignalOrder = ["open", "tray user", "stop asked?", "wait", "done", "wait copied"];
     private static readonly DateTime Now = new(2026, 10, 25, 14, 30, 5, DateTimeKind.Utc);
 
     private static (TraceOutcome Outcome, FakeTraceMachine Machine, FakeTraceSignals Signals, FakeRunner Runner, CapturingLog Log) Run(
@@ -384,13 +394,26 @@ public sealed class TraceHelperTests
         Assert.AreEqual("-cancel -instancename " + WprCommand.InstanceName, runner.Calls[^1]);
     }
 
+    // The grant goes to the account read from the tray's own handle at the start, not to whatever process holds the tray's ID
+    // when the recording ends.
     [TestMethod]
     public void TheTraysUserCanReadTheFileAndTheResultButNothingElseIsOpened()
     {
         var (_, machine, _, _, _) = Run();
 
-        CollectionAssert.Contains(machine.Calls, "grant bluetooth-20261025T143005Z.etl 4321");
-        CollectionAssert.Contains(machine.Calls, "grant result.txt 4321");
+        CollectionAssert.Contains(machine.Calls, "grant bluetooth-20261025T143005Z.etl S-1-5-21-1-2-3-1001");
+        CollectionAssert.Contains(machine.Calls, "grant result.txt S-1-5-21-1-2-3-1001");
+    }
+
+    [TestMethod]
+    public void ATrayWhoseAccountCannotBeReadIsRefusedBeforeAnythingStarts()
+    {
+        var (outcome, machine, _, runner, log) = Run((_, s, _) => s.User = null);
+
+        Assert.AreEqual(TraceOutcome.Refused, outcome);
+        Assert.IsEmpty(runner.Calls);
+        Assert.IsFalse(machine.Calls.Any(c => c.StartsWith("folder ", StringComparison.Ordinal)));
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("Win32 error 5", StringComparison.Ordinal)));
     }
 
     [TestMethod]

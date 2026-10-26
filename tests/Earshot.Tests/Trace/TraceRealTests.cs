@@ -43,7 +43,8 @@ public sealed class TraceRealTests
         File.WriteAllText(file, "x");
         var machine = new TraceMachine(Paths.FromEnvironment(n => n == Paths.DataRootVariable ? folder.Path : null), new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
-        string? problem = machine.GrantRead(file, Environment.ProcessId);
+        using WindowsIdentity current = WindowsIdentity.GetCurrent();
+        string? problem = machine.GrantRead(file, current.User!);
 
         Assert.IsNull(problem);
         using WindowsIdentity me = WindowsIdentity.GetCurrent();
@@ -148,6 +149,22 @@ public sealed class TraceRealTests
         Assert.IsFalse(helper.WaitCopied(TimeSpan.FromMilliseconds(100)));
         tray.SetCopied();
         Assert.IsTrue(helper.WaitCopied(TimeSpan.FromSeconds(10)));
+    }
+
+    // The tray's account is read from the handle the helper holds: the test process stands in for the tray.
+    [TestMethod]
+    public void TheTraysAccountIsReadFromTheHandleTheHelperHolds()
+    {
+        string nonce = NewNonce();
+        using var tray = TrayTraceSignals.Create(nonce);
+        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, nonce), new CapturingLog());
+        Assert.IsNull(helper.Open());
+
+        SecurityIdentifier? user = helper.TrayUser(out string? problem);
+
+        Assert.IsNotNull(user, problem);
+        using WindowsIdentity me = WindowsIdentity.GetCurrent();
+        Assert.AreEqual(me.User, user);
     }
 
     // The test process stands in for the tray: it is in the helper's own session.

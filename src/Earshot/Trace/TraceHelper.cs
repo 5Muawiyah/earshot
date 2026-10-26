@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Principal;
 using System.Text;
 using Earshot.Contracts;
 
@@ -31,8 +32,9 @@ internal interface ITraceMachine
     // Null when deleted; otherwise why not, which is logged too. Only a folder inside the trace folder is ever deleted.
     string? DeleteRunFolder(string runFolder);
 
-    // Gives the user who runs the tray read access to one file. Null when done; otherwise why not.
-    string? GrantRead(string path, int trayPid);
+    // Gives the user who runs the tray (read at the start from the tray's own process handle) read access to one file. Null
+    // when done; otherwise why not.
+    string? GrantRead(string path, SecurityIdentifier trayUser);
 }
 
 // The tray's three events and the tray process, as the helper sees them.
@@ -46,6 +48,10 @@ internal interface ITraceSignals
     // True when the tray process named on the command line is in this helper's own Windows session: the trace is made readable
     // for that process's user, so it must be the one at this screen.
     bool TrayInThisSession();
+
+    // The account the tray runs as, read from the process handle Open took, so a process ID used again by another process
+    // after the tray exits cannot be the one the trace is given to. Null with the reason when it cannot be read.
+    SecurityIdentifier? TrayUser(out string? problem);
 
     // Blocks until the tray asks to stop, the tray process exits, or max passes.
     TraceStopReason WaitForStop(TimeSpan max);
@@ -112,6 +118,13 @@ internal static class TraceHelper
             return TraceOutcome.Refused;
         }
 
+        SecurityIdentifier? trayUser = signals.TrayUser(out string? userProblem);
+        if (trayUser is null)
+        {
+            log.Warn("trace: the tray's account could not be read, so nothing was started: " + userProblem);
+            return TraceOutcome.Refused;
+        }
+
         string? folderProblem = machine.PrepareRunFolder(request.Nonce, out string runFolder);
         if (folderProblem is not null)
         {
@@ -120,7 +133,7 @@ internal static class TraceHelper
             return TraceOutcome.SetupFailed;
         }
 
-        TraceOutcome outcome = Record(request, machine, signals, runner, log, utcNow, runFolder, out string fileName, out int wprCode, out bool leaveFolder);
+        TraceOutcome outcome = Record(request, machine, signals, runner, log, utcNow, runFolder, trayUser, out string fileName, out int wprCode, out bool leaveFolder);
 
         string resultPath = Path.Combine(runFolder, ResultFileName);
         string? writeProblem = machine.WriteFile(resultPath, Encoding.UTF8.GetBytes(TraceResultFile.Serialize(new TraceResultFile(outcome, fileName, wprCode))));
@@ -130,7 +143,7 @@ internal static class TraceHelper
         }
         else
         {
-            string? grant = machine.GrantRead(resultPath, request.TrayPid);
+            string? grant = machine.GrantRead(resultPath, trayUser);
             if (grant is not null)
             {
                 log.Warn("trace: the result could not be made readable: " + grant);
@@ -169,7 +182,7 @@ internal static class TraceHelper
 
     // The part between the folder and the result. leaveFolder: nobody is going to collect the file.
     private static TraceOutcome Record(TraceRequest request, ITraceMachine machine, ITraceSignals signals, IProcessRunner runner, ILog log, Func<DateTime> utcNow,
-        string runFolder, out string fileName, out int wprCode, out bool leaveFolder)
+        string runFolder, SecurityIdentifier trayUser, out string fileName, out int wprCode, out bool leaveFolder)
     {
         fileName = "";
         wprCode = 0;
@@ -277,7 +290,7 @@ internal static class TraceHelper
         _ = machine.DeleteFile(markerPath);
         log.Info("trace: wpr -stop " + Describe(stop));
 
-        string? grant = machine.GrantRead(etlPath, request.TrayPid);
+        string? grant = machine.GrantRead(etlPath, trayUser);
         if (grant is not null)
         {
             log.Warn("trace: the saved trace could not be made readable by the tray's user: " + grant);

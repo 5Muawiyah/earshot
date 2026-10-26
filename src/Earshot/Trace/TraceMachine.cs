@@ -200,14 +200,10 @@ internal sealed class TraceMachine : ITraceMachine
     private static string Describe(Exception ex) =>
         ex.GetType().Name + " (HRESULT 0x" + ex.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "): " + ex.Message;
 
-    public string? GrantRead(string path, int trayPid)
+    public string? GrantRead(string path, SecurityIdentifier trayUser)
     {
-        SecurityIdentifier? sid = TrayUser.SidOf(trayPid, out string? problem);
-        if (sid is null)
-        {
-            return problem;
-        }
-
+        ArgumentNullException.ThrowIfNull(trayUser);
+        SecurityIdentifier sid = trayUser;
         try
         {
             var info = new FileInfo(path);
@@ -257,32 +253,58 @@ internal static partial class TrayUser
 
         try
         {
-            if (!OpenProcessToken(process, TokenQuery | TokenDuplicate, out nint token))
-            {
-                int error = Marshal.GetLastWin32Error();
-                problem = "OpenProcessToken for process " + processId + " failed (Win32 error " + error + "): " + new Win32Exception(error).Message;
-                return null;
-            }
-
-            try
-            {
-                using var identity = new WindowsIdentity(token);
-                if (identity.User is null)
-                {
-                    problem = "The token of process " + processId + " has no user.";
-                    return null;
-                }
-
-                return identity.User;
-            }
-            finally
-            {
-                _ = CloseHandle(token);
-            }
+            return SidOfHandle(process, processId, out problem);
         }
         finally
         {
             _ = CloseHandle(process);
+        }
+    }
+
+    // From a process handle the caller already holds: the handle keeps that process object, so its ID used again names
+    // nothing here.
+    public static SecurityIdentifier? SidOf(Microsoft.Win32.SafeHandles.SafeProcessHandle process, int processId, out string? problem)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        bool added = false;
+        try
+        {
+            process.DangerousAddRef(ref added);
+            return SidOfHandle(process.DangerousGetHandle(), processId, out problem);
+        }
+        finally
+        {
+            if (added)
+            {
+                process.DangerousRelease();
+            }
+        }
+    }
+
+    private static SecurityIdentifier? SidOfHandle(nint process, int processId, out string? problem)
+    {
+        problem = null;
+        if (!OpenProcessToken(process, TokenQuery | TokenDuplicate, out nint token))
+        {
+            int error = Marshal.GetLastWin32Error();
+            problem = "OpenProcessToken for process " + processId + " failed (Win32 error " + error + "): " + new Win32Exception(error).Message;
+            return null;
+        }
+
+        try
+        {
+            using var identity = new WindowsIdentity(token);
+            if (identity.User is null)
+            {
+                problem = "The token of process " + processId + " has no user.";
+                return null;
+            }
+
+            return identity.User;
+        }
+        finally
+        {
+            _ = CloseHandle(token);
         }
     }
 }
