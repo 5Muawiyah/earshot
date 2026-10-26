@@ -216,8 +216,9 @@ public sealed class PairingSessionTests
 
         Assert.IsTrue(result.NameUnread);
         Assert.IsTrue(result.Unreachable);
-        Assert.AreEqual(RadioLines.Unreachable, result.CardLine);
-        Assert.AreEqual("This PC found the headphones but couldn't reach them.", result.CardLine);
+        // What was seen and Windows' own status, not a claim that this PC could not reach them.
+        Assert.AreEqual(RadioLines.UnreachableLine(7), result.CardLine);
+        Assert.AreEqual("This PC found the headphones, but the pairing didn't finish (Windows status 7).", result.CardLine);
         Assert.AreEqual(FailureClass.PcSide.ToString(), result.ToHistoryEntry(DateTimeOffset.UnixEpoch).FailureClass);
         Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "name-unread" && s.Code == 1));
     }
@@ -269,7 +270,7 @@ public sealed class PairingSessionTests
         PairingSessionResult result = await RunAsync(rig);
 
         Assert.IsTrue(result.Unreachable, status.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        Assert.AreEqual(RadioLines.Unreachable, result.CardLine);
+        Assert.AreEqual(RadioLines.UnreachableLine(status), result.CardLine);
     }
 
     // A code that is not a pairing status (no status was returned) says nothing either way, so it is not read as the PC.

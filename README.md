@@ -158,7 +158,8 @@ Startup on is not covered.
   can't do Classic Bluetooth, which AirPods need for sound.", with no button,
   and no fix for the AirPods. A read of the Bluetooth adapter that fails says
   nothing. When headphones with no name read were found and Windows' answer to
-  the pairing does not say they answered, it says "This PC found the headphones but couldn't reach them." with
+  the pairing does not say they answered, it says "This PC found the headphones, but the pairing didn't finish
+  (Windows status N)." with
   a Record a Bluetooth trace button. That reading of the PC as the cause rests
   on one sitting, on 25 October.
   `Earshot.exe doctor` reports the driver's version and date, the problem code,

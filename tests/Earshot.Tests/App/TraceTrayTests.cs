@@ -298,7 +298,7 @@ public sealed class TraceTrayTests
             tray.PumpUntilIdle();
 
             CardContent card = tray.Cards.Shown[^1].Content;
-            Assert.AreEqual(RadioLines.Unreachable, card.Status);
+            Assert.AreEqual(RadioLines.UnreachableLine(PairReasons.AuthenticationTimeout), card.Status);
             Assert.AreEqual(RadioLines.RecordTraceButton, card.Action?.Label);
 
             card.Action!.OnClick();
@@ -423,7 +423,7 @@ public sealed class TraceTrayTests
             tray.PumpUntilIdle();
 
             CardContent card = tray.Cards.Shown[^1].Content;
-            Assert.AreEqual(RadioLines.Unreachable, card.Status);
+            Assert.AreEqual(RadioLines.UnreachableLine(PairReasons.AuthenticationTimeout), card.Status);
             Assert.IsNull(card.Action);
         });
     }

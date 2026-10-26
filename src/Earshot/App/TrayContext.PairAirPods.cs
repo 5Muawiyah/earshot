@@ -1120,7 +1120,7 @@ internal sealed partial class TrayContext
         // The AirPods were found but could not be reached: the one case where a trace may show where it stopped.
         if (result.Unreachable)
         {
-            ShowRadioCard(UnreachableCheck, place);
+            ShowRadioCard(UnreachableCheck with { Line = result.CardLine ?? RadioLines.Unreachable }, place);
             return;
         }
 

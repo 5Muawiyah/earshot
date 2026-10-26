@@ -1450,7 +1450,7 @@ https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
 | Problem | Bluetooth on this PC isn't working. Windows reports problem code N. | Bluetooth settings |
 | No adapter | Windows finds no Bluetooth on this PC. | Bluetooth settings |
 | No Classic Bluetooth | Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound. | None |
-| Unreachable | This PC found the headphones but couldn't reach them. | Record a Bluetooth trace |
+| Unreachable | This PC found the headphones, but the pairing didn't finish (Windows status N). | Record a Bluetooth trace |
 
 Each line claims only what was read. In these states the card offers nothing
 for the AirPods: no Fix connection, no Connect in Windows, no reset advice,
@@ -1469,7 +1469,7 @@ status Windows returned was not recorded (see [verification.md](verification.md)
 ### Record a Bluetooth trace
 
 From the settings page and the Unreachable card, and from a Fix connection
-result that could not reach the AirPods. The tray first shows a note: a trace
+result that is Unreachable. The tray first shows a note: a trace
 holds the Bluetooth addresses of the person's devices and may hold pairing
 keys, Earshot never sends it anywhere, share it only with someone trusted and
 delete it when done. Only the note's Record button goes on. The note, and the

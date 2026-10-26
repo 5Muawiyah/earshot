@@ -255,7 +255,7 @@ internal sealed class PairingSession
                 // code that is no status say nothing about the PC. The PC-side reading rests on one sitting (25 October).
                 bool timedOut = pair.Name == CancelledTimeout;
                 bool unreachable = nameUnread && !timedOut && PairReasons.SaysNoAnswer(pair);
-                string line = unreachable ? RadioLines.Unreachable : timedOut ? PairingText.TimedOut : PairReasons.LineFor(pair);
+                string line = unreachable ? RadioLines.UnreachableLine(pair.Code) : timedOut ? PairingText.TimedOut : PairReasons.LineFor(pair);
                 lines.Add(line);
                 PairFailureReason reason = timedOut ? PairFailureReason.TimedOut : PairFailureReason.PairFailed;
                 PairOutcome outcome = PairReasons.StatusOf(pair) is PairReasons.PairingCanceled or PairReasons.RejectedByHandler ? PairOutcome.Cancelled : PairOutcome.Failed;
