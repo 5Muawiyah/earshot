@@ -1002,9 +1002,15 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
-            rig.Ui.HoldPick = TimeSpan.FromSeconds(2);
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            rig.Ui.HoldPick = TimeSpan.FromSeconds(30);
+            rig.Ui.HoldPickUntil = done.Task;
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
-            rig.Ui.OnPick = () => tray.Ui.Post(_ => tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0)), null);
+            rig.Ui.OnPick = () => tray.Ui.Post(_ =>
+            {
+                tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
+                done.TrySetResult();
+            }, null);
 
             Click(tray);
 
@@ -1023,14 +1029,20 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
-            rig.Ui.HoldPick = TimeSpan.FromSeconds(2);
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            rig.Ui.HoldPick = TimeSpan.FromSeconds(30);
+            rig.Ui.HoldPickUntil = done.Task;
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
             tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
                 ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
             tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
             tray.PumpUntilIdle();
             CardAction connectInWindows = tray.Cards.Shown.Last(c => c.Content.Action?.Label == ConnectInWindowsOffer.ButtonLabel).Content.Action!;
-            rig.Ui.OnPick = () => tray.Ui.Post(_ => connectInWindows.OnClick(), null);
+            rig.Ui.OnPick = () => tray.Ui.Post(_ =>
+            {
+                connectInWindows.OnClick();
+                done.TrySetResult();
+            }, null);
 
             Click(tray);
 
@@ -1050,7 +1062,9 @@ public sealed class PairAirPodsTests
             using var rig = new FixRig();
             ArrangePairs(rig);
             rig.Prompter.SayOk();
-            rig.Ui.HoldPick = TimeSpan.FromSeconds(2);
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            rig.Ui.HoldPick = TimeSpan.FromSeconds(30);
+            rig.Ui.HoldPickUntil = done.Task;
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
             bool protectBefore = tray.Settings.Current.ProtectAudioQuality;
             bool microphoneOffBefore = tray.Settings.Current.HandsFreeMicrophoneOffMode;
@@ -1059,6 +1073,7 @@ public sealed class PairAirPodsTests
                 tray.ClickMenu(MenuModel.BlockAtBoot);
                 tray.ClickMenu(MenuModel.ProtectAudioQuality);
                 tray.Context.SetHandsFreeMicrophoneOff(!microphoneOffBefore, CardPlace.NearTray);
+                done.TrySetResult();
             }, null);
 
             Click(tray);

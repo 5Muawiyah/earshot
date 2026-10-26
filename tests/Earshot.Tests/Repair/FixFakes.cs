@@ -128,17 +128,18 @@ internal sealed class FakeRePairUi : IFixRePairUi
     // How long the pick stays up before it closes unanswered, as the real dialog does at its time limit; zero answers at once.
     public TimeSpan HoldPick { get; set; }
 
+    // Ends a held pick early (still unanswered) once it completes, so a test that acts while the pick is up does not race the
+    // hold on real time.
+    public Task? HoldPickUntil { get; set; }
+
     public async Task<PickAnswer> PickAsync(IReadOnlyList<UnpairedDevice> candidates, CancellationToken ct)
     {
         OnPick?.Invoke();
         Shown.Add("pick:" + string.Join("|", candidates.Select(c => c.Name)));
         if (HoldPick > TimeSpan.Zero)
         {
-            try
-            {
-                await Task.Delay(HoldPick, ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            await Task.WhenAny(Task.Delay(HoldPick, ct), HoldPickUntil ?? Task.Delay(Timeout.Infinite, ct));
+            if (ct.IsCancellationRequested)
             {
                 return new PickAnswer(null, FixAnswer.Cancel);
             }
