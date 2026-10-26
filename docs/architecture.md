@@ -1273,7 +1273,10 @@ session. It takes no option that says yes.
    same process with no second prompt, from an administrators-only plan folder.
    Such a run writes nothing under the person's profile: its log goes to the
    machine folder's log once it ends, it adds no connect history entry, and its
-   marker (step 5) is in the machine folder, which the tray reads too.
+   marker (step 5) is in the machine folder, which the tray reads too. Like
+   install and fix-apply, it refuses to start, before its first question, when
+   the user's environment sets a variable that makes the runtime load other
+   code, use another runtime or write a file where it says.
 4. Second question, a separate window: remove the AirPods from Windows and pair
    them again, by name, with the pairing-mode steps and a picture of each kind of
    case, as in Pair AirPods' first question. On OK, in the same session: unpair, scan, show the

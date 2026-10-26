@@ -109,4 +109,20 @@ public sealed class FixApplyModeTests
         var redirected = Earshot.Infra.Paths.FromEnvironment(name => name == Earshot.Infra.Paths.DataRootVariable ? Path.GetTempPath() : null);
         Assert.IsNotNull(Program.FixApplyPathsRefusal(redirected));
     }
+
+    // A fix run started already elevated (Setup.exe starts it that way) checks the user's environment before it asks or writes
+    // anything, as install, the trace and fix-apply do. Before, the check came only at the apply step, after the questions and
+    // with the re-pair's machine-folder writes still to come.
+    [TestMethod]
+    public void AnAlreadyElevatedFixRunRefusesAnEnvironmentThatLoadsOtherCodeFirst()
+    {
+        var log = new CapturingLog();
+
+        Assert.IsTrue(Program.FixEnvironmentRefused(FakeToken.ElevatedUser, ["DOTNET_STARTUP_HOOKS"], log));
+        Assert.IsTrue(log.Has(LogLevel.Warn, "DOTNET_STARTUP_HOOKS"));
+        Assert.IsFalse(Program.FixEnvironmentRefused(FakeToken.ElevatedUser, [], new CapturingLog()));
+
+        // Not elevated, the run is the person's own program and changes nothing itself: its elevated step makes the check.
+        Assert.IsFalse(Program.FixEnvironmentRefused(FakeToken.PlainUser, ["DOTNET_STARTUP_HOOKS"], new CapturingLog()));
+    }
 }

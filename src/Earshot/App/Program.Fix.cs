@@ -92,8 +92,24 @@ internal static partial class Program
         return token.IsElevatedAdministrator && !token.IsLocalSystem;
     }
 
+    // A run that is already elevated started with the user's environment, which any program the user runs can change: one that
+    // makes the runtime load other code, use another runtime or write a file where it says refuses the run before anything is
+    // asked or written, as install, the trace and fix-apply do. An unelevated run is the person's own program; its elevated step
+    // makes the check.
+    internal static bool FixEnvironmentRefused(IProcessToken token, IEnumerable<string>? environmentNames, ILog log)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        return HoldsFixLog(token) && EnvironmentRefusal("fix", environmentNames, log) is not null;
+    }
+
     private static void TryRunFix(RunContext ctx, Paths paths, IProcessToken token, ILog log)
     {
+        if (FixEnvironmentRefused(token, null, log))
+        {
+            ctx.ExitCode = ExitCodes.Refused;
+            return;
+        }
+
         string? outPath = null;
         for (int i = 1; i + 1 < ctx.Args.Length; i++)
         {
