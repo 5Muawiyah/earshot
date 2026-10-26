@@ -27,20 +27,26 @@ internal sealed partial class TrayContext
 
         _traceRecorder.StateChanged += OnTraceStateChanged;
 
-        // A helper an earlier run left behind with a session open: said once, at start.
+        // A helper an earlier run left behind with a session open, and run folders an earlier recording left (a helper that could
+        // not delete its copy, or stopped part way): said at start, in one card that stays up, so neither replaces the other. A
+        // later card (the start-time look at the pairs) can still replace it; the session notice comes back at each start until
+        // the PC is restarted, and both are in the log.
         string? notice = _traceRecorder.StillRunningNotice();
         if (notice is not null)
         {
             _log.Warn("Bluetooth trace: " + notice);
-            ShowCard(TrayStatus.AppName, notice, CardPlace.NearTray);
         }
 
-        // Run folders an earlier recording left (a helper that could not delete its copy, or stopped part way): said once, at start.
         string? leftover = _traceRecorder.LeftoverNotice();
         if (leftover is not null)
         {
             _log.Warn("Bluetooth trace: " + leftover);
-            ShowCard(TrayStatus.AppName, leftover, CardPlace.NearTray);
+        }
+
+        string? said = notice is null ? leftover : leftover is null ? notice : notice + " " + leftover;
+        if (said is not null && !_closing && !_closed)
+        {
+            _registry.Cards.Show(new CardContent(TrayStatus.AppName, said, StaysUp: true), CardPlace.NearTray.Anchor);
         }
     }
 

@@ -205,6 +205,21 @@ public sealed class TraceTrayTests
         });
     }
 
+    // Both at once are one card, so the second does not replace the first: the trace that may still run is the one to act on.
+    [TestMethod]
+    public void ASessionLeftRunningAndRunFoldersLeftAreSaidInOneCard()
+    {
+        StaThread.Run(() =>
+        {
+            var recorder = new FakeTraceRecorder { Notice = TraceCopy.StillRunning, Leftover = TraceCopy.Leftover(1) };
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), traceRecorder: recorder);
+
+            CardContent card = tray.Cards.Shown.Single(c => c.Content.Status.Contains(TraceCopy.StillRunning, StringComparison.Ordinal)).Content;
+            StringAssert.Contains(card.Status, TraceCopy.Leftover(1));
+            Assert.IsTrue(card.StaysUp, "Shown at sign-in, it stays until it is closed or replaced.");
+        });
+    }
+
     [TestMethod]
     public void RunFoldersLeftByAnEarlierRecordingAreSaidOnceAtStart()
     {
