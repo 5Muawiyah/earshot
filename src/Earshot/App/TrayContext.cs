@@ -952,6 +952,15 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
+        // A Pair AirPods that runs owns the pairs and the gate until it has adopted: a switch now would race its adoption, which
+        // the gate could then refuse.
+        if (_elevatedRun == PairRun)
+        {
+            _log.Info("Click ignored: Pair AirPods is running.");
+            ShowCard(TrayStatus.AppName, FixRunLock.PairAlreadyRunningMessage, place);
+            return;
+        }
+
         // The menu toggle is disabled while the device itself reports the link is changing, so a click is
         // ignored then too: the label and the click always agree.
         ConnectionState connection = TrayStatus.ActiveTarget(_snapshot, settings)?.Connection ?? ConnectionState.Unknown;

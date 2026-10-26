@@ -928,6 +928,26 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // A click while Pair AirPods runs is refused with a line, so no switch races the run's adoption. Before, it connected.
+    [TestMethod]
+    public void AClickWhilePairAirPodsRunsIsRefused()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Ui.HangOnPick = true;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: Services(rig));
+            rig.Ui.OnPick = () => tray.Ui.Post(_ => tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0)), null);
+
+            Click(tray);
+
+            Assert.IsFalse(tray.Connection.Calls.Any(c => c.Connect), string.Join(", ", tray.Connection.Calls));
+            Assert.IsTrue(tray.Cards.Shown.Any(c => c.Content.Status == FixRunLock.PairAlreadyRunningMessage), string.Join(" | ", tray.Cards.Statuses));
+        });
+    }
+
     // A refusal the gate gave just as Exit began is still the adoption's result, with its code, not Earshot closing.
     [TestMethod]
     public void AGateRefusalAsExitBeginsKeepsItsCode()
