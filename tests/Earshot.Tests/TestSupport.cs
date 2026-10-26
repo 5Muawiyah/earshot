@@ -66,13 +66,20 @@ internal sealed class EnvironmentVariableScope : IDisposable
 
 // Clears, for the scope, every variable an elevated run refuses (Program.UnsafeRuntimeVariables). A hosted runner runs elevated
 // with DOTNET_ROOT set, and the fix verb run elevated refuses that environment before anything else, as it would for a person; a
-// test that starts the real program to see it plan clears them for its child. The tests run one at a time (DoNotParallelize).
+// test that starts the real program to see it plan clears them for its child. Only when this process is elevated: unelevated,
+// the refusal never applies, and a .NET found only through DOTNET_ROOT (a per-user install) keeps working for the child. The
+// tests run one at a time (DoNotParallelize).
 internal sealed class RuntimeVariablesCleared : IDisposable
 {
-    private readonly List<EnvironmentVariableScope> _cleared;
+    private readonly List<EnvironmentVariableScope> _cleared = [];
 
     public RuntimeVariablesCleared()
     {
+        if (!Program.HoldsFixLog(Earshot.Boot.Gate.WindowsProcessToken.Current()))
+        {
+            return;
+        }
+
         IEnumerable<string> names = Environment.GetEnvironmentVariables().Keys.Cast<string>();
         _cleared = Program.UnsafeRuntimeVariables(names).Select(n => new EnvironmentVariableScope(n, null)).ToList();
     }
