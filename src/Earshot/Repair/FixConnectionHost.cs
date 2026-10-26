@@ -71,6 +71,10 @@ internal sealed class FixOptions
     // How long to wait for the new device's nodes to appear after pairing.
     public TimeSpan PostPairWait { get; init; } = TimeSpan.FromSeconds(20);
 
+    // How long the paired list read after a pairing is given. A waiting budget, not a measured figure: past it the pair is one
+    // that could not be looked at, and the run (holding the Fix lock and the pairing flag) does not wait on Windows.
+    public TimeSpan PairedListWait { get; init; } = TimeSpan.FromSeconds(5);
+
     public Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = static (span, ct) => Task.Delay(span, ct);
 }
 

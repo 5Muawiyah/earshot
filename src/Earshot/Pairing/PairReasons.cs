@@ -111,6 +111,8 @@ internal static class PairingText
 
     public const string NothingFound = "No AirPods turned up. Check the lid is open and the light flashes white, then try again.";
 
+    public const string ScanStopped = "Windows stopped looking for Bluetooth devices. Check Bluetooth is on, then try again.";
+
     public const string NotAirPods = "That device didn't pass Earshot's AirPods check, so Earshot adopted nothing. It is still paired in Windows; remove it there if you don't want it.";
 
     public const string Unverified = "Paired, but Earshot couldn't check that these are AirPods. If they are yours, choose them.";

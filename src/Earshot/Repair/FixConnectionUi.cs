@@ -16,6 +16,11 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     private Form? _form;
     private Label? _label;
 
+    // Set while the window is closed by the run itself, so only the person's close (the X, or Alt+F4) cancels the run.
+    private bool _closingHere;
+
+    internal Form? FormForTests => _form;
+
     // Runs work on the window's own thread, waiting for it; at once when already there or when there is no context to send to.
     internal T OnUi<T>(Func<T> work)
     {
@@ -68,6 +73,25 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
             _label = new Label { Left = 16, Top = 16, Width = 428, Height = 110, Text = text };
             var cancel = new Button { Text = "Cancel", Left = 364, Top = 144, Width = 80 };
             cancel.Click += (_, _) => _cancel.Cancel();
+
+            // Closing the window is the person's Cancel too: before, it closed the window and the scan ran on for its minute
+            // behind nothing, with the lock and the pairing flag held.
+            // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.formclosingeventargs.closereason
+            _form.FormClosing += (_, e) =>
+            {
+                if (e.CloseReason == CloseReason.UserClosing && !_closingHere)
+                {
+                    _cancel.Cancel();
+                }
+            };
+            _form.FormClosed += (_, _) =>
+            {
+                if (!_closingHere)
+                {
+                    _form = null;
+                    _label = null;
+                }
+            };
             _form.Controls.Add(_label);
             _form.Controls.Add(cancel);
             _form.CancelButton = cancel;
@@ -104,7 +128,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
 
     internal static FixPrompt PinPrompt(FixPairKind kind, string? pin, string title = FixPromptText.Title) => kind == FixPairKind.ConfirmPinMatch
         ? new FixPrompt(title, PairingText.DoesItShow(pin), "Compare the number with the one on your device.", [], [], "Yes")
-        : new FixPrompt(title, "Enter " + pin + " on your device", "Windows is showing this number to pair.", [], [], "Continue");
+        : new FixPrompt(title, "Enter " + pin + " on your device", "Enter this number on your device to pair.", [], [], "Continue");
 
     // With offerTrace, a second button asks the tray for Record a Bluetooth trace, which shows its note before anything is
     // recorded.
@@ -138,8 +162,17 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
 
     private void CloseHere()
     {
-        _form?.Close();
-        _form?.Dispose();
+        _closingHere = true;
+        try
+        {
+            _form?.Close();
+            _form?.Dispose();
+        }
+        finally
+        {
+            _closingHere = false;
+        }
+
         _form = null;
         _label = null;
     }

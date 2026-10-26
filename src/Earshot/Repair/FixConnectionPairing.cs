@@ -46,6 +46,10 @@ internal enum WatchEventKind
     Updated,
     Removed,
     InitialListDone,
+
+    // Windows stopped the watcher on its own (DeviceWatcherStatus.Aborted): the scan sees nothing more.
+    // https://learn.microsoft.com/en-us/uwp/api/windows.devices.enumeration.devicewatcherstatus
+    Aborted,
 }
 
 internal sealed record WatchEvent(WatchEventKind Kind, UnpairedDevice? Device);
@@ -390,6 +394,15 @@ internal sealed partial class WinRtPairingApi : IPairingApi
                 _watcher.Updated += (_, update) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Updated, DescribeDevice(update.Id, "", update.Properties)));
                 _watcher.Removed += (_, update) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Removed, new UnpairedDevice(update.Id, "", "", false)));
                 _watcher.EnumerationCompleted += (_, _) => _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.InitialListDone, null));
+                _watcher.Stopped += (sender, _) =>
+                {
+                    if (sender.Status == DeviceWatcherStatus.Aborted)
+                    {
+                        _channel.Writer.TryWrite(new WatchEvent(WatchEventKind.Aborted, null));
+                    }
+
+                    _channel.Writer.TryComplete();
+                };
                 _watcher.Start();
             }
 

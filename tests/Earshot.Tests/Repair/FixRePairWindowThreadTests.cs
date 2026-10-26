@@ -34,6 +34,29 @@ public sealed class FixRePairWindowThreadTests
         });
     }
 
+    // The person closing the window is their Cancel; the run closing it is not.
+    [TestMethod]
+    public void ClosingTheWindowCancelsTheRunAndTheRunsOwnCloseDoesNot()
+    {
+        StaThread.Run(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            using var byPerson = new CancellationTokenSource();
+            using var window = new FixRePairWindow(byPerson);
+            window.ShowInstruction("Looking");
+            window.FormForTests!.Close();
+            Application.DoEvents();
+            Assert.IsTrue(byPerson.IsCancellationRequested, "Closing the window did not cancel the run.");
+
+            using var byRun = new CancellationTokenSource();
+            using var other = new FixRePairWindow(byRun);
+            other.ShowInstruction("Looking");
+            other.Close();
+            Application.DoEvents();
+            Assert.IsFalse(byRun.IsCancellationRequested, "The run's own close cancelled it.");
+        });
+    }
+
     [TestMethod]
     public void ACallOnTheWindowsOwnThreadRunsAtOnce()
     {

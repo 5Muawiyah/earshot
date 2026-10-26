@@ -45,6 +45,8 @@ public sealed class FixPairPromptTextTests
         Assert.AreEqual("Does your device show 123456?", match.Heading);
         Assert.AreEqual("Yes", match.OkText);
         Assert.Contains("654321", display.Heading, StringComparison.Ordinal);
+        // Earshot's own window shows the number Windows gave it.
+        Assert.AreEqual("Enter this number on your device to pair.", display.Body);
     }
 
     [TestMethod]

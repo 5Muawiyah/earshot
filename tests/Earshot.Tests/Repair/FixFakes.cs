@@ -393,6 +393,7 @@ internal sealed class FixRig : IDisposable
             SettleWait = TimeSpan.FromMilliseconds(20),
             PairTimeout = TimeSpan.FromMilliseconds(300),
             PostPairWait = TimeSpan.Zero,
+            PairedListWait = TimeSpan.FromMilliseconds(200),
             Delay = (_, _) => Task.CompletedTask,
         },
     };

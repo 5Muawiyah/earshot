@@ -17,7 +17,7 @@ public sealed class PairingSessionTests
     private const string AirPodsId = "unpaired-airpods";
 
     // Every step with its code, and its time in the -ms step after it.
-    private static readonly string[] DesignedSteps = ["radio-check", "radio-check-ms", "scan", "scan-ms", "pair", "pair-ms", "model-check", "model-check-ms", "adopt", "setup"];
+    private static readonly string[] DesignedSteps = ["radio-check", "radio-check-ms", "scan", "scan-ms", "pick", "pick-ms", "pair", "pair-ms", "model-check", "model-check-ms", "adopt", "setup"];
 
     private static readonly string[] Planted = ["Jonathan", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer.ToString(), "654321"];
 
@@ -283,6 +283,46 @@ public sealed class PairingSessionTests
         PairingSessionResult result = await RunAsync(rig);
 
         Assert.IsFalse(result.Unreachable);
+    }
+
+    // A paired list that does not answer after the pairing ends the look within its budget: the pair is one that could not be
+    // looked at, not one the run waits on while it holds the lock.
+    [TestMethod]
+    public async Task APairedListThatDoesNotAnswerAfterThePairingIsUnverifiedWithinItsBudget()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        AirPodsAppear(rig, name: "AirPods Pro");
+        Action<string>? paired = rig.Pairing.OnPaired;
+        rig.Pairing.OnPaired = id =>
+        {
+            paired?.Invoke(id);
+            rig.Pairing.HangOnList = true;
+        };
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.AreEqual(PairOutcome.Unverified, result.Outcome);
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "pair-list" && s.Code == 1460), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code)));
+        Assert.IsLessThan(10_000L, watch.ElapsedMilliseconds);
+    }
+
+    // Windows stopped the scan (the watcher aborted): that is said with its status, not as "nothing turned up", which blames the
+    // case. Before, the scan waited out its time and said the case was not in pairing mode.
+    [TestMethod]
+    public async Task AScanWindowsStopsIsSaidWithItsStatus()
+    {
+        using var rig = new FixRig();
+        ArrangePairs(rig);
+        rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Aborted, null));
+
+        PairingSessionResult result = await RunAsync(rig);
+
+        Assert.AreEqual(PairOutcome.Failed, result.Outcome);
+        Assert.AreEqual(PairingText.ScanStopped, result.CardLine);
+        Assert.AreNotEqual(PairingText.NothingFound, result.CardLine);
+        Assert.IsTrue(result.HistorySteps.Any(s => s.Step == "scan-aborted" && !s.Ok && s.Code == 5), string.Join(", ", result.HistorySteps.Select(s => s.Step)));
     }
 
     // Nodes a removed pairing left behind, not present, are not the new pair: matching them read "AirPods" before the new nodes

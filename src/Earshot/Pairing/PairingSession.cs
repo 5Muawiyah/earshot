@@ -196,13 +196,27 @@ internal sealed class PairingSession
             long scanMs = scanTime.ElapsedMilliseconds;
             history.Add(new StepOutcome("scan", candidates.Count > 0, candidates.Count, "candidates", null));
             history.Add(new StepOutcome("scan-ms", true, (int)Math.Min(scanMs, int.MaxValue), "ms", null));
+            if (candidates.Count == 0 && Aborted(seen))
+            {
+                // DeviceWatcherStatus.Aborted is 5.
+                history.Add(new StepOutcome("scan-aborted", false, 5, "Aborted", null));
+                lines.Add("Windows stopped the scan for Bluetooth devices (DeviceWatcherStatus Aborted). Nothing was paired.");
+                return Finish(PairOutcome.Failed, PairFailureReason.NoDevice, false, null, null, false, false, 0, scanMs, PairingText.ScanStopped);
+            }
+
             if (candidates.Count == 0)
             {
                 lines.Add("No new Bluetooth audio device appeared. Nothing was paired.");
                 return Finish(PairOutcome.Failed, PairFailureReason.NoDevice, false, null, null, false, false, 0, scanMs, PairingText.NothingFound);
             }
 
+            var pickTime = Stopwatch.StartNew();
             UnpairedDevice? chosen = await _ui.PickAsync(candidates).ConfigureAwait(false);
+            // Earshot's own step: 0 when a device was chosen, 1 when none was. Its time is how long the person took.
+            history.Add(new StepOutcome("pick", chosen is not null, chosen is null ? 1 : 0, chosen is null ? "none-chosen" : "chosen", null));
+            history.Add(Ms("pick-ms", pickTime.ElapsedMilliseconds));
+            // A pick closed because the run ended (Exit, or the window's Cancel) is that, not the person choosing nothing.
+            ct.ThrowIfCancellationRequested();
             if (chosen is null)
             {
                 lines.Add("No device was chosen. Nothing was paired.");
@@ -241,7 +255,22 @@ internal sealed class PairingSession
                 return Finish(outcome, reason, false, null, pair, nameUnread, unreachable, candidates.Count, scanMs, line);
             }
 
-            PairedListResult now = await _api.ListPairedAsync(ct).ConfigureAwait(false);
+            PairedListResult now;
+            using (var listWait = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                listWait.CancelAfter(_options.PairedListWait);
+                try
+                {
+                    now = await _api.ListPairedAsync(listWait.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Earshot's own time limit, so the pair is one that could not be looked at.
+                    now = new PairedListResult([], [StepOutcomes.FromWin32("pair-list", 1460, "The paired list did not answer within " + _options.PairedListWait.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms.", ok: false)]);
+                    _log.Warn("pair: the paired list did not answer in time after the pairing, so the new pair could not be looked at.");
+                }
+            }
+
             steps.AddRange(now.Steps);
             PairedDevice? newPaired = chosen.Address12.Length == 12 && now.Devices.Count(d => d.Address12 == chosen.Address12) == 1
                 ? now.Devices.Single(d => d.Address12 == chosen.Address12)
@@ -396,7 +425,7 @@ internal sealed class PairingSession
                 timeout.CancelAfter(_options.SettleWait);
             }
 
-            if (pump.IsCompleted || timeout.IsCancellationRequested)
+            if (pump.IsCompleted || timeout.IsCancellationRequested || Aborted(seen))
             {
                 // A Cancel in the window ends the scan as a cancel: no pick is shown and "nothing found" is not said.
                 ct.ThrowIfCancellationRequested();
@@ -413,6 +442,14 @@ internal sealed class PairingSession
             {
                 ct.ThrowIfCancellationRequested();
             }
+        }
+    }
+
+    private static bool Aborted(List<WatchEvent> seen)
+    {
+        lock (seen)
+        {
+            return seen.Exists(e => e.Kind == WatchEventKind.Aborted);
         }
     }
 
