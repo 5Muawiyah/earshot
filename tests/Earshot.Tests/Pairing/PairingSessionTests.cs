@@ -237,6 +237,8 @@ public sealed class PairingSessionTests
     [DataRow(PairReasons.OperationAlreadyInProgress)]
     [DataRow(PairReasons.RequiredHandlerNotRegistered)]
     [DataRow(PairReasons.RemoteDeviceHasAssociation)]
+    // "The device object indicated there was a hardware failure": worded as the device's own answer, as TooManyConnections is.
+    [DataRow(PairReasons.HardwareFailure)]
     public async Task AnUnreadNameWithAStatusThatSaysTheDeviceAnsweredIsNotUnreachable(int status)
     {
         using var rig = new FixRig();
@@ -255,7 +257,6 @@ public sealed class PairingSessionTests
 
     [TestMethod]
     [DataRow(PairReasons.NotPaired)]
-    [DataRow(PairReasons.HardwareFailure)]
     [DataRow(PairReasons.AuthenticationTimeout)]
     [DataRow(PairReasons.Failed)]
     public async Task AnUnreadNameWithAStatusThatSaysNoAnswerIsUnreachable(int status)

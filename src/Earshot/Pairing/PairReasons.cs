@@ -43,12 +43,14 @@ internal static class PairReasons
     // Done: now paired, or already paired.
     internal static bool IsSuccess(PairingCallResult result) => StatusOf(result) is Paired or AlreadyPaired;
 
-    // The failure statuses whose documented meaning does not say the device answered: not paired, a hardware failure, the
-    // authentication timing out, or a plain failure. On a device whose name could not be read, one of these is the one PC-side
-    // signal of the pairing debug run (see PairingSession). Every other failure status is the device's answer (it turned the
-    // connection down, was busy, failed the check, refused, or is set up with something else) or a step Windows itself
-    // refused, so it says nothing about this PC reaching it.
-    internal static bool SaysNoAnswer(PairingCallResult result) => StatusOf(result) is NotPaired or HardwareFailure or AuthenticationTimeout or Failed;
+    // The failure statuses whose documented meaning does not say the device answered: not paired, the authentication timing
+    // out, or a plain failure. On a device whose name could not be read, one of these is read as the PC not reaching it (see
+    // PairingSession). That set is Earshot's reading of the documented meanings, not an observation: the pairing debug run of
+    // 25 October saw a device with no name read and pairings that failed, and which status Windows returned was not recorded.
+    // Every other failure status is worded as the device's answer ("the device object indicated" a hardware failure or too
+    // many connections, turned the connection down, failed the check, refused, or is set up with something else) or a step
+    // Windows itself refused, so it says nothing about this PC reaching it.
+    internal static bool SaysNoAnswer(PairingCallResult result) => StatusOf(result) is NotPaired or AuthenticationTimeout or Failed;
 
     internal static string LineFor(PairingCallResult result)
     {

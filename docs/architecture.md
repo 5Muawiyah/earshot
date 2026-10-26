@@ -1404,7 +1404,9 @@ is not shown over it. The pin is matched by its container alone: the same
 AirPods paired again keep their address under a new container. Before it says
 a pair is gone or none is paired, the look reads the radio (one second): a PC
 whose Bluetooth is off, switched off, broken or missing gets the radio's line
-and button instead, and the pinned pair's readings are kept.
+and button instead, and the pinned pair's readings are kept. A radio that
+could not be read leaves the look saying nothing, as a failed paired-list read
+does.
 
 **The recovery marker.** Pairing makes the AirPods a Windows device at once,
 and the adoption comes after. A crash, a sign-out or a shutdown in between
@@ -1450,10 +1452,11 @@ Windows cannot make: it is Unknown, with its code in the history, not "no
 Bluetooth". Unreachable comes from a pairing, never from these reads: the
 headphones picked were found with no name read and the pairing then failed
 with a status whose meaning does not say the device answered (NotPaired,
-HardwareFailure, AuthenticationTimeout or Failed). Any other status, Earshot's
-own time limit or a code that is no status gets its own line. That is what a driver that cannot page devices looked
-like on 25 October, the one sitting the reading rests on (see
-[verification.md](verification.md)).
+AuthenticationTimeout or Failed). Any other status, Earshot's own time limit or
+a code that is no status gets its own line. That set is Earshot's reading of
+Microsoft's wording, not an observation: on 25 October a driver that could not
+page devices found devices with no name read and failed to pair them, and which
+status Windows returned was not recorded (see [verification.md](verification.md)).
 
 ### Record a Bluetooth trace
 

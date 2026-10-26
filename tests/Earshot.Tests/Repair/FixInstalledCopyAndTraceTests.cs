@@ -84,7 +84,7 @@ public sealed class FixInstalledCopyAndTraceTests
         FixRePairTests.ArrangeHappyPairing(rig);
         rig.Pairing.Events.RemoveAll(e => e.Device?.Id == FixRePairTests.NewId);
         rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice(FixRePairTests.NewId, "", FixRig.NewAirPodsAddress, IsAudioVideo: true, MinorClass: 6)));
-        rig.Pairing.PairResult = new PairingCallResult("HardwareFailure", PairReasons.HardwareFailure, false, null);
+        rig.Pairing.PairResult = new PairingCallResult("AuthenticationTimeout", PairReasons.AuthenticationTimeout, false, null);
     }
 
     [TestMethod]

@@ -254,7 +254,7 @@ public sealed class TraceTrayTests
         {
             using var rig = new FixRig();
             rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("no-name", "", FixRig.NewAirPodsAddress, true, 6, null)));
-            rig.Pairing.PairResult = new PairingCallResult("HardwareFailure", PairReasons.HardwareFailure, false, null);
+            rig.Pairing.PairResult = new PairingCallResult("AuthenticationTimeout", PairReasons.AuthenticationTimeout, false, null);
             rig.Prompter.SayOk();
             var recorder = new FakeTraceRecorder();
             var services = new PairAirPodsServices
@@ -379,7 +379,7 @@ public sealed class TraceTrayTests
         {
             using var rig = new FixRig();
             rig.Pairing.Events.Add(new WatchEvent(WatchEventKind.Added, new UnpairedDevice("no-name", "", FixRig.NewAirPodsAddress, true, 6, null)));
-            rig.Pairing.PairResult = new PairingCallResult("HardwareFailure", PairReasons.HardwareFailure, false, null);
+            rig.Pairing.PairResult = new PairingCallResult("AuthenticationTimeout", PairReasons.AuthenticationTimeout, false, null);
             rig.Prompter.SayOk();
             var recorder = new FakeTraceRecorder { NeedsSetUp = true };
             var services = new PairAirPodsServices
