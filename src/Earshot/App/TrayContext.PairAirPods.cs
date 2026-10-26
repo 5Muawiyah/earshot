@@ -204,9 +204,17 @@ internal sealed partial class TrayContext
     private async Task<bool> RecoverPairingAsync(PairAirPodsServices services, CardPlace place)
     {
         _log.Warn("Pair AirPods: an earlier pairing ended before its AirPods were adopted, so they may be paired, unpinned and unblocked.");
-        if (!await CheckPinnedPairAsync("pairing recovery", place) || _closing)
+        var cards = new PinLookCards();
+        bool showedNothing = await CheckPinnedPairAsync("pairing recovery", place, cards: cards);
+        if (_closing)
         {
             return true;
+        }
+
+        if (!showedNothing)
+        {
+            // A card Windows held back told nobody anything: the coordinator's own check still runs, and the marker stays.
+            return !cards.Held;
         }
 
         AirPodsDiscoveryResult found;

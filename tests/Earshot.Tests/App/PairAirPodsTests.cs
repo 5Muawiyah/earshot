@@ -1465,6 +1465,42 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // The same with the pinned pair removed in Windows: the recovery's look at the pinned pair shows its card, and Windows holds
+    // that back too, so it answered nothing and the coordinator's check still runs. Before, that look's card counted as seen.
+    [TestMethod]
+    public void AMarkerLeftAtStartWhoseStalePinCardIsHeldBackLetsTheCoordinatorsCheckRun()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            rig.Pairing.Paired.RemoveAll(p => p.Id == "paired-old");
+            foreach (string id in RecordedNodes.AirPodsTargets)
+            {
+                rig.Gate.Nodes[id].Present = false;
+            }
+
+            rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(FixRig.NewAirPodsNodes()));
+            rig.Pairing.Paired.Add(new PairedDevice("paired-new", "AirPods Pro", FixRig.NewAirPodsAddress, FixRig.NewAirPodsContainer));
+            var marker = new FakePairRecoveryMarker { Present = true };
+            PairAirPodsServices services = Services(rig, marker: marker);
+            var protection = new FakeProtectionCheck { Reading = new ProtectionReading(true, true, 1) };
+            using var tray = new TrayHarness(
+                snapshot: NoDevice(),
+                pairAirPods: services,
+                coordinatorServices: new CoordinatorServices { Protection = protection, TrayPairing = services.RunFlag },
+                arrange: h => h.Cards.HoldBackNearTray = true,
+                settings: s =>
+                {
+                    s.PinnedContainerId = RecordedNodes.AirPodsContainer;
+                    s.PinnedAddress = RecordedNodes.AirPodsAddress;
+                });
+            TrayHarness.PumpUntil(() => protection.Reads > 0, "The coordinator's check did not run after the held-back stale-pin card.");
+
+            Assert.IsTrue(tray.Cards.HeldBack.Any(c => c.Content.Status == PairAirPodsText.StaleChosen), string.Join(" | ", tray.Cards.HeldBack.Select(c => c.Content.Status)));
+            Assert.IsTrue(marker.Exists(), "Kept for the next start.");
+        });
+    }
+
     // A start-time recovery that throws showed nothing about the pairs, so the check for unprotected AirPods still runs. The throw
     // comes after an await, as a real paired-list read's does, so the coordinator has already found the flag up and left the
     // check to the look; before, the rethrow skipped the look's own call for it.
