@@ -364,6 +364,19 @@
       "secondHalfOnlyCriteriaIds": [
         "connects-restart"
       ]
+    },
+    {
+      "number": "24",
+      "script": "24-PairAirPods.ps1",
+      "testId": "24-pair-airpods",
+      "kind": "owner-present",
+      "halves": 1,
+      "name": "Pair AirPods",
+      "title": "Pair AirPods",
+      "proves": "Earshot says when Bluetooth is off, pairs your AirPods from its menu, sets itself up with one Windows permission box and connects them once.",
+      "settles": "Whether Pair AirPods pairs and adopts the AirPods from the tray, sets up with one prompt, shows no old reading and connects once, and whether the radio check reads a real radio turned off.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
     }
   ]
 }

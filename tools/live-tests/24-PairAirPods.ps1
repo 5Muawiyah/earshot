@@ -14,7 +14,7 @@
     criterion to those lines. One Connect and one Disconnect follow. The Bluetooth trace is optional.
 
     What it records but cannot prove from the log: whether the list showed your AirPods with a name, what
-    Earshot asked while pairing (nothing, a yes or no, or a number), whether Windows showed a box of
+    Earshot asked while pairing (a yes or no question, a number to check, or neither), whether Windows showed a box of
     its own, and the minor class the scan saw (Earshot does not log it, so it is only asked for).
     What stays unproved: the radio lines for a switch, a broken driver or no radio, the empty-name
     signal, undoing the pairing of a device that is not AirPods (no other headphones may be paired),
@@ -247,11 +247,11 @@ try
         {
             Add-Finding -Run $run -Name 'pairReached' -Value 'reached'
             Wait-Owner -Run $run -Text 'On your iPhone, open Settings, Bluetooth, and turn Bluetooth off. Then come back here.'
-            $model = Read-Answer -Run $run -Question 'Which AirPods do you have?' -Options @('airpods-pro-3-or-4', 'other')
-            Add-Finding -Run $run -Name 'airpodsModelChoice' -Value $model
+            $model = Read-Answer -Run $run -Question 'Are your AirPods AirPods Pro 3 or AirPods 4?' -Options @('yes', 'no')
+            Add-Finding -Run $run -Name 'airpodsPro3Or4' -Value $model
             $pairStart = (Get-Date).ToUniversalTime()
             Wait-Owner -Run $run -Text 'Right-click the Earshot icon and choose Pair AirPods. Earshot checks Bluetooth, then waits for you to press Look for AirPods. Do not press it yet. Come back here.'
-            if ($model -eq 'airpods-pro-3-or-4')
+            if ($model -eq 'yes')
             {
                 Wait-Owner -Run $run -Text 'Open the lid of the case, then double-tap the front of the case until the light flashes white. Then come back here.'
             }
@@ -270,14 +270,23 @@ try
                 -Detail $(if ($named -eq 'yes') { 'the list showed the AirPods with a name.' } else { 'the list showed the AirPods as "Headphones with no name"; that is the signal the empty-name rule watches for.' })
 
             Wait-Owner -Run $run -Text 'Choose your AirPods in the list and press Pair. If Earshot asks "Does your device show ...", answer it. Allow anything Windows asks. Then come back here when Earshot says Paired, or gives a reason.'
-            $asked = Read-Answer -Run $run -Question 'What did Earshot ask while pairing?' -Options @('nothing', 'yes-or-no', 'number')
+            $askedYesNo = Read-Answer -Run $run -Question 'Did Earshot ask you a yes or no question while pairing?' -Options @('yes', 'no')
+            $askedNumber = Read-Answer -Run $run -Question 'Did Earshot show a number to check while pairing?' -Options @('yes', 'no')
             $dialog = Read-Answer -Run $run -Question 'Did Windows show a pairing box of its own?' -Options @('yes', 'no')
-            Add-Finding -Run $run -Name 'pairingAsked' -Value $asked
+            Add-Finding -Run $run -Name 'pairingAskedYesNo' -Value $askedYesNo
+            Add-Finding -Run $run -Name 'pairingShowedNumber' -Value $askedNumber
             Add-Finding -Run $run -Name 'windowsShowedItsOwnBox' -Value $dialog
 
             # Set-up follows the pairing: one administrator prompt.
             Wait-Owner -Run $run -Text 'If Windows asks for permission for Earshot, allow it once. Wait until the Earshot card says it is using your AirPods, then come back here.'
-            $prompts = Read-Answer -Run $run -Question 'How many Windows permission prompts did Earshot raise?' -Options @('none', 'one', 'more')
+            $askedPermission = Read-Answer -Run $run -Question 'Did Windows ask for administrator permission while Earshot set itself up?' -Options @('yes', 'no')
+            $askedAgain = 'no'
+            if ($askedPermission -eq 'yes')
+            {
+                $askedAgain = Read-Answer -Run $run -Question 'Did Windows ask for it more than once?' -Options @('yes', 'no')
+            }
+
+            $prompts = $(if ($askedPermission -ne 'yes') { 'none' } elseif ($askedAgain -eq 'yes') { 'more' } else { 'one' })
             Add-Finding -Run $run -Name 'permissionPrompts' -Value $prompts
 
             # The log and the report are read before anything else is asked of Earshot.

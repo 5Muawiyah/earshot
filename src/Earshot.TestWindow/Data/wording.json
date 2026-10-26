@@ -113,6 +113,57 @@
         "Click Colours.",
         "Change \"Choose your mode\" between Light and Dark."
       ]
+    },
+    "turn-bluetooth-off-or-on-in-quick-settings": {
+      "picture": "quick-settings-bluetooth",
+      "steps": [
+        "Click the small icons next to the clock, at the bottom right of the screen.",
+        "Find the Bluetooth tile in the panel that opens.",
+        "Click the Bluetooth tile to turn Bluetooth off, or on again."
+      ]
+    },
+    "turn-bluetooth-off-on-your-iphone": {
+      "picture": "iphone-bluetooth-off",
+      "steps": [
+        "On your iPhone, open Settings.",
+        "Tap Bluetooth.",
+        "Slide the Bluetooth switch to off."
+      ]
+    },
+    "put-the-case-in-pairing-mode-by-tapping-the-front": {
+      "picture": "airpods-case-front-tap",
+      "steps": [
+        "Open the lid of the case.",
+        "Double-tap the front of the case.",
+        "Keep doing that until the light on the case flashes white."
+      ]
+    },
+    "put-the-case-in-pairing-mode-with-the-back-button": {
+      "picture": "airpods-case-back-button",
+      "steps": [
+        "Open the lid of the case.",
+        "Hold the small button on the back of the case.",
+        "Keep holding it until the light flashes white."
+      ]
+    },
+    "pair-airpods-in-earshot": {
+      "picture": "earshot-pair-window",
+      "steps": [
+        "Right-click the Earshot icon near the clock.",
+        "Click Pair AirPods.",
+        "Press Look for AirPods.",
+        "Choose your AirPods in the list, then press Pair."
+      ]
+    },
+    "remove-the-airpods-in-windows": {
+      "picture": null,
+      "steps": [
+        "Click Start.",
+        "Click Settings.",
+        "Click Bluetooth and devices.",
+        "Find your AirPods in the list.",
+        "Click the three dots next to them, then Remove device."
+      ]
     }
   },
   "entries": [
@@ -761,6 +812,55 @@
     { "test": "23", "kind": "check", "scriptText": "connects-wake", "plain": "After waking, all three connects should finish within 20 seconds." },
     { "test": "23", "kind": "check", "scriptText": "connects-restart", "plain": "After a restart, all three connects should finish within 20 seconds." },
     { "test": "23", "kind": "check", "scriptText": "restart-reached", "plain": "This computer should have been restarted for the last three connects." },
-    { "test": "23", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." }
+    { "test": "23", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." },
+
+    { "test": "24", "kind": "precondition", "scriptText": "Earshot 1.5.0 or later is installed, set up, and running in the tray.", "plain": "Earshot 1.5.0 or later is installed, set up, and its icon is showing near the clock." },
+    { "test": "24", "kind": "precondition", "scriptText": "Block at boot is on.", "plain": "Block at boot is on." },
+    { "test": "24", "kind": "precondition", "scriptText": "The AirPods are paired with this PC and with your iPhone, and your iPhone and the AirPods case are with you.", "plain": "The AirPods are paired with this computer and with your iPhone, and your iPhone and the AirPods case are with you." },
+    { "test": "24", "kind": "precondition", "scriptText": "No other Bluetooth headphones or speakers are paired with this PC.", "plain": "No other Bluetooth headphones or speakers are paired with this computer." },
+    { "test": "24", "kind": "action", "scriptText": "Turn Bluetooth off and on again in quick settings.", "plain": "Turn Bluetooth off and on again in quick settings.", "howTo": ["turn-bluetooth-off-or-on-in-quick-settings"] },
+    { "test": "24", "kind": "action", "scriptText": "Remove your AirPods in Windows Settings, then pair them again with Pair AirPods in Earshot, with the case in pairing mode and Bluetooth off on your iPhone.", "plain": "Remove your AirPods in Windows settings, then pair them again with Pair AirPods in Earshot, with the case ready and Bluetooth off on your iPhone.", "howTo": ["remove-the-airpods-in-windows", "pair-airpods-in-earshot"] },
+    { "test": "24", "kind": "action", "scriptText": "Allow Earshot when Windows asks, once, for set-up.", "plain": "Click Yes when Windows asks for permission, once.", "howTo": ["the-windows-permission-box"] },
+    { "test": "24", "kind": "action", "scriptText": "Open the case next to this PC, then connect once from the Earshot card.", "plain": "Open the case next to this computer, then connect once from the Earshot card.", "howTo": ["open-the-case-next-to-this-computer"] },
+    { "test": "24", "kind": "instruction", "scriptText": "Open quick settings and turn Bluetooth off. Then left-click the Earshot icon and choose Connect on the card; it will not connect, and that is expected. Read what the card says, then come back here.", "plain": "Turn Bluetooth off in quick settings, then click the Earshot icon and choose Connect. It will not connect, and that is fine. Read what the card says.", "howTo": ["turn-bluetooth-off-or-on-in-quick-settings", "find-and-left-click-the-earshot-icon"] },
+    { "test": "24", "kind": "question", "scriptText": "Did the Earshot card say \"Bluetooth is off.\"?", "plain": "Did the Earshot card say \"Bluetooth is off.\"?" },
+    { "test": "24", "kind": "instruction", "scriptText": "Turn Bluetooth back on in quick settings. Watch the Earshot card if it is still open. Wait until the line goes, or ten seconds, then come back here.", "plain": "Turn Bluetooth back on in quick settings. Watch the card until the line goes, or for ten seconds.", "howTo": ["turn-bluetooth-off-or-on-in-quick-settings"] },
+    { "test": "24", "kind": "question", "scriptText": "Did the \"Bluetooth is off.\" line go from the card once Bluetooth was on?", "plain": "Did the \"Bluetooth is off.\" line go from the card once Bluetooth was back on?" },
+    { "test": "24", "kind": "instruction", "scriptText": "Open Windows Settings, Bluetooth and devices, find your AirPods, open the three dots and choose Remove device. Then come back here.", "plain": "Remove your AirPods in Windows settings.", "howTo": ["remove-the-airpods-in-windows"] },
+    { "test": "24", "kind": "question", "scriptText": "Can you put the case into pairing mode now, with Bluetooth off on your iPhone?", "plain": "Can you put the case into pairing mode now, with Bluetooth off on your iPhone?", "howTo": ["turn-bluetooth-off-on-your-iphone"] },
+    { "test": "24", "kind": "instruction", "scriptText": "On your iPhone, open Settings, Bluetooth, and turn Bluetooth off. Then come back here.", "plain": "Turn Bluetooth off on your iPhone.", "howTo": ["turn-bluetooth-off-on-your-iphone"] },
+    { "test": "24", "kind": "question", "scriptText": "Are your AirPods AirPods Pro 3 or AirPods 4?", "plain": "Are your AirPods AirPods Pro 3 or AirPods 4?" },
+    { "test": "24", "kind": "instruction", "scriptText": "Right-click the Earshot icon and choose Pair AirPods. Earshot checks Bluetooth, then waits for you to press Look for AirPods. Do not press it yet. Come back here.", "plain": "Right-click the Earshot icon and choose Pair AirPods. Do not press anything else yet.", "howTo": ["pair-airpods-in-earshot"] },
+    { "test": "24", "kind": "instruction", "scriptText": "Open the lid of the case, then double-tap the front of the case until the light flashes white. Then come back here.", "plain": "Open the lid and double-tap the front of the case until the light flashes white.", "howTo": ["put-the-case-in-pairing-mode-by-tapping-the-front"] },
+    { "test": "24", "kind": "instruction", "scriptText": "Open the lid of the case, then hold the button on the back until the light flashes white. Then come back here.", "plain": "Open the lid and hold the button on the back until the light flashes white.", "howTo": ["put-the-case-in-pairing-mode-with-the-back-button"] },
+    { "test": "24", "kind": "instruction", "scriptText": "Press Look for AirPods in Earshot. When the list \"Choose your AirPods\" shows, look at it, and come back here without choosing yet.", "plain": "Press Look for AirPods. When the list shows, look at it, but do not choose yet.", "howTo": ["pair-airpods-in-earshot"] },
+    { "test": "24", "kind": "question", "scriptText": "Does the list show your AirPods with a name?", "plain": "Does the list show your AirPods with a name?", "howTo": ["pair-airpods-in-earshot"] },
+    { "test": "24", "kind": "note", "scriptText": "What else did the list show about your AirPods, if anything? Type it, or none.", "plain": "What else did the list show about your AirPods, if anything? Type it, or leave it blank." },
+    { "test": "24", "kind": "instruction", "scriptText": "Choose your AirPods in the list and press Pair. If Earshot asks \"Does your device show ...\", answer it. Allow anything Windows asks. Then come back here when Earshot says Paired, or gives a reason.", "plain": "Choose your AirPods and press Pair. Answer anything Earshot or Windows asks.", "howTo": ["pair-airpods-in-earshot"] },
+    { "test": "24", "kind": "question", "scriptText": "Did Earshot ask you a yes or no question while pairing?", "plain": "Did Earshot ask you a yes or no question while pairing?" },
+    { "test": "24", "kind": "question", "scriptText": "Did Earshot show a number to check while pairing?", "plain": "Did Earshot show a number to check while pairing?" },
+    { "test": "24", "kind": "question", "scriptText": "Did Windows show a pairing box of its own?", "plain": "Did Windows show a pairing box of its own?" },
+    { "test": "24", "kind": "instruction", "scriptText": "If Windows asks for permission for Earshot, allow it once. Wait until the Earshot card says it is using your AirPods, then come back here.", "plain": "If Windows asks for permission, click Yes once. Wait until Earshot says it is using your AirPods.", "howTo": ["the-windows-permission-box"] },
+    { "test": "24", "kind": "question", "scriptText": "Did Windows ask for administrator permission while Earshot set itself up?", "plain": "Did Windows ask for permission while Earshot set itself up?", "howTo": ["the-windows-permission-box"] },
+    { "test": "24", "kind": "question", "scriptText": "Did Windows ask for it more than once?", "plain": "Did Windows ask for it more than once?", "howTo": ["the-windows-permission-box"] },
+    { "test": "24", "kind": "question", "scriptText": "Before you open the case: does the Earshot gauge or card show a battery figure for the AirPods?", "plain": "Before you open the case: does the Earshot gauge or card show a battery figure for the AirPods?" },
+    { "test": "24", "kind": "instruction", "scriptText": "Put both AirPods in the case and close the lid. Wait ten seconds, then open the lid next to this PC and leave it open for half a minute. Then come back here.", "plain": "Close the case, wait ten seconds, then open it next to this computer and leave it open for half a minute.", "howTo": ["open-the-case-next-to-this-computer"] },
+    { "test": "24", "kind": "question", "scriptText": "Now the case is open: does a battery figure appear for the AirPods?", "plain": "Now the case is open: does a battery figure show for the AirPods?", "howTo": ["open-the-case-next-to-this-computer"] },
+    { "test": "24", "kind": "instruction", "scriptText": "Left-click the Earshot icon, then Connect on the card. Wait until the card says the AirPods are connected or gives a reason, then come back here.", "plain": "Click the Earshot icon, then Connect. Wait for the card.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "24", "kind": "instruction", "scriptText": "Disconnect the AirPods from this PC: left-click the Earshot icon and choose Disconnect. Then come back here.", "plain": "Disconnect the AirPods with Earshot.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "24", "kind": "question", "scriptText": "Do you want to try the Bluetooth trace now?", "plain": "Do you want to try recording a Bluetooth trace now?" },
+    { "test": "24", "kind": "instruction", "scriptText": "Open Earshot settings and choose Record a Bluetooth trace. Allow the Windows permission prompt once. Wait about ten seconds, then press Stop. Wait for the card to say where it saved the trace, then come back here.", "plain": "Open Earshot settings and choose Record a Bluetooth trace. Click Yes if Windows asks. Wait ten seconds, then press Stop and wait for the card.", "howTo": ["the-windows-permission-box"] },
+    { "test": "24", "kind": "check", "scriptText": "radio-off-seen", "plain": "With Bluetooth turned off, the card should say \"Bluetooth is off.\"" },
+    { "test": "24", "kind": "check", "scriptText": "radio-cleared", "plain": "With Bluetooth back on, that line should go." },
+    { "test": "24", "kind": "check", "scriptText": "listed-with-name", "plain": "The list should show your AirPods with a name." },
+    { "test": "24", "kind": "check", "scriptText": "pair-paired", "plain": "Pair AirPods should pair your AirPods from the Earshot menu." },
+    { "test": "24", "kind": "check", "scriptText": "pair-radio-checked", "plain": "Before looking for AirPods, Earshot should check that Bluetooth is on." },
+    { "test": "24", "kind": "check", "scriptText": "model-check", "plain": "Earshot should find that the new pair is AirPods." },
+    { "test": "24", "kind": "check", "scriptText": "pair-adopted", "plain": "Earshot should start using the new pair." },
+    { "test": "24", "kind": "check", "scriptText": "setup-one-prompt", "plain": "Earshot should set itself up with one Windows permission box." },
+    { "test": "24", "kind": "check", "scriptText": "no-old-reading", "plain": "No old battery figure should show after the new pair, and a new one should show once the case is open." },
+    { "test": "24", "kind": "check", "scriptText": "connect-after-pairing", "plain": "One Connect should finish within 20 seconds." },
+    { "test": "24", "kind": "check", "scriptText": "trace-saved", "plain": "The Bluetooth trace should record and be saved." },
+    { "test": "24", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." }
   ]
 }

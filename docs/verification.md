@@ -35,6 +35,7 @@ stays pending until a run on the device has written the evidence for it.
 | Hand back on sleep while connected (`tools\live-tests\18-HandBackOnSleep.ps1`) | Pending: no live run yet |
 | Hand back on Exit while connected (`tools\live-tests\20-HandBackOnExit.ps1`) | Pending: no live run yet |
 | Connect from every node state inside 20 seconds with one retry, a plain reason and the allow put back (`tools\live-tests\23-ConnectEveryState.ps1`, test 23) | Pending an owner run: the script is in place, with its self-test against fake inputs. Stand-in tests only |
+| Pair AirPods from the tray with the case in pairing mode, the "Bluetooth is off." line from a real radio turned off and on, adoption, set-up with one prompt, no old reading, one Connect (`tools\live-tests-PairAirPods.ps1`, test 24) | Pending an owner run: the script is in place, with its self-test against fake inputs. The scan's minor class, the pairing kind Windows asks for and whether Windows shows a box of its own are asked of the owner, not read from the log. The Switched off, Problem, No adapter and Unreachable lines, the empty-name signal and the undo of a pairing that is not AirPods stay unproved |
 | Fix connection, including removing the AirPods from Windows and pairing them again | Pending: unproved on real AirPods. Stand-in tests only |
 | Setup.exe on a real PC (SmartScreen, the administrator prompt, install, repair, uninstall) | Pending: no live run yet |
 | Settings > Apps > Installed apps: the entry, Uninstall and the Modify button | Pending: no live run yet |

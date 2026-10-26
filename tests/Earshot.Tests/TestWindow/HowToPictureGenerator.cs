@@ -29,6 +29,11 @@ internal static class HowToPictureGenerator
         ["airpods-case-open"] = AirPodsCaseOpen,
         ["permission-box"] = PermissionBox,
         ["task-manager-end-task"] = TaskManagerEndTask,
+        ["quick-settings-bluetooth"] = QuickSettingsBluetooth,
+        ["iphone-bluetooth-off"] = IPhoneBluetoothOff,
+        ["airpods-case-front-tap"] = AirPodsCaseFrontTap,
+        ["airpods-case-back-button"] = AirPodsCaseBackButton,
+        ["earshot-pair-window"] = EarshotPairWindow,
     };
 
     private static byte[] EarshotIconTaskbar()
@@ -271,6 +276,121 @@ internal static class HowToPictureGenerator
             y += 28;
         }
 
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] QuickSettingsBluetooth()
+    {
+        const int width = 360, height = 180;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 2);
+        using var font = new Font(FontFamily.GenericSansSerif, 12f);
+        using var ink = new SolidBrush(Ink);
+
+        // The quick settings panel above the taskbar: a row of tiles, the Bluetooth one ringed.
+        g.DrawRectangle(pen, new Rectangle(16, 12, width - 32, 120));
+        for (int i = 0; i < 3; i++)
+        {
+            var tile = new Rectangle(32 + i * 104, 28, 92, 60);
+            if (i == 1)
+            {
+                using var ringPen = new Pen(Highlight, 3);
+                g.DrawRectangle(ringPen, tile);
+                g.DrawString("Bluetooth", font, ink, tile, CentreFormat);
+            }
+            else
+            {
+                g.DrawRectangle(pen, tile);
+            }
+        }
+
+        g.DrawLine(pen, 32, 108, width - 32, 108);
+        g.DrawRectangle(pen, new Rectangle(0, height - 36, width, 36));
+        DrawClock(g, width - 28, height - 18, 9);
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] IPhoneBluetoothOff()
+    {
+        const int width = 240, height = 220;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 3);
+        using var font = new Font(FontFamily.GenericSansSerif, 12f);
+        using var ink = new SolidBrush(Ink);
+
+        // A phone with the Bluetooth row and its switch slid to the left, which is off.
+        var phone = new Rectangle(70, 12, 100, 196);
+        g.DrawRectangle(pen, phone);
+        g.DrawString("Bluetooth", font, ink, phone.Left + 8, phone.Top + 60);
+        var track = new Rectangle(phone.Left + 14, phone.Top + 100, 72, 30);
+        g.DrawRectangle(pen, track);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawEllipse(ringPen, track.Left + 3, track.Top + 3, 24, 24);
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] AirPodsCaseFrontTap()
+    {
+        const int width = 300, height = 200;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 3);
+
+        // The case seen from the front with its lid open, a light on the front and a fingertip tapping twice.
+        var body = new Rectangle(80, 100, 140, 70);
+        g.DrawRectangle(pen, body);
+        Point[] lid = [new(body.Left, body.Top), new(body.Left + 14, body.Top - 60), new(body.Right - 14, body.Top - 60), new(body.Right, body.Top)];
+        g.DrawPolygon(pen, lid);
+        g.DrawEllipse(pen, body.Left + body.Width / 2 - 5, body.Top + 12, 10, 10);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawEllipse(ringPen, body.Left + body.Width / 2 - 26, body.Top + 26, 52, 36);
+        g.DrawArc(ringPen, body.Right + 6, body.Top - 12, 36, 36, 200, 220);
+        g.DrawArc(ringPen, body.Right + 14, body.Top - 20, 52, 52, 200, 220);
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] AirPodsCaseBackButton()
+    {
+        const int width = 300, height = 200;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 3);
+
+        // The case seen from behind with its lid open, and the small round button on the back ringed.
+        var body = new Rectangle(80, 100, 140, 70);
+        g.DrawRectangle(pen, body);
+        Point[] lid = [new(body.Left, body.Top), new(body.Left + 14, body.Top - 60), new(body.Right - 14, body.Top - 60), new(body.Right, body.Top)];
+        g.DrawPolygon(pen, lid);
+        g.DrawEllipse(pen, body.Left + body.Width / 2 - 8, body.Top + 28, 16, 16);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawEllipse(ringPen, body.Left + body.Width / 2 - 24, body.Top + 12, 48, 48);
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] EarshotPairWindow()
+    {
+        const int width = 380, height = 200;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 2);
+        using var font = new Font(FontFamily.GenericSansSerif, 12f);
+        using var ink = new SolidBrush(Ink);
+
+        // Earshot's own window: its title, a list with one row chosen, and the Pair button ringed.
+        var window = new Rectangle(16, 12, width - 32, height - 24);
+        g.DrawRectangle(pen, window);
+        g.DrawString("Pair AirPods", font, ink, window.Left + 12, window.Top + 10);
+        g.DrawLine(pen, window.Left, window.Top + 40, window.Right, window.Top + 40);
+        g.DrawString("Choose your AirPods", font, ink, window.Left + 12, window.Top + 50);
+        var row = new Rectangle(window.Left + 12, window.Top + 80, window.Width - 24, 32);
+        using var rowPen = new Pen(Highlight, 2);
+        g.DrawRectangle(rowPen, row);
+        var button = new Rectangle(window.Right - 104, window.Bottom - 44, 88, 32);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawRectangle(ringPen, button);
+        g.DrawString("Pair", font, ink, button, CentreFormat);
         return ToPngBytes(bitmap);
     }
 
