@@ -39,6 +39,37 @@ public sealed class RadioCardTests
         tray.PumpUntilIdle();
     }
 
+    // A click made while the failed connect's radio is being read is a new connect, not the opposite of a switch that has
+    // already ended. Before, it was taken as a disconnect of the switch still "in flight", and the failure card never came.
+    [TestMethod]
+    public void AClickWhileTheFailureIsLookedAtConnectsAgainAndDoesNotDisconnect()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            var radio = new FakeRadioCheck(Pairing.PairingSessionTests.Radio(RadioCheckState.Ok)) { Wait = TimeSpan.FromSeconds(2) };
+            PairAirPodsServices services = Services(rig, RadioCheckState.Ok);
+            var slow = new PairAirPodsServices
+            {
+                Api = services.Api, Nodes = services.Nodes, Prompter = services.Prompter, UiFactory = services.UiFactory, Radio = radio,
+                Options = services.Options, LockName = services.LockName,
+            };
+            long now = 0;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), pairAirPods: slow, tickCount: () => now);
+            tray.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(
+                ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
+
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            TrayHarness.PumpUntil(() => radio.Checks == 1, "The radio was not read after the failed connect.");
+            now += 5000;
+            tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(2, tray.Connection.Calls.Count(c => c.Connect), string.Join(", ", tray.Connection.Calls));
+            Assert.IsFalse(tray.Connection.Calls.Any(c => !c.Connect), "The second click was taken as a disconnect.");
+        });
+    }
+
     [TestMethod]
     [DataRow((int)RadioCheckState.Off, "Bluetooth is off.")]
     [DataRow((int)RadioCheckState.SwitchedOff, "Bluetooth is turned off by a switch, the firmware or a policy on this PC.")]

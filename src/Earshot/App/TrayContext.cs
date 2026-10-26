@@ -361,6 +361,9 @@ internal sealed partial class TrayContext : ApplicationContext
     private CancellationTokenSource? _toggle;
     private bool _toggleInFlight;
 
+    // The switch in flight has its report: only the looks after a failure (the radio, the pinned pair) are left.
+    private bool _toggleReported;
+
     // The connect or disconnect in flight: which it is, when its click came, whether a newer click is waiting for
     // it to end, why it was cancelled, and a task that completes once it has ended, clean-up included.
     private bool _toggleConnect;
@@ -821,6 +824,18 @@ internal sealed partial class TrayContext : ApplicationContext
     // block, allow and protection order around it and shows its cards.
     private async Task ToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, bool? wanted = null)
     {
+        // The switch itself has ended and only the looks after its failure are left (the radio, the pinned pair): a new click is a
+        // new request, not the opposite of a switch in flight. Those looks are ended and the request runs as one of its own.
+        if (_toggleInFlight && _toggleReported && _toggleDone is { } ending)
+        {
+            _log.Info("Click: the looks after the failed " + (_toggleConnect ? "connect" : "disconnect") + " are ended for a new request.");
+            _toggleCancelReason = "a new click came while the failure was looked at";
+            _toggle?.Cancel();
+            await ending.Task;
+            await RunToggleAsync(place, clickedAt, connect: wanted, viaHotkey, trigger);
+            return;
+        }
+
         if (_toggleInFlight)
         {
             if (!SupersedesInFlightToggle(wanted, clickedAt))
@@ -993,6 +1008,7 @@ internal sealed partial class TrayContext : ApplicationContext
                 report.Steps);
             _log.Write(report.IsSuccess || cancelled ? LogLevel.Info : LogLevel.Warn, text);
             LogSwitch(_log, report);
+            _toggleReported = true;
             // A radio that is off, switched off, broken or absent is the whole story of a failed connect: its line and its button are
             // shown, and nothing that cannot help (Fix connection, Connect in Windows) is offered. Read once, only after a failure.
             RadioCheckResult? radio = wanted && !report.IsSuccess && !cancelled ? await ReadRadioAfterFailureAsync(cts.Token) : null;
@@ -1054,6 +1070,7 @@ internal sealed partial class TrayContext : ApplicationContext
         {
             _toggle = null;
             _toggleInFlight = false;
+            _toggleReported = false;
             _toggleDone = null;
             done.TrySetResult();
             UpdatePresentation(forceIcon: false);
