@@ -1274,8 +1274,9 @@ session. It takes no option that says yes.
    Such a run writes nothing under the person's profile: its log goes to the
    machine folder's log once it ends, it adds no connect history entry, and its
    marker (step 5) is in the machine folder, which the tray reads too.
-4. Second question, a separate dialog: remove the AirPods from Windows and pair
-   them again, by name. On OK, in the same session: unpair, scan, show the
+4. Second question, a separate window: remove the AirPods from Windows and pair
+   them again, by name, with the pairing-mode steps and a picture of each kind of
+   case, as in Pair AirPods' first question. On OK, in the same session: unpair, scan, show the
    instruction for putting the AirPods in pairing mode, pick, pair, check the new
    device with the identity rule, and adopt it through one gate run when Earshot
    is installed.
@@ -1367,7 +1368,8 @@ finish it. A radio that stops the pairing pairs nothing, so no marker is
 written. A marker an earlier run left is cleared only by the start-time look at
 what that run left, never by a later run, which writes it again after its own
 adoption. The model check takes only a device node that is present, not one a
-removed pairing left behind. While the run is under way the coordinator's
+removed pairing left behind. From the press of Look for AirPods (not while only
+that question is up) until the run ends, the coordinator's
 checks for AirPods Earshot does not protect, its automatic blocks, and the
 tray's own stale-pin check (also when a pairing starts while it reads) wait for
 it, and a Fix pressed then says a pairing is running. When the run ends, the
@@ -1384,7 +1386,11 @@ One run at a time with a Fix connection, through a named mutex
 (`FixRunLock`, `Global\Earshot.Fix.Run`) held by a thread of its own, so the
 tray can let it go from any thread. A pinned pair that Windows no longer holds
 (`StalePin`) is said at start and when a device appears, and the device picker
-or Pair AirPods is offered; nothing is adopted by itself.
+or Pair AirPods is offered; nothing is adopted by itself. Either card stays up
+until it is used. The paired list is given 5 seconds (a waiting budget), after
+which the look says nothing and logs ERROR_TIMEOUT. At start, a card from this
+look answers for the pairs, so the coordinator's card about unprotected AirPods
+is not shown over it.
 
 **The recovery marker.** Pairing makes the AirPods a Windows device at once,
 and the adoption comes after. A crash, a sign-out or a shutdown in between

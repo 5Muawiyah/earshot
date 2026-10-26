@@ -60,7 +60,7 @@ try
     Test-One 'log-line-after-nul-run: the new line behind a NUL run is kept' (@(@($lines) -match 'second time after the run').Count -eq 1) 'the line stamped 24 October behind the run was dropped'
     foreach ($line in @($lines))
     {
-        Test-One 'log-line-after-nul-run: no NUL is returned' ($line.IndexOf($nul) -lt 0) 'a returned line still starts with NUL bytes'
+        Test-One 'log-line-after-nul-run: no NUL is returned' ($line.IndexOf([char]0) -lt 0) 'a returned line still starts with NUL bytes'
         Test-One 'log-line-after-nul-run: a returned line starts with its stamp' ($line -match '^\d{4}-\d{2}-\d{2}T') ('a returned line does not start with a stamp: ' + $line.Substring(0, [Math]::Min(30, $line.Length)))
     }
 
