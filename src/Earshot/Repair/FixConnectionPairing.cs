@@ -176,7 +176,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
 
             steps.Add(StepOutcomes.FromHResult("pair-list", 0, devices.Count.ToString(CultureInfo.InvariantCulture) + " paired device(s)."));
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // The raw HRESULT and the type are kept; the message can carry a device path and is not.
             steps.Add(StepOutcomes.FromHResult("pair-list", ex.HResult, ex.GetType().Name));
@@ -223,7 +223,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
             DeviceUnpairingResultStatus status = result.Status;
             return new PairingCallResult(status.ToString(), (int)status, status is DeviceUnpairingResultStatus.Unpaired or DeviceUnpairingResultStatus.AlreadyUnpaired, null);
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new PairingCallResult(ex.GetType().Name, ex.HResult, false, "HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture), Threw: true);
         }
@@ -284,7 +284,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
                 custom.PairingRequested -= OnRequested;
             }
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new PairingCallResult(ex.GetType().Name, ex.HResult, false, "HRESULT 0x" + ex.HResult.ToString("X8", CultureInfo.InvariantCulture), Threw: true);
         }
@@ -307,7 +307,7 @@ internal sealed partial class WinRtPairingApi : IPairingApi
             };
             failure.Record(await AnswerRequestAsync(kind, args.Pin, prompt, args.Accept).ConfigureAwait(false));
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // GetDeferral, PairingKind or Pin.
             failure.Record(ex);

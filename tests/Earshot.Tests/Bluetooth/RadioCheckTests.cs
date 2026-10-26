@@ -68,7 +68,7 @@ public sealed class RadioCheckTests
         RadioCheckResult r = await Check(Adapter(RadioStateValues.Disabled), Node()).CheckAsync(CancellationToken.None);
 
         Assert.AreEqual(RadioCheckState.SwitchedOff, r.State);
-        Assert.AreEqual("Bluetooth is turned off by a switch on this PC or by its firmware.", r.Line);
+        Assert.AreEqual("Bluetooth is turned off by a switch, the firmware or a policy on this PC.", r.Line);
         Assert.AreEqual(RadioAction.BluetoothSettings, r.Action);
         Assert.AreEqual(3, r.HistoryCode);
     }
@@ -186,7 +186,7 @@ public sealed class RadioCheckTests
         RadioCheckResult r = await check.CheckAsync(CancellationToken.None);
 
         Assert.AreEqual(RadioCheckState.Unknown, r.State);
-        Assert.IsTrue(r.ReadCodes.Any(s => s.Step == "radio-read" && s.Code == 1460 && !s.Ok), string.Join("; ", r.ReadCodes.Select(s => s.Step + " " + s.Code)));
+        Assert.IsTrue(r.ReadCodes.Any(s => s.Step == "radio-read" && s.Code == 1460 && !s.Ok && s.CodeName == "earshot-timeout"), string.Join("; ", r.ReadCodes.Select(s => s.Step + " " + s.Code)));
         Assert.AreEqual("earshot-timeout", r.ToStep().CodeName, "The history names Earshot's own time limit as such, not as a Windows timeout.");
         Assert.IsLessThan(2000, r.ElapsedMs);
         Assert.IsTrue(seen.IsCancellationRequested, "The abandoned read is told to stop.");
@@ -243,6 +243,20 @@ public sealed class RadioCheckTests
 
         Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("after the time limit", StringComparison.Ordinal) && e.Message.Contains("bluetooth-radio", StringComparison.Ordinal)),
             string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
+    // A read that throws what its own catches did not take ends Unknown with the code. Before, it was thrown to the card's caller
+    // after a failed connect, and the radio's line was lost.
+    [TestMethod]
+    public async Task AReadThatThrowsIsUnknownWithItsCode()
+    {
+        var api = new FakeRadioApi(_ => Task.FromException<AdapterReading>(new UnauthorizedAccessException("denied")));
+        var check = new RadioCheck(api, new FakeNodes(Node()));
+
+        RadioCheckResult r = await check.CheckAsync(CancellationToken.None);
+
+        Assert.AreEqual(RadioCheckState.Unknown, r.State);
+        Assert.IsTrue(r.ReadCodes.Any(s => s.Step == "radio-read" && s.Code == new UnauthorizedAccessException().HResult && !s.Ok));
     }
 
     [TestMethod]

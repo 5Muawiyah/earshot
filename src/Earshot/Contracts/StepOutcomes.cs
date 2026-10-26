@@ -23,6 +23,13 @@ public static class StepOutcomes
     public static StepOutcome NotAttempted(string step, string detail) =>
         new(step, Ok: false, NativeCodes.NotAttempted, NativeCodes.Name(NativeCodes.NotAttempted), detail);
 
+    // A wait that ran past one of Earshot's own time limits. The code is ERROR_TIMEOUT's number, the name says it is Earshot's,
+    // so neither a log nor the history takes it for a timeout Windows returned.
+    public const string EarshotTimeoutName = "earshot-timeout";
+
+    public static StepOutcome EarshotTimeout(string step, string detail) =>
+        new(step, Ok: false, 1460, EarshotTimeoutName, detail);
+
     // A step this build cannot perform and that made no native call.
     public static StepOutcome NotAvailable(string step, string detail) =>
         new(step, Ok: false, NativeCodes.NotAvailable, NativeCodes.Name(NativeCodes.NotAvailable), detail);

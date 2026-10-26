@@ -266,7 +266,7 @@ internal sealed class PairingSession
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
                     // Earshot's own time limit, so the pair is one that could not be looked at.
-                    now = new PairedListResult([], [StepOutcomes.FromWin32("pair-list", 1460, "The paired list did not answer within " + _options.PairedListWait.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms.", ok: false)]);
+                    now = new PairedListResult([], [StepOutcomes.EarshotTimeout("pair-list", "The paired list did not answer within " + _options.PairedListWait.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms.")]);
                     _log.Warn("pair: the paired list did not answer in time after the pairing, so the new pair could not be looked at.");
                 }
             }
@@ -376,7 +376,7 @@ internal sealed class PairingSession
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _log.Warn("pair: the pairing was cancelled after " + _options.PairTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + " s (ERROR_TIMEOUT).");
+            _log.Warn("pair: the pairing was cancelled after " + _options.PairTimeout.TotalSeconds.ToString("0", CultureInfo.InvariantCulture) + " s (Earshot's own time limit, cancelled-timeout).");
             return new PairingCallResult(CancelledTimeout, ErrorTimeout, false, null);
         }
     }

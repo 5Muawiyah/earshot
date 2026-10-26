@@ -39,7 +39,7 @@ public sealed class StalePinTests
         StalePinResult result = await StalePin.ReadAsync(rig.Pairing, rig.Nodes, RecordedNodes.AirPodsContainer, RecordedNodes.AirPodsAddress, CancellationToken.None, TimeSpan.FromMilliseconds(100));
 
         Assert.AreEqual(StalePinState.Unknown, result.State);
-        Assert.IsTrue(result.Steps.Any(s => s.Code == 1460 && !s.Ok), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code)));
+        Assert.IsTrue(result.Steps.Any(s => s.Code == 1460 && !s.Ok && s.CodeName == "earshot-timeout"), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code + " " + s.CodeName)));
         Assert.IsLessThan(5000L, watch.ElapsedMilliseconds);
     }
 

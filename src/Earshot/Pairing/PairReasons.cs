@@ -71,7 +71,7 @@ internal static class PairReasons
             AuthenticationTimeout => "Pairing took too long and stopped.",
             AuthenticationNotAllowed or ProtectionLevelCouldNotBeMet or InvalidCeremonyData or RequiredHandlerNotRegistered =>
                 "Windows couldn't complete the pairing (code " + number + ").",
-            AuthenticationFailure => "Pairing failed when this PC and the device checked each other.",
+            AuthenticationFailure => "Pairing failed because the authentication was turned down.",
             NoSupportedProfiles => "Windows found nothing it can use on this device.",
             AccessDenied => "Windows didn't allow Earshot to pair.",
             PairingCanceled or RejectedByHandler => "Pairing was cancelled.",

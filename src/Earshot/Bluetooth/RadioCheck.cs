@@ -105,17 +105,17 @@ internal sealed record RadioCheckResult(
     };
 
     // A read that ran past this build's own budget is named as Earshot's, so the history does not take it for a Windows timeout.
-    public StepOutcome ToStep() => new("radio-check", State == RadioCheckState.Ok, HistoryCode, TimedOut ? EarshotTimeout : State.ToString(), null);
+    public StepOutcome ToStep() => new("radio-check", State == RadioCheckState.Ok, HistoryCode, TimedOut ? StepOutcomes.EarshotTimeoutName : State.ToString(), null);
 
-    internal const string EarshotTimeout = "earshot-timeout";
-
-    private bool TimedOut => State == RadioCheckState.Unknown && ReadCodes.Any(s => s.Step == "radio-read" && s.Code == 1460);
+    private bool TimedOut => State == RadioCheckState.Unknown && ReadCodes.Any(s => s.Step == "radio-read" && s.CodeName == StepOutcomes.EarshotTimeoutName);
 }
 
 internal static class RadioLines
 {
     public const string Off = "Bluetooth is off.";
-    public const string SwitchedOff = "Bluetooth is turned off by a switch on this PC or by its firmware.";
+    // RadioState.Disabled: off by the firmware or a hardware switch, and Microsoft's remarks add system policy; it cannot be
+    // changed from a program. https://learn.microsoft.com/en-us/uwp/api/windows.devices.radios.radiostate
+    public const string SwitchedOff = "Bluetooth is turned off by a switch, the firmware or a policy on this PC.";
     public const string NoAdapter = "Windows finds no Bluetooth on this PC.";
     public const string NoClassic = "Bluetooth on this PC can't do Classic Bluetooth, which AirPods need for sound.";
     public const string Unreachable = "This PC found the headphones but couldn't reach them.";
@@ -209,12 +209,22 @@ internal sealed class RadioCheck : IRadioCheck
             // The WinRT read is abandoned, not waited for: the card must not hang behind it. What it ends with is logged.
             await cts.CancelAsync().ConfigureAwait(false);
             _ = read.ContinueWith(LogLate, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
-            var late = new[] { StepOutcomes.FromWin32("radio-read", 1460, "The radio did not answer within " + _budget.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms.", ok: false) };
-            _log?.Warn("radio check: the read did not finish in time (ERROR_TIMEOUT).");
+            var late = new[] { StepOutcomes.EarshotTimeout("radio-read", "The radio did not answer within " + _budget.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms.") };
+            _log?.Warn("radio check: the read did not finish within Earshot's " + _budget.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms (" + StepOutcomes.EarshotTimeoutName + ").");
             return Result(RadioCheckState.Unknown, null, null, late, watch);
         }
 
-        AdapterReading adapter = await read.ConfigureAwait(false);
+        AdapterReading adapter;
+        try
+        {
+            adapter = await read.ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A read that threw something its own catches did not take (E_ACCESSDENIED, say): Unknown, with its code, rather than
+            // an exception that would lose the card after a failed connect.
+            return Result(RadioCheckState.Unknown, null, null, [StepOutcomes.FromHResult("radio-read", ex.HResult, ex.GetType().Name, ok: false)], watch);
+        }
         var codes = adapter.Steps.ToList();
         if (!adapter.Answered)
         {
@@ -306,7 +316,7 @@ internal sealed class WinRtRadioApi : IRadioApi
         {
             adapter = await BluetoothAdapter.GetDefaultAsync().AsTask(ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             steps.Add(StepOutcomes.FromHResult("bluetooth-adapter", ex.HResult, ex.GetType().Name, ok: false));
             return new AdapterReading(false, false, null, null, steps, Answered: false);
@@ -325,7 +335,7 @@ internal sealed class WinRtRadioApi : IRadioApi
             classic = adapter.IsClassicSupported;
             steps.Add(StepOutcomes.FromHResult("bluetooth-classic", 0, classic ? "supported" : "not supported", ok: classic));
         }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             steps.Add(StepOutcomes.FromHResult("bluetooth-classic", ex.HResult, ex.GetType().Name, ok: false));
         }
@@ -344,7 +354,7 @@ internal sealed class WinRtRadioApi : IRadioApi
                 steps.Add(StepOutcomes.FromHResult("bluetooth-radio", 0, radio.State.ToString()));
             }
         }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             steps.Add(StepOutcomes.FromHResult("bluetooth-radio", ex.HResult, ex.GetType().Name, ok: false));
         }
@@ -356,7 +366,7 @@ internal sealed class WinRtRadioApi : IRadioApi
             instanceId = info.Properties.TryGetValue(InstanceIdProperty, out object? value) ? value as string : null;
             steps.Add(StepOutcomes.FromHResult("bluetooth-instance-id", 0, instanceId is null ? "no instance id" : "read", ok: instanceId is not null));
         }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or ArgumentException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             steps.Add(StepOutcomes.FromHResult("bluetooth-instance-id", ex.HResult, ex.GetType().Name, ok: false));
         }

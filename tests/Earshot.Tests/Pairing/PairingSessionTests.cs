@@ -199,7 +199,7 @@ public sealed class PairingSessionTests
 
         Assert.AreEqual(PairOutcome.Failed, result.Outcome);
         Assert.AreEqual(PairFailureReason.PairFailed, result.Reason);
-        Assert.AreEqual("Pairing failed when this PC and the device checked each other.", result.CardLine);
+        Assert.AreEqual("Pairing failed because the authentication was turned down.", result.CardLine);
         Assert.IsFalse(result.Unreachable, "A named device that fails to pair says nothing about the PC.");
         Assert.AreEqual(FailureClass.Unknown.ToString(), result.ToHistoryEntry(DateTimeOffset.UnixEpoch).FailureClass);
     }
@@ -304,7 +304,7 @@ public sealed class PairingSessionTests
         PairingSessionResult result = await RunAsync(rig);
 
         Assert.AreEqual(PairOutcome.Unverified, result.Outcome);
-        Assert.IsTrue(result.Steps.Any(s => s.Step == "pair-list" && s.Code == 1460), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code)));
+        Assert.IsTrue(result.Steps.Any(s => s.Step == "pair-list" && s.Code == 1460 && s.CodeName == "earshot-timeout"), string.Join(", ", result.Steps.Select(s => s.Step + " " + s.Code)));
         Assert.IsLessThan(10_000L, watch.ElapsedMilliseconds);
     }
 

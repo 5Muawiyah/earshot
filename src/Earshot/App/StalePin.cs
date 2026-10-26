@@ -64,7 +64,7 @@ internal static class StalePin
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                steps.Add(StepOutcomes.FromWin32(PairListStep, 1460, "The paired list did not answer within " + (budget ?? DefaultBudget).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms.", ok: false));
+                steps.Add(StepOutcomes.EarshotTimeout(PairListStep, "The paired list did not answer within " + (budget ?? DefaultBudget).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms."));
                 return new StalePinResult(StalePinState.Unknown, [], steps);
             }
         }
