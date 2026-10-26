@@ -873,6 +873,48 @@ public sealed class TrayContextTests
         });
     }
 
+    // Exit chosen while set-up runs waits for it, and set-up that ends then still points Open on startup at the installed copy.
+    // Before, the closing tray skipped it, and the Run value kept starting this copy until the next sign-in's repair.
+    [TestMethod]
+    public void SetUpThatEndsWhileEarshotClosesStillPointsOpenOnStartupAtTheInstalledCopy()
+    {
+        StaThread.Run(() =>
+        {
+            const string Installed = @"C:\Program Files\Earshot Installed\Earshot.exe";
+            bool installed = false;
+            TrayHarness? running = null;
+            using var tray = new TrayHarness(
+                arrange: t =>
+                {
+                    t.Block.Status = Block(BlockState.NotSetUp);
+                    t.Block.OnRunSetup = async _ =>
+                    {
+                        running!.Ui.Post(_ => running.ClickMenu(MenuModel.Exit), null);
+                        await Task.Delay(300, CancellationToken.None);
+                        installed = true;
+                        return ControllerResult.Ok("Done");
+                    };
+                },
+                installedExePath: Installed,
+                fileExists: path => installed && path == Installed);
+            running = tray;
+            bool timedOut = false;
+            using var giveUp = new System.Windows.Forms.Timer { Interval = 20000 };
+            giveUp.Tick += (_, _) =>
+            {
+                timedOut = true;
+                Application.ExitThread();
+            };
+            giveUp.Start();
+
+            tray.Ui.Post(_ => tray.ClickMenu(MenuModel.SetUpEarshot), null);
+            Application.Run(tray.Context);
+
+            Assert.IsFalse(timedOut, "Exit did not finish.");
+            Assert.AreEqual(StartupRegistration.CommandFor(Installed), tray.Startup.Run[StartupRegistration.ValueName]);
+        });
+    }
+
     [TestMethod]
     public void AtStartTheRunValueIsPointedAtAnInstalledCopy()
     {

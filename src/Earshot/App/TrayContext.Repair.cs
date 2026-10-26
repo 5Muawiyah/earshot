@@ -136,7 +136,8 @@ internal sealed partial class TrayContext
         DateTimeOffset started = _time.GetUtcNow();
         ControllerResult? result = await WithElevatedProgramAsync(() => RunOperationAsync(
             "repair", ct => _coordinator.RunAsync("repair", token => _registry.Block.RunRepairAsync(verb, token), ct), place, alwaysShowCard: true));
-        if (result is { IsSuccess: true } && !_closing)
+        // Also while Earshot closes, as after set-up.
+        if (result is { IsSuccess: true })
         {
             PointStartupAtInstalledCopy();
         }

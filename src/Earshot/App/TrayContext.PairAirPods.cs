@@ -581,8 +581,10 @@ internal sealed partial class TrayContext
                 UpdatePresentation(forceIcon: false);
                 var setupWatch = System.Diagnostics.Stopwatch.StartNew();
                 ControllerResult? setUpResult = await RunSetupClaimedAsync(place);
-                BootBlockStatus? after = await ReadBlockStatusQuietlyAsync();
-                bool done = after is not null && !TrayStatus.NeedsSetUp(after);
+                // Exit chosen during set-up waited for it, and the status is not read while Earshot closes: set-up's own result
+                // then says how it ended.
+                BootBlockStatus? after = _closing ? null : await ReadBlockStatusQuietlyAsync();
+                bool done = after is not null ? !TrayStatus.NeedsSetUp(after) : _closing && setUpResult is { IsSuccess: true };
 
                 // A set-up that did not take carries the code of its first failing step (a declined prompt is ERROR_CANCELLED).
                 StepOutcome? failing = done ? null : setUpResult?.Steps.FirstOrDefault(s => !s.Ok);

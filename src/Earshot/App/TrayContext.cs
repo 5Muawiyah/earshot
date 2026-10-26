@@ -2155,7 +2155,10 @@ internal sealed partial class TrayContext : ApplicationContext
     {
         ControllerResult? result = await WithElevatedProgramAsync(
             () => RunOperationAsync("setup", ct => _coordinator.RunAsync("setup", _registry.Block.RunSetupAsync, ct), place));
-        if (result is { IsSuccess: true } && !_closing)
+
+        // Also while Earshot closes: Exit waits for set-up, and a Run value left on this copy would start it until the next
+        // sign-in's repair.
+        if (result is { IsSuccess: true })
         {
             PointStartupAtInstalledCopy();
         }

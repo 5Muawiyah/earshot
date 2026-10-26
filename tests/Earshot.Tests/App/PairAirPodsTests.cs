@@ -384,6 +384,58 @@ public sealed class PairAirPodsTests
         });
     }
 
+    // Exit chosen during the set-up a pairing handed over to: set-up still ends and is waited for, and the history says how it
+    // ended from its own result, since the block status is not read while Earshot closes. Before, the unread status was
+    // recorded as a set-up not attempted.
+    [TestMethod]
+    public void ASetUpThatEndsWhileEarshotClosesIsRecordedFromItsOwnResult()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            ArrangePairs(rig);
+            rig.Prompter.SayOk();
+            rig.Prompter.SayOk();
+            using var folder = new TempFolder();
+            var history = new ConnectHistory(folder.File("history.json"), TimeProvider.System, new CapturingLog());
+            TrayHarness? running = null;
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected), time: TimeProvider.System, pairAirPods: Services(rig),
+                coordinatorServices: new CoordinatorServices { History = history },
+                arrange: h =>
+                {
+                    h.Block.Status = Block(BlockState.NotSetUp);
+                    h.Block.OnRunSetup = async _ =>
+                    {
+                        running!.Ui.Post(_ => running.ClickMenu(MenuModel.Exit), null);
+                        await Task.Delay(300, CancellationToken.None);
+                        return ControllerResult.Ok("Done");
+                    };
+                });
+            running = tray;
+            bool timedOut = false;
+            using var giveUp = new System.Windows.Forms.Timer { Interval = 20000 };
+            giveUp.Tick += (_, _) =>
+            {
+                timedOut = true;
+                Application.ExitThread();
+            };
+            giveUp.Start();
+
+            tray.Ui.Post(_ =>
+            {
+                tray.Context.Menu.Refresh();
+                tray.Context.Menu.Items.OfType<ToolStripMenuItem>().Single(i => i.Text == MenuModel.PairAirPods).PerformClick();
+            }, null);
+            Application.Run(tray.Context);
+
+            Assert.IsFalse(timedOut, "Exit did not finish.");
+            HistoryStep setup = history.Read().Single().Steps.Single(s => s.Name == "setup");
+            Assert.AreEqual(0, setup.Code, setup.CodeName);
+            Assert.AreEqual("S_OK", setup.CodeName);
+        });
+    }
+
     [TestMethod]
     public void SetUpAfterAPairingTakesTheRunWithNoGapInBetween()
     {
