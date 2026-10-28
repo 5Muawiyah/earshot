@@ -251,4 +251,28 @@ public sealed class FixOfferTests
         Assert.IsFalse(launcher.IsRunning);
         Assert.AreEqual(0, launcher.LastExitCode);
     }
+
+    // The code read when a run ends is that run's own. Before, a new run kept the previous run's code until its own was read,
+    // so a run whose code could not be read was taken for the one before it (an earlier AlreadyRunning skipped the recheck).
+    [TestMethod]
+    public void ANewRunDoesNotKeepThePreviousRunsExitCode()
+    {
+        string where = Path.Combine(Environment.SystemDirectory, "where.exe");
+        string ping = Path.Combine(Environment.SystemDirectory, "ping.exe");
+        string next = where;
+        using var ended = new AutoResetEvent(false);
+        var log = new CapturingLog();
+        var launcher = new OwnProgramFixLauncher(() => ended.Set(), () => next, ["-n", "3", "127.0.0.1"]);
+
+        Assert.IsTrue(launcher.Start(log));
+        Assert.IsTrue(ended.WaitOne(TimeSpan.FromSeconds(30)), "The first run did not end.");
+        Assert.IsNotNull(launcher.LastExitCode, "where.exe refuses -n and ends with a code.");
+
+        next = ping;
+        Assert.IsTrue(launcher.Start(log));
+        Assert.IsTrue(launcher.IsRunning);
+        Assert.IsNull(launcher.LastExitCode, "While the second run is open, no code is its own yet.");
+        Assert.IsTrue(ended.WaitOne(TimeSpan.FromSeconds(30)), "The second run did not end.");
+        Assert.AreEqual(0, launcher.LastExitCode);
+    }
 }

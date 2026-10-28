@@ -107,7 +107,8 @@ internal sealed class OwnProgramFixLauncher(Action? ended = null, Func<string?>?
         }
     }
 
-    // The exit code of the last run that ended, for tests; null before any has.
+    // The exit code of the last run that ended; null before any has, while a run is open, and when the code of the run that
+    // ended could not be read. Program.Tray reads it when a run ends, so it is never an earlier run's.
     internal int? LastExitCode
     {
         get
@@ -149,6 +150,7 @@ internal sealed class OwnProgramFixLauncher(Action? ended = null, Func<string?>?
             lock (_gate)
             {
                 _running.Add(process);
+                _lastExitCode = int.MinValue;
             }
 
             if (!process.Start())
@@ -185,6 +187,10 @@ internal sealed class OwnProgramFixLauncher(Action? ended = null, Func<string?>?
         catch (InvalidOperationException ex)
         {
             log.Warn("Fix connection: the exit code of the run that ended could not be read (" + ex.GetType().Name + ").");
+            lock (_gate)
+            {
+                _lastExitCode = int.MinValue;
+            }
         }
 
         Forget(process);
