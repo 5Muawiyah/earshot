@@ -1517,9 +1517,11 @@ session, since the trace is made readable for that process's user. Then it:
    sign-out may end the helper too before it can cancel; the recording session
    can outlive it, and the next start then says a trace may still be running. A start that timed
    out is cancelled too. The helper's marker for this is one per Windows
-   session and records when the PC last started; the tray uses it only when the
-   trace folder passes its check and the PC has not restarted since, because a
-   restart ends every recording.
+   session and records when the PC last started; the tray reads every session's
+   (a sign-in after a sign-out is usually a new session), only when the trace
+   folder passes its check and the PC has not restarted since, because a restart
+   ends every recording. Another session's marker whose helper this account
+   cannot query says nothing, since that person may be recording now.
 5. Gives the tray's user read on the trace and the result, waits for the tray
    to copy the trace to `%LOCALAPPDATA%\Earshot\traces` (not Documents, which
    OneDrive's PC folder backup can upload; the copy is made under a temporary
@@ -1541,8 +1543,9 @@ another account has not yet been run. Its read and delete failures go to the mac
 log. Like install and fix-apply, the helper refuses to run when its environment
 (the user's, since it is raised from the user's session) sets a variable that
 makes the runtime load other code, use another runtime or write a file where it
-says. The refusal stops Earshot's own work; code the runtime loaded before
-Earshot's first line ran has already run, which is why the person is told. A trace changes no device, service or pairing, and nothing in the trace
+says. The refusal stops Earshot's own work, not code the runtime loaded before
+Earshot's first line ran; the reason goes to the machine log, and the tray's
+card gives the helper's exit code. A trace changes no device, service or pairing, and nothing in the trace
 code touches the network.
 
 ### Send to

@@ -69,8 +69,8 @@ internal sealed class Paths
 
     public string InstalledExe => Path.Combine(InstallFolder, "Earshot.exe");
 
-    // Where Record a Bluetooth trace leaves the person's copy of a trace: %LOCALAPPDATA%\Earshot\traces. Local, so no folder
-    // backup uploads it (Documents can be uploaded), and per user.
+    // Where Record a Bluetooth trace leaves the person's copy of a trace: %LOCALAPPDATA%\Earshot\traces. Local, so not in
+    // Documents or another folder OneDrive's PC folder backup covers, and per user.
     public string UserTraceFolder => Path.Combine(LocalFolder, "traces");
 
     // The widget's folder, %LOCALAPPDATA%\Earshot\widget, or under EARSHOT_DATA_ROOT when redirected. What an older

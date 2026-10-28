@@ -603,7 +603,8 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         IEnumerable<string> paths;
         try
         {
-            paths = Directory.EnumerateFiles(_traceFolder, TraceHelper.MarkerPattern).Take(MaxMarkers).ToList();
+            // The newest first, so markers left by earlier starts of the PC cannot crowd out the one that matters.
+            paths = Directory.EnumerateFiles(_traceFolder, TraceHelper.MarkerPattern).OrderByDescending(File.GetLastWriteTimeUtc).Take(MaxMarkers).ToList();
         }
         catch (DirectoryNotFoundException)
         {

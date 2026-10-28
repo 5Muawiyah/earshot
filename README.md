@@ -136,7 +136,7 @@ Startup on is not covered.
   been proved on real AirPods.
 - **Pair AirPods**, new in 1.6.0, in the tray menu, as a row on the settings
   page, on the card that says no AirPods are paired with this PC, and from
-  Connect in Windows when nothing is paired yet. It reads this PC's Bluetooth
+  Connect in Windows before Earshot is set up, when no AirPods are paired. It reads this PC's Bluetooth
   first, then shows how to put the case in pairing mode, with a picture of each
   kind of case, and asks you to press Look for AirPods, lists the headphones in
   pairing mode nearby, and pairs the ones you
