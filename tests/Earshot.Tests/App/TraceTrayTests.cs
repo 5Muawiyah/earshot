@@ -112,10 +112,10 @@ public sealed class TraceTrayTests
             tray.Context.RecordTraceFromSettings();
             PressRecordOnTheNote(tray, recorder);
             Assert.AreEqual(1, recorder.Recorded);
-            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.TraceStarted);
 
             recorder.BeginRecording();
             WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Running), "the running card");
+            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.TraceStarted);
             CardContent running = tray.Cards.Shown[^1].Content;
             Assert.AreEqual(TraceCopy.Running, running.Status);
             Assert.AreEqual(TraceCopy.StopButton, running.Action?.Label);
