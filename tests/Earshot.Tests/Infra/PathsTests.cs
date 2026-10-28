@@ -152,7 +152,7 @@ public sealed class PathsTests
         }
     }
 
-    // A saved Bluetooth trace stays in the local profile, which folder backup does not upload, never in Documents.
+    // A saved Bluetooth trace stays in the local profile, not a folder OneDrive's PC folder backup covers, never in Documents.
     [TestMethod]
     public void ASavedTraceGoesToTheLocalFolderNotDocuments()
     {

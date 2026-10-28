@@ -364,8 +364,8 @@ internal static partial class Program
 
     // The recorder for a Bluetooth trace. Not in safe mode or against a redirected data folder, where the elevated helper would
     // refuse. Making it starts nothing. Only the installed copy is ever raised; with none, the recorder says to set up Earshot
-    // first and the trace is not offered. The trace is copied to %LOCALAPPDATA%\Earshot\traces, which folder backup does not
-    // upload, unlike Documents.
+    // first and the trace is not offered. The trace is copied to %LOCALAPPDATA%\Earshot\traces, not Documents or another
+    // folder OneDrive's PC folder backup covers.
     internal static Tracing.ITraceRecorder? CreateTraceRecorder(Paths paths, ILog log)
     {
         ArgumentNullException.ThrowIfNull(paths);

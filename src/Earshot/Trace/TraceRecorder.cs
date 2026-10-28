@@ -36,7 +36,7 @@ internal interface ITraceRecorder : IDisposable
 // InstalledExecutable: %ProgramFiles%\Earshot\Earshot.exe when it is there, is 1.6.0 or later and its folder passes
 // InstalledCopy.Assess, otherwise null. Only that copy is ever raised: a copy run from Downloads or a build folder sits where a
 // standard user can change it. DestinationFolder: where the person finds the
-// trace, %LOCALAPPDATA%\Earshot\traces, which no folder backup uploads (Documents can be).
+// trace, %LOCALAPPDATA%\Earshot\traces: not Documents or another folder OneDrive's PC folder backup covers.
 internal sealed record TraceRecorderOptions(bool SafeMode, Func<string?> InstalledExecutable, string DestinationFolder, int TrayPid, Func<string> NewNonce);
 
 // The tray's side of the user-visible files.
