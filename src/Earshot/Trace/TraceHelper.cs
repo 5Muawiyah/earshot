@@ -337,12 +337,13 @@ internal static class TraceHelper
             return "did not start: " + run.Problem;
         }
 
+        string note = run.Problem is null ? "" : " Note: " + run.Problem;
         if (run.TimedOut)
         {
-            return "timed out and was ended. " + Tail(run.Output);
+            return "timed out and was ended. " + Tail(run.Output) + note;
         }
 
-        return "returned " + TraceCopy.Encoded(run.ExitCode) + ". " + Tail(run.Output);
+        return "returned " + TraceCopy.Encoded(run.ExitCode) + ". " + Tail(run.Output) + note;
     }
 
     private static string Tail(string output)

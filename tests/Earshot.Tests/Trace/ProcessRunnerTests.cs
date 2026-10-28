@@ -53,6 +53,21 @@ public sealed class ProcessRunnerTests
         Assert.AreEqual(7, run.ExitCode);
     }
 
+    // A program that ends while another process it started still holds its output pipe: the run returns within the drain limit,
+    // with a note, rather than waiting for that other process. Before, the wait for the output to end had no limit.
+    [TestMethod]
+    public void AProgramWhosePipeOutlivesItStillReturnsWithinTheDrainLimit()
+    {
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        // cmd starts ping in the background and ends at once; ping keeps the inherited output pipe for about 30 s.
+        ProcessRun run = new WindowsProcessRunner().Run(System32("cmd.exe"), ["/c", "start", "/b", System32("PING.EXE"), "-n", "31", "127.0.0.1"], TimeSpan.FromSeconds(60));
+
+        Assert.IsTrue(run.Started, run.Problem);
+        Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed, "The run waited for the background process's pipe.");
+        Assert.IsNotNull(run.Problem, "A short output is said.");
+    }
+
     // The trace's wpr runs get the private run folder as TEMP and TMP, not the person's own temporary folder.
     [TestMethod]
     public void ATempFolderGivenIsTheProgramsTempAndTmp()

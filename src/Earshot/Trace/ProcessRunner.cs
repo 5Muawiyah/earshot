@@ -48,6 +48,10 @@ internal sealed class WindowsProcessRunner : IProcessRunner
         ];
     }
 
+    // How long the redirected output may take to end once the program has: another process can hold the inherited pipes open
+    // after it, and the elevated helper must not wait on that for ever.
+    internal static readonly TimeSpan DrainLimit = TimeSpan.FromSeconds(5);
+
     public ProcessRun Run(string exe, IReadOnlyList<string> args, TimeSpan timeout, string? tempFolder = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(exe);
@@ -80,10 +84,14 @@ internal sealed class WindowsProcessRunner : IProcessRunner
         }
 
         var output = new StringBuilder();
-        void Append(string? line)
+        using var outputEnded = new ManualResetEventSlim();
+        using var errorEnded = new ManualResetEventSlim();
+        void Append(string? line, ManualResetEventSlim ended)
         {
+            // A null line is the end of that stream.
             if (line is null)
             {
+                ended.Set();
                 return;
             }
 
@@ -117,8 +125,8 @@ internal sealed class WindowsProcessRunner : IProcessRunner
 
         using (process)
         {
-            process.OutputDataReceived += (_, e) => Append(e.Data);
-            process.ErrorDataReceived += (_, e) => Append(e.Data);
+            process.OutputDataReceived += (_, e) => Append(e.Data, outputEnded);
+            process.ErrorDataReceived += (_, e) => Append(e.Data, errorEnded);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             process.StandardInput.Close();
@@ -126,14 +134,28 @@ internal sealed class WindowsProcessRunner : IProcessRunner
             if (!process.WaitForExit(timeout))
             {
                 process.Kill(entireProcessTree: true);
-                process.WaitForExit();
-                return new ProcessRun(true, -1, true, Text(output), null);
+                _ = process.WaitForExit(DrainLimit);
+                string? killedProblem = Drain(process, outputEnded, errorEnded);
+                return new ProcessRun(true, -1, true, Text(output), killedProblem);
             }
 
-            // The no-argument overload waits for the redirected streams to end, so every line is in Output.
-            process.WaitForExit();
-            return new ProcessRun(true, process.ExitCode, false, Text(output), null);
+            string? problem = Drain(process, outputEnded, errorEnded);
+            return new ProcessRun(true, process.ExitCode, false, Text(output), problem);
         }
+    }
+
+    // Waits for both redirected streams to end, within DrainLimit; past it the reads are cancelled and the output may be short.
+    private static string? Drain(Process process, ManualResetEventSlim outputEnded, ManualResetEventSlim errorEnded)
+    {
+        if (WaitHandle.WaitAll([outputEnded.WaitHandle, errorEnded.WaitHandle], DrainLimit))
+        {
+            return null;
+        }
+
+        process.CancelOutputRead();
+        process.CancelErrorRead();
+        return "the program's output did not end within " + DrainLimit.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) +
+            " s of it ending (another process may hold its pipes), so it may be short.";
     }
 
     private static string Text(StringBuilder output)
