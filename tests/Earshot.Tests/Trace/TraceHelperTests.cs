@@ -201,7 +201,7 @@ public sealed class TraceHelperTests
             return new ProcessRun(true, 0, false, "", null);
         });
 
-        Assert.AreEqual(TraceOutcome.StartFailed, outcome);
+        Assert.AreEqual(TraceOutcome.Unexpected, outcome, "A throw is not a failed start: it can come after the stop worked.");
         Assert.AreEqual("-cancel -instancename " + WprCommand.InstanceName, runner.Calls[^1], "The session the start may have begun is cancelled.");
         CollectionAssert.Contains(signals.Calls, "done");
         Assert.IsTrue(machine.FolderDeleted);

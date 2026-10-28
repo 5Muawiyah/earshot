@@ -152,7 +152,7 @@ internal static class TraceHelper
             log.Error("trace: the recording stopped on something unexpected (" + ex.GetType().Name + ", HRESULT 0x" +
                 ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + "), so wpr is cancelled.", ex);
             CancelAfterAThrow(machine, runner, log, runFolder);
-            outcome = TraceOutcome.StartFailed;
+            outcome = TraceOutcome.Unexpected;
             fileName = "";
             wprCode = ex.HResult;
             leaveFolder = false;

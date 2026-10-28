@@ -28,6 +28,10 @@ internal enum TraceOutcome
     StartFailed,
     StopFailed,
 
+    // Something unexpected was thrown while the helper recorded, at any point from the start to the hand-over: a session it
+    // may have started was cancelled and nothing was saved. The code with it is the exception's HRESULT, not wpr's.
+    Unexpected,
+
     // Tray side only: the person said no at the administrator prompt.
     Declined,
 
