@@ -41,6 +41,16 @@ public sealed class TraceRealTests
         Assert.AreEqual(me.User, sid, problem);
     }
 
+    // Coverage: before Open has given a handle, the tray's user is a reason, never a throw out of the elevated helper.
+    [TestMethod]
+    public void TheTraysUserBeforeOpenIsAReasonNotAThrow()
+    {
+        using var helper = new TraceSignals(new TraceRequest(Environment.ProcessId, NewNonce()), new CapturingLog());
+
+        Assert.IsNull(helper.TrayUser(out string? problem));
+        Assert.IsFalse(string.IsNullOrEmpty(problem));
+    }
+
     [TestMethod]
     public void AProcessThatIsNotThereGivesAReasonNotASid()
     {

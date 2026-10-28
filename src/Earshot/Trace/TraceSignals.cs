@@ -60,12 +60,14 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
             _stop = System.Threading.EventWaitHandleAcl.OpenExisting(TraceEventNames.Stop(_request.Nonce), System.Security.AccessControl.EventWaitHandleRights.Synchronize);
             _done = System.Threading.EventWaitHandleAcl.OpenExisting(TraceEventNames.Done(_request.Nonce), System.Security.AccessControl.EventWaitHandleRights.Modify);
             _copied = System.Threading.EventWaitHandleAcl.OpenExisting(TraceEventNames.Copied(_request.Nonce), System.Security.AccessControl.EventWaitHandleRights.Synchronize);
-            _tray = Process.GetProcessById(_request.TrayPid);
+            // The handle first: it pins the process, so its ID cannot name another process for the session read that follows.
             _trayHandle = Tracing.TrayUser.OpenForWatch(_request.TrayPid, out string? problem);
             if (_trayHandle is null)
             {
                 return problem;
             }
+
+            _tray = Process.GetProcessById(_request.TrayPid);
 
             // A process handle is waitable (it is signalled when the process ends), so it is wrapped in an event object
             // that does not own it and waited on beside the stop event.
@@ -113,7 +115,7 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
 
     public SecurityIdentifier? TrayUser(out string? problem)
     {
-        if (_tray is null)
+        if (_trayHandle is null)
         {
             problem = "Open() has not succeeded.";
             return null;
@@ -121,7 +123,7 @@ internal sealed class TraceSignals : ITraceSignals, IDisposable
 
         try
         {
-            return Tracing.TrayUser.SidOf(_trayHandle!, _request.TrayPid, out problem);
+            return Tracing.TrayUser.SidOf(_trayHandle, _request.TrayPid, out problem);
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ObjectDisposedException)
         {
