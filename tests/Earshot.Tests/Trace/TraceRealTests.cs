@@ -282,7 +282,22 @@ public sealed class TraceRealTests
         File.WriteAllText(Path.Combine(root.Path, TraceHelper.MarkerFileName), new string('x', TraceUserFiles.MaxMarkerBytes + 1));
         var files = new TraceUserFiles(root.Path, new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
-        Assert.IsNull(files.ReadMarker());
+        Assert.IsEmpty(files.ReadMarkers());
+    }
+
+    // A sign-in after a sign-out is usually a new session, so the marker a recording left is under another session's name: the
+    // look at start reads every session's. Before, it read only its own session's, and said nothing.
+    [TestMethod]
+    public void TheMarkersOfEverySessionAreRead()
+    {
+        using var root = new TempFolder();
+        File.WriteAllText(Path.Combine(root.Path, TraceHelper.MarkerFileNameFor(9001)), "earlier session");
+        File.WriteAllText(Path.Combine(root.Path, "unrelated.txt"), "not a marker");
+        var files = new TraceUserFiles(root.Path, new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
+
+        IReadOnlyList<string> markers = files.ReadMarkers();
+        Assert.HasCount(1, markers);
+        Assert.AreEqual("earlier session", markers[0]);
     }
 
     // The folder window is opened by explorer.exe's full path in the Windows folder.
@@ -300,7 +315,7 @@ public sealed class TraceRealTests
         var files = new TraceUserFiles(Path.Combine(root.Path, "no-such-folder"), new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
         Assert.IsNull(files.ReadResult(NewNonce()));
-        Assert.IsNull(files.ReadMarker());
+        Assert.IsEmpty(files.ReadMarkers());
     }
 
     [TestMethod]

@@ -90,6 +90,9 @@ internal static class TraceHelper
 
     internal static string MarkerFileNameFor(int sessionId) => "running-S" + sessionId.ToString(CultureInfo.InvariantCulture) + ".txt";
 
+    // Every session's marker, for the tray's look at start.
+    internal const string MarkerPattern = "running-S*.txt";
+
     public static TraceOutcome Run(TraceRequest request, ITraceMachine machine, ITraceSignals signals, IProcessRunner runner, ILog log, Func<DateTime> utcNow)
     {
         ArgumentNullException.ThrowIfNull(request);

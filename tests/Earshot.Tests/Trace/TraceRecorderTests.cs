@@ -99,10 +99,13 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     }
 
     public void OpenFolder(string folder) => Calls.Add("open " + folder);
-    public string? ReadMarker()
+    // Markers of other sessions, beside this one's.
+    public List<string> OtherMarkers { get; } = new();
+
+    public IReadOnlyList<string> ReadMarkers()
     {
         Calls.Add("read marker");
-        return Marker;
+        return [.. Marker is null ? [] : new[] { Marker }, .. OtherMarkers];
     }
     public bool ProcessAlive(int pid) => Alive.Contains(pid);
     public long BootSeconds() => Boot;
@@ -562,6 +565,16 @@ public sealed class TraceRecorderTests
         rig.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot));
 
         Assert.AreEqual("A Bluetooth trace may still be running. Restart the PC to stop it.", rig.Recorder.StillRunningNotice());
+    }
+
+    // A marker another session left (a sign-out during a recording, then a sign-in as a new session) is seen too.
+    [TestMethod]
+    public void AnotherSessionsMarkerWhoseHelperIsGoneSaysATraceMayStillBeRunning()
+    {
+        var rig = new Rig();
+        rig.Files.OtherMarkers.Add(TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot)));
+
+        Assert.AreEqual(TraceCopy.StillRunning, rig.Recorder.StillRunningNotice());
     }
 
     [TestMethod]

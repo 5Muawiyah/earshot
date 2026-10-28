@@ -62,8 +62,9 @@ internal interface ITraceUserFiles
 
     void OpenFolder(string folder);
 
-    // This session's marker, or null.
-    string? ReadMarker();
+    // Every session's marker (running-S<session>.txt): a sign-in after a sign-out is usually a new session, so the marker a
+    // recording left is under another session's name. Empty when there is none.
+    IReadOnlyList<string> ReadMarkers();
 
     bool ProcessAlive(int pid);
 
@@ -333,24 +334,26 @@ internal sealed class TraceRecorder : ITraceRecorder
             return null;
         }
 
-        string? text = _files.ReadMarker();
-        if (text is null)
+        foreach (string text in _files.ReadMarkers())
         {
-            return null;
+            if (!TraceMarker.TryParse(text, out TraceMarker? marker) || marker is null)
+            {
+                continue;
+            }
+
+            if (!TraceMarker.SameBoot(marker.BootSeconds, _files.BootSeconds()))
+            {
+                _log.Info("trace: a marker is not from this start of the PC (or the clock moved by more than 30 s since), so it is not taken to mean a recording is running.");
+                continue;
+            }
+
+            if (!_files.ProcessAlive(marker.HelperPid))
+            {
+                return TraceCopy.StillRunning;
+            }
         }
 
-        if (!TraceMarker.TryParse(text, out TraceMarker? marker) || marker is null)
-        {
-            return null;
-        }
-
-        if (!TraceMarker.SameBoot(marker.BootSeconds, _files.BootSeconds()))
-        {
-            _log.Info("trace: the marker is not from this start of the PC (or the clock moved by more than 30 s since), so it is not taken to mean a recording is running.");
-            return null;
-        }
-
-        return _files.ProcessAlive(marker.HelperPid) ? null : TraceCopy.StillRunning;
+        return null;
     }
 
     public string? LeftoverNotice()
@@ -582,11 +585,43 @@ internal sealed class TraceUserFiles : ITraceUserFiles
     // anything).
     internal const int MaxMarkerBytes = 1024;
 
-    public string? ReadMarker()
+    // More markers than this are not read: one per session that recorded, and a folder that has not been checked yet may hold
+    // anything.
+    internal const int MaxMarkers = 16;
+
+    public IReadOnlyList<string> ReadMarkers()
+    {
+        var texts = new List<string>();
+        IEnumerable<string> paths;
+        try
+        {
+            paths = Directory.EnumerateFiles(_traceFolder, TraceHelper.MarkerPattern).Take(MaxMarkers).ToList();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return texts;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _log.Warn("trace: the markers could not be listed: " + Describe(ex));
+            return texts;
+        }
+
+        foreach (string path in paths)
+        {
+            if (ReadMarker(path) is { } text)
+            {
+                texts.Add(text);
+            }
+        }
+
+        return texts;
+    }
+
+    private string? ReadMarker(string path)
     {
         try
         {
-            string path = Path.Combine(_traceFolder, TraceHelper.MarkerFileName);
             var info = new FileInfo(path);
             if (info.Exists && info.Length > MaxMarkerBytes)
             {
