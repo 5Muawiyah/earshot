@@ -705,7 +705,7 @@ public sealed class PairingSessionTests
         {
             ArrangePairs(aborted);
             aborted.Pairing.Events.Add(new WatchEvent(WatchEventKind.Aborted, null));
-            Assert.AreEqual("Aborted", ConnectHistory.HeadlineCode((await RunAsync(aborted)).ToHistoryEntry(DateTimeOffset.UnixEpoch)));
+            AssertWrittenHeadline("Aborted", await RunAsync(aborted));
         }
 
         using (var noName = new FixRig())
@@ -713,7 +713,7 @@ public sealed class PairingSessionTests
             ArrangePairs(noName);
             AirPodsAppear(noName, name: "");
             noName.Pairing.PairResult = new PairingCallResult("AuthenticationTimeout", PairReasons.AuthenticationTimeout, false, null);
-            Assert.AreEqual("AuthenticationTimeout", ConnectHistory.HeadlineCode((await RunAsync(noName)).ToHistoryEntry(DateTimeOffset.UnixEpoch)));
+            AssertWrittenHeadline("AuthenticationTimeout", await RunAsync(noName));
         }
 
         using (var unread = new FixRig())
@@ -722,8 +722,19 @@ public sealed class PairingSessionTests
             AirPodsAppear(unread);
             PairingSessionResult paired = await RunAsync(unread, radio: new FakeRadioCheck(Radio(RadioCheckState.Unknown)));
             Assert.AreEqual(PairOutcome.Paired, paired.Outcome);
-            Assert.AreEqual("S_OK", ConnectHistory.HeadlineCode(paired.ToHistoryEntry(DateTimeOffset.UnixEpoch)));
+            AssertWrittenHeadline("S_OK", paired);
         }
+    }
+
+    // The headline as the history file has it, so the line written is checked and not only the rule that picks it.
+    private static void AssertWrittenHeadline(string expected, PairingSessionResult result)
+    {
+        Assert.AreEqual(expected, ConnectHistory.HeadlineCode(result.ToHistoryEntry(DateTimeOffset.UnixEpoch)));
+        using var temp = new TempFolder();
+        string path = Path.Combine(temp.Path, "connect-history.jsonl");
+        var time = new ManualTime();
+        new ConnectHistory(path, time, new CapturingLog()).Append(result.ToHistoryEntry(time.GetUtcNow()));
+        StringAssert.Contains(File.ReadAllText(path), "\"code\":\"" + expected + "\"");
     }
 
     // ---- the real watcher's reading of one event ----
