@@ -145,4 +145,17 @@ public sealed class ProcessRunnerTests
         Assert.IsFalse(run.Started);
         Assert.IsNotNull(run.Problem);
     }
+
+    // Past the drain limit the runner returns and disposes its two end events, and a stream that ends later still calls Set on
+    // one from a pool thread. That late Set must not throw, or it would end the elevated helper.
+    [TestMethod]
+    public void ALateEndOfAStreamAfterTheRunnerGaveUpDoesNotThrow()
+    {
+        var ended = new ManualResetEventSlim();
+        ended.Dispose();
+
+        ended.Set();
+
+        Assert.IsTrue(ended.IsSet);
+    }
 }

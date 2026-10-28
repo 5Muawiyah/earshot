@@ -146,7 +146,7 @@ internal sealed class WindowsProcessRunner : IProcessRunner
     }
 
     // Waits for both redirected streams to end, within DrainLimit in all; past it the run stops waiting, and the output may be
-    // short. Two single waits, not WaitHandle.WaitAll, which throws on an STA thread such as the helper's (Main is STAThread).
+    // short. A stream that ends after that calls Set on a disposed event, which does not throw (ProcessRunnerTests). Two single waits, not WaitHandle.WaitAll, which throws on an STA thread such as the helper's (Main is STAThread).
     // https://learn.microsoft.com/en-us/dotnet/api/system.threading.waithandle.waitall
     private static string? Drain(Process process, ManualResetEventSlim outputEnded, ManualResetEventSlim errorEnded)
     {
