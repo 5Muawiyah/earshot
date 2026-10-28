@@ -153,6 +153,9 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
     // closes itself after the same time as Fix's questions, with no trace asked for.
     internal static readonly TimeSpan ResultTimeout = FixDialogPages.Timeout;
 
+    // The result's time limit for this window; a test makes it short.
+    internal TimeSpan ResultWait { get; init; } = ResultTimeout;
+
     // With offerTrace, a second button asks the tray for Record a Bluetooth trace, which shows its note before anything is
     // recorded.
     public bool ShowResult(string text, bool offerTrace)
@@ -178,7 +181,7 @@ internal sealed class FixRePairWindow : IFixRePairUi, IDisposable
         }
 
         page.Buttons.Add(TaskDialogButton.OK);
-        using var timer = new System.Windows.Forms.Timer { Interval = (int)ResultTimeout.TotalMilliseconds };
+        using var timer = new System.Windows.Forms.Timer { Interval = (int)ResultWait.TotalMilliseconds };
         timer.Tick += (_, _) =>
         {
             timer.Stop();

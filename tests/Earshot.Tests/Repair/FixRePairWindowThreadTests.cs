@@ -120,5 +120,26 @@ public sealed class FixRePairWindowThreadTests
     {
         Assert.AreEqual(FixDialogPages.Timeout, FixRePairWindow.ResultTimeout);
         Assert.AreEqual(TimeSpan.FromMinutes(5), FixRePairWindow.ResultTimeout);
+        using var cancel = new CancellationTokenSource();
+        using var window = new FixRePairWindow(cancel);
+        Assert.AreEqual(FixRePairWindow.ResultTimeout, window.ResultWait, "A window is given the five minutes unless a test says otherwise.");
+    }
+
+    // The close itself, run with a short limit on a private desktop: the result window ends on its own, with no trace asked for.
+    [TestMethod]
+    public void TheResultWindowReallyClosesItselfAtItsLimit()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+            using var cancel = new CancellationTokenSource();
+            using var window = new FixRePairWindow(cancel) { ResultWait = TimeSpan.FromMilliseconds(300) };
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
+            bool traceAsked = window.ShowResult("Fix connection finished.", offerTrace: true);
+
+            Assert.IsFalse(traceAsked, "A window that closed on its own asked for no trace.");
+            Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed);
+        }, TimeSpan.FromSeconds(30));
     }
 }
