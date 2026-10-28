@@ -184,6 +184,30 @@ public sealed class TraceHelperTests
         Assert.IsTrue(machine.FolderDeleted);
     }
 
+    // Something unexpected thrown out of the recording part still ends the run as every run ends: wpr is cancelled, a result
+    // is written, the tray is told it is done and the run folder is deleted. Before, the throw left the folder for the next
+    // start to report, and the tray waited for a done that never came.
+    [TestMethod]
+    public void AThrowWhileRecordingStillCancelsWritesAResultSignalsDoneAndDeletesTheFolder()
+    {
+        int runs = 0;
+        var (outcome, machine, signals, runner, log) = Run((_, _, r) => r.Respond = _ =>
+        {
+            if (runs++ == 1)
+            {
+                throw new NotSupportedException("thrown by the runner");
+            }
+
+            return new ProcessRun(true, 0, false, "", null);
+        });
+
+        Assert.AreEqual(TraceOutcome.StartFailed, outcome);
+        Assert.AreEqual("-cancel -instancename " + WprCommand.InstanceName, runner.Calls[^1], "The session the start may have begun is cancelled.");
+        CollectionAssert.Contains(signals.Calls, "done");
+        Assert.IsTrue(machine.FolderDeleted);
+        Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("NotSupportedException", StringComparison.Ordinal)), string.Join(" | ", log.Entries.Select(e => e.Message)));
+    }
+
     [TestMethod]
     public void TheProfileIsWrittenIntoThePrivateFolderAndCheckedBeforeItIsUsed()
     {

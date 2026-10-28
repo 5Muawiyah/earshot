@@ -136,7 +136,27 @@ internal static class TraceHelper
             return TraceOutcome.SetupFailed;
         }
 
-        TraceOutcome outcome = Record(request, machine, signals, runner, log, utcNow, runFolder, trayUser, out string fileName, out int wprCode, out bool leaveFolder);
+        TraceOutcome outcome;
+        string fileName;
+        int wprCode;
+        bool leaveFolder;
+        try
+        {
+            outcome = Record(request, machine, signals, runner, log, utcNow, runFolder, trayUser, out fileName, out wprCode, out leaveFolder);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Something unexpected stopped the recording part. A session it may have started is not left recording, and the run
+            // still ends as every run does: a result, the done signal and the run folder deleted, so the tray says how it ended
+            // and no folder is left behind for the next start to report.
+            log.Error("trace: the recording stopped on something unexpected (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + "), so wpr is cancelled.", ex);
+            CancelAfterAThrow(machine, runner, log, runFolder);
+            outcome = TraceOutcome.StartFailed;
+            fileName = "";
+            wprCode = ex.HResult;
+            leaveFolder = false;
+        }
 
         string resultPath = Path.Combine(runFolder, ResultFileName);
         string? writeProblem = machine.WriteFile(resultPath, Encoding.UTF8.GetBytes(TraceResultFile.Serialize(new TraceResultFile(outcome, fileName, wprCode))));
@@ -308,6 +328,25 @@ internal static class TraceHelper
 
     // The marker says a session may still be recording. It goes only once a stop or a cancel has worked; otherwise the session
     // may still run, and the next start of the tray says so.
+    // The cancel after a throw, which may throw again for the same cause: that is logged with its code too, and the marker is
+    // then kept, so the next start says a trace may still be running.
+    private static void CancelAfterAThrow(ITraceMachine machine, IProcessRunner runner, ILog log, string runFolder)
+    {
+        string markerPath = Path.Combine(machine.TraceFolder, MarkerFileName);
+        try
+        {
+            ProcessRun cancel = runner.Run(machine.WprPath, WprCommand.Cancel, CancelLimit, runFolder);
+            log.Info("trace: wpr -cancel after the unexpected stop " + Describe(cancel));
+            RemoveMarkerIf(Succeeded(cancel), machine, markerPath, log);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            log.Error("trace: wpr -cancel after the unexpected stop could not run (" + ex.GetType().Name + ", HRESULT 0x" +
+                ex.HResult.ToString("X8", CultureInfo.InvariantCulture) + ").", ex);
+            RemoveMarkerIf(false, machine, markerPath, log);
+        }
+    }
+
     private static void RemoveMarkerIf(bool sessionEnded, ITraceMachine machine, string markerPath, ILog log)
     {
         if (!sessionEnded)

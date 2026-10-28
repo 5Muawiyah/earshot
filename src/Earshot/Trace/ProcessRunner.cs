@@ -134,8 +134,9 @@ internal sealed class WindowsProcessRunner : IProcessRunner
             if (!process.WaitForExit(timeout))
             {
                 process.Kill(entireProcessTree: true);
-                _ = process.WaitForExit(DrainLimit);
-                string? killedProblem = Drain(process, outputEnded, errorEnded);
+                string? killedProblem = process.WaitForExit(DrainLimit)
+                    ? Drain(process, outputEnded, errorEnded)
+                    : "it was asked to end and had not ended " + DrainLimit.TotalSeconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " s later.";
                 return new ProcessRun(true, -1, true, Text(output), killedProblem);
             }
 
