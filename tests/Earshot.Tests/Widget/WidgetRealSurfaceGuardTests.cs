@@ -92,6 +92,13 @@ public sealed class WidgetRealSurfaceGuardTests
         // above are zeroed here rather than per-test - one process-wide proof over the whole run, not one
         // harness build. See its own header for what it watches and why a per-class counter is not enough.
         TopLevelWindowVisibilityGuard.Start();
+
+        // Both of the app's entry points turn on visual styles before any control exists (ApplicationConfiguration.Initialize
+        // for the tray, Application.EnableVisualStyles for Fix), and a TaskDialog needs them: without them comctl32 version 6
+        // is never loaded and TaskDialogIndirect is not found. The test process does the same, and does it here because the
+        // first comctl32 load is the one every later call uses.
+        // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.application.enablevisualstyles
+        System.Windows.Forms.Application.EnableVisualStyles();
     }
 
     [TestMethod]
