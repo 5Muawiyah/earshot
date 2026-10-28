@@ -54,7 +54,7 @@ public sealed class ProcessRunnerTests
         Assert.AreEqual(7, run.ExitCode);
     }
 
-    // The trace helper runs on Main's STA thread, so the runner works there too. Round 16 found WaitHandle.WaitAll, which
+    // The trace helper runs on Main's STA thread, so the runner works there too. Before, it used WaitHandle.WaitAll, which
     // throws on an STA thread, in the wait for the output to end: every recording would have failed at its first wpr run.
     [TestMethod]
     public void TheRunnerWorksOnAnStaThreadAsTheHelpersMainIs()
