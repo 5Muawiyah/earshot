@@ -144,12 +144,20 @@ internal sealed class WindowsProcessRunner : IProcessRunner
         }
     }
 
-    // Waits for both redirected streams to end, within DrainLimit; past it the reads are cancelled and the output may be short.
+    // Waits for both redirected streams to end, within DrainLimit in all; past it the run stops waiting, and the output may be
+    // short. Two single waits, not WaitHandle.WaitAll, which throws on an STA thread such as the helper's (Main is STAThread).
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.waithandle.waitall
     private static string? Drain(Process process, ManualResetEventSlim outputEnded, ManualResetEventSlim errorEnded)
     {
-        if (WaitHandle.WaitAll([outputEnded.WaitHandle, errorEnded.WaitHandle], DrainLimit))
+        var watch = Stopwatch.StartNew();
+        TimeSpan left = DrainLimit;
+        if (outputEnded.Wait(left))
         {
-            return null;
+            left = DrainLimit - watch.Elapsed;
+            if (errorEnded.Wait(left < TimeSpan.Zero ? TimeSpan.Zero : left))
+            {
+                return null;
+            }
         }
 
         process.CancelOutputRead();

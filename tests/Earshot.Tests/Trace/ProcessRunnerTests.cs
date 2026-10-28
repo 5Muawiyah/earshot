@@ -1,3 +1,4 @@
+using Earshot.Tests.Phase1;
 using Earshot.Tracing;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -53,6 +54,20 @@ public sealed class ProcessRunnerTests
         Assert.AreEqual(7, run.ExitCode);
     }
 
+    // The trace helper runs on Main's STA thread, so the runner works there too. Round 16 found WaitHandle.WaitAll, which
+    // throws on an STA thread, in the wait for the output to end: every recording would have failed at its first wpr run.
+    [TestMethod]
+    public void TheRunnerWorksOnAnStaThreadAsTheHelpersMainIs()
+    {
+        ProcessRun? run = null;
+        StaThread.Run(() => run = new WindowsProcessRunner().Run(System32("cmd.exe"), ["/c", "exit 7"], TimeSpan.FromSeconds(30)));
+
+        Assert.IsNotNull(run);
+        Assert.IsTrue(run.Started, run.Problem);
+        Assert.AreEqual(7, run.ExitCode);
+        Assert.IsNull(run.Problem);
+    }
+
     // A program that ends while another process it started still holds its output pipe: the run returns within the drain limit,
     // with a note, rather than waiting for that other process. Before, the wait for the output to end had no limit.
     [TestMethod]
@@ -60,12 +75,22 @@ public sealed class ProcessRunnerTests
     {
         var watch = System.Diagnostics.Stopwatch.StartNew();
 
-        // cmd starts ping in the background and ends at once; ping keeps the inherited output pipe for about 30 s.
-        ProcessRun run = new WindowsProcessRunner().Run(System32("cmd.exe"), ["/c", "start", "/b", System32("PING.EXE"), "-n", "31", "127.0.0.1"], TimeSpan.FromSeconds(60));
+        // cmd starts waitfor in the background and ends at once; waitfor keeps the inherited output pipe until it is signalled,
+        // which the test does at the end, so nothing is left running.
+        string signal = "EarshotDrain" + Guid.NewGuid().ToString("N")[..12];
+        try
+        {
+            ProcessRun run = new WindowsProcessRunner().Run(System32("cmd.exe"), ["/c", "start", "/b", System32("waitfor.exe"), "/t", "60", signal], TimeSpan.FromSeconds(60));
 
-        Assert.IsTrue(run.Started, run.Problem);
-        Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed, "The run waited for the background process's pipe.");
-        Assert.IsNotNull(run.Problem, "A short output is said.");
+            Assert.IsTrue(run.Started, run.Problem);
+            Assert.IsLessThan(TimeSpan.FromSeconds(20), watch.Elapsed, "The run waited for the background process's pipe.");
+            Assert.IsNotNull(run.Problem, "A short output is said.");
+        }
+        finally
+        {
+            using var release = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(System32("waitfor.exe"), ["/si", signal]) { UseShellExecute = false, CreateNoWindow = true });
+            release?.WaitForExit(10_000);
+        }
     }
 
     // The trace's wpr runs get the private run folder as TEMP and TMP, not the person's own temporary folder.
