@@ -200,6 +200,9 @@ internal sealed class TaskDialogPrompter : IFixPrompter
 {
     public FixPromptAnswer Ask(FixPrompt prompt) => Ask(prompt, CancellationToken.None);
 
+    // How long a question waits before it counts as timed out; the questions' own limit unless a test makes it short.
+    internal TimeSpan? Limit { get; init; }
+
     // A prompt with pictures is a window of its own (a TaskDialog shows no pictures). closeOn closes either, on the thread that
     // shows it.
     public FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn)
@@ -212,10 +215,11 @@ internal sealed class TaskDialogPrompter : IFixPrompter
 
         if (prompt.Pictures is { Count: > 0 })
         {
-            return PicturePromptWindow.Ask(prompt, closeOn);
+            return PicturePromptWindow.Ask(prompt, Limit ?? FixDialogPages.Timeout, closeOn);
         }
 
         TaskDialogPage page = FixDialogPages.Build(prompt, out TimeSpan timeout);
+        timeout = Limit ?? timeout;
         SynchronizationContext? ui = SynchronizationContext.Current;
         using CancellationTokenRegistration closing = closeOn.Register(() =>
         {

@@ -45,12 +45,14 @@ internal static class PromptPictures
 // TimedOut), and closeOn closes it as a cancel. No tooltips: every control has its words on it.
 internal static class PicturePromptWindow
 {
-    public static FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn)
+    public static FixPromptAnswer Ask(FixPrompt prompt, CancellationToken closeOn) => Ask(prompt, FixDialogPages.Timeout, closeOn);
+
+    internal static FixPromptAnswer Ask(FixPrompt prompt, TimeSpan limit, CancellationToken closeOn)
     {
         ArgumentNullException.ThrowIfNull(prompt);
         using Form form = Build(prompt, out Button ok);
         bool timedOut = false;
-        using var timer = new System.Windows.Forms.Timer { Interval = (int)FixDialogPages.Timeout.TotalMilliseconds };
+        using var timer = new System.Windows.Forms.Timer { Interval = (int)limit.TotalMilliseconds };
         timer.Tick += (_, _) =>
         {
             timedOut = true;
