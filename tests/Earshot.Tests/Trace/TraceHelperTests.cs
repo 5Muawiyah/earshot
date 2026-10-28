@@ -206,6 +206,9 @@ public sealed class TraceHelperTests
         CollectionAssert.Contains(signals.Calls, "done");
         Assert.IsTrue(machine.FolderDeleted);
         Assert.IsTrue(log.Entries.Any(e => e.Message.Contains("NotSupportedException", StringComparison.Ordinal)), string.Join(" | ", log.Entries.Select(e => e.Message)));
+        byte[] result = machine.Files[Path.Combine(@"C:\ProgramData\Earshot\trace", Nonce, "result.txt")];
+        Assert.IsTrue(TraceResultFile.TryParse(System.Text.Encoding.UTF8.GetString(result), out TraceResultFile? parsed), "The tray is told how the run ended.");
+        Assert.AreEqual(TraceOutcome.Unexpected, parsed!.Outcome);
     }
 
     [TestMethod]
