@@ -311,6 +311,27 @@ public sealed class TraceRealTests
         Assert.IsFalse(markers[0].ThisSession);
     }
 
+    // Past the cap, the newest markers are read: old ones from earlier starts of the PC cannot crowd out the one that matters.
+    [TestMethod]
+    public void PastTheCapTheNewestMarkersAreRead()
+    {
+        using var root = new TempFolder();
+        for (int session = 1; session <= TraceUserFiles.MaxMarkers + 1; session++)
+        {
+            string old = Path.Combine(root.Path, TraceHelper.MarkerFileNameFor(session));
+            File.WriteAllText(old, "old " + session.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            File.SetLastWriteTimeUtc(old, new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMinutes(session));
+        }
+
+        // Last by name, so a read in name order alone would leave it out.
+        File.WriteAllText(Path.Combine(root.Path, TraceHelper.MarkerFileNameFor(99999)), "newest");
+        var files = new TraceUserFiles(root.Path, new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
+
+        IReadOnlyList<TraceMarkerText> markers = files.ReadMarkers();
+        Assert.HasCount(TraceUserFiles.MaxMarkers, markers);
+        Assert.AreEqual("newest", markers[0].Text);
+    }
+
     // The folder window is opened by explorer.exe's full path in the Windows folder.
     [TestMethod]
     public void TheFolderWindowIsOpenedByExplorersFullPath()
