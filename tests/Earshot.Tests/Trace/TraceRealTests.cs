@@ -305,9 +305,10 @@ public sealed class TraceRealTests
         File.WriteAllText(Path.Combine(root.Path, "unrelated.txt"), "not a marker");
         var files = new TraceUserFiles(root.Path, new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
-        IReadOnlyList<string> markers = files.ReadMarkers();
+        IReadOnlyList<TraceMarkerText> markers = files.ReadMarkers();
         Assert.HasCount(1, markers);
-        Assert.AreEqual("earlier session", markers[0]);
+        Assert.AreEqual("earlier session", markers[0].Text);
+        Assert.IsFalse(markers[0].ThisSession);
     }
 
     // The folder window is opened by explorer.exe's full path in the Windows folder.
@@ -333,8 +334,8 @@ public sealed class TraceRealTests
     {
         var files = new TraceUserFiles(Path.GetTempPath(), new Boot.Gate.NtfsFolderSecurity(), new CapturingLog());
 
-        Assert.IsTrue(files.ProcessAlive(Environment.ProcessId));
-        Assert.IsFalse(files.ProcessAlive(int.MaxValue - 7));
+        Assert.AreEqual(true, files.ProcessAlive(Environment.ProcessId));
+        Assert.AreEqual(false, files.ProcessAlive(int.MaxValue - 7));
     }
 
     // The helper may be another account than the tray, so the events grant Administrators wait and set, not only the token's

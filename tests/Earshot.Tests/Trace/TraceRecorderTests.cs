@@ -102,12 +102,16 @@ internal sealed class FakeTraceFiles : ITraceUserFiles
     // Markers of other sessions, beside this one's.
     public List<string> OtherMarkers { get; } = new();
 
-    public IReadOnlyList<string> ReadMarkers()
+    public IReadOnlyList<TraceMarkerText> ReadMarkers()
     {
         Calls.Add("read marker");
-        return [.. Marker is null ? [] : new[] { Marker }, .. OtherMarkers];
+        return [.. Marker is null ? [] : new[] { new TraceMarkerText(Marker, ThisSession: true) }, .. OtherMarkers.Select(m => new TraceMarkerText(m, ThisSession: false))];
     }
-    public bool ProcessAlive(int pid) => Alive.Contains(pid);
+
+    // Helpers that cannot be queried (another account's).
+    public HashSet<int> Unqueryable { get; } = new();
+
+    public bool? ProcessAlive(int pid) => Unqueryable.Contains(pid) ? null : Alive.Contains(pid);
     public long BootSeconds() => Boot;
 }
 
@@ -575,6 +579,22 @@ public sealed class TraceRecorderTests
         rig.Files.OtherMarkers.Add(TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot)));
 
         Assert.AreEqual(TraceCopy.StillRunning, rig.Recorder.StillRunningNotice());
+    }
+
+    // Another session's marker whose helper cannot be queried may be someone recording now: nothing is said, since restarting the
+    // PC would end their recording. This session's own marker in the same case still says a trace may be running.
+    [TestMethod]
+    public void AnotherSessionsMarkerWhoseHelperCannotBeQueriedSaysNothing()
+    {
+        var other = new Rig();
+        other.Files.OtherMarkers.Add(TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot)));
+        other.Files.Unqueryable.Add(5150);
+        Assert.IsNull(other.Recorder.StillRunningNotice());
+
+        var own = new Rig();
+        own.Files.Marker = TraceMarker.Serialize(new TraceMarker(5150, Nonce, FakeTraceFiles.DefaultBoot));
+        own.Files.Unqueryable.Add(5150);
+        Assert.AreEqual(TraceCopy.StillRunning, own.Recorder.StillRunningNotice());
     }
 
     [TestMethod]

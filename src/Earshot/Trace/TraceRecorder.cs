@@ -64,9 +64,10 @@ internal interface ITraceUserFiles
 
     // Every session's marker (running-S<session>.txt): a sign-in after a sign-out is usually a new session, so the marker a
     // recording left is under another session's name. Empty when there is none.
-    IReadOnlyList<string> ReadMarkers();
+    IReadOnlyList<TraceMarkerText> ReadMarkers();
 
-    bool ProcessAlive(int pid);
+    // True or false when it could be told; null when the process could not be queried (another account's, or protected).
+    bool? ProcessAlive(int pid);
 
     // When this start of the PC began, in Unix seconds (TraceMarker.BootSecondsNow).
     long BootSeconds();
@@ -334,9 +335,9 @@ internal sealed class TraceRecorder : ITraceRecorder
             return null;
         }
 
-        foreach (string text in _files.ReadMarkers())
+        foreach (TraceMarkerText entry in _files.ReadMarkers())
         {
-            if (!TraceMarker.TryParse(text, out TraceMarker? marker) || marker is null)
+            if (!TraceMarker.TryParse(entry.Text, out TraceMarker? marker) || marker is null)
             {
                 continue;
             }
@@ -347,7 +348,11 @@ internal sealed class TraceRecorder : ITraceRecorder
                 continue;
             }
 
-            if (!_files.ProcessAlive(marker.HelperPid))
+            // A helper that cannot be queried counts as gone for this session's own marker: the safe side, against missing a
+            // recording left behind. For another session's it says nothing: that person may be recording now, under a helper
+            // this account may not query, and restarting the PC would end it.
+            bool? alive = _files.ProcessAlive(marker.HelperPid);
+            if (alive == false || (alive is null && entry.ThisSession))
             {
                 return TraceCopy.StillRunning;
             }
@@ -395,6 +400,9 @@ internal sealed class TraceRecorder : ITraceRecorder
 
 // The real files: the helper's result and trace under %ProgramData%\Earshot\trace\<nonce>, readable by this user because the
 // helper granted it, and the folder the person finds the copy in.
+// One marker's text, and whether it is this session's own.
+internal readonly record struct TraceMarkerText(string Text, bool ThisSession);
+
 internal sealed class TraceUserFiles : ITraceUserFiles
 {
     private readonly string _traceFolder;
@@ -589,9 +597,9 @@ internal sealed class TraceUserFiles : ITraceUserFiles
     // anything.
     internal const int MaxMarkers = 16;
 
-    public IReadOnlyList<string> ReadMarkers()
+    public IReadOnlyList<TraceMarkerText> ReadMarkers()
     {
-        var texts = new List<string>();
+        var texts = new List<TraceMarkerText>();
         IEnumerable<string> paths;
         try
         {
@@ -611,7 +619,7 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         {
             if (ReadMarker(path) is { } text)
             {
-                texts.Add(text);
+                texts.Add(new TraceMarkerText(text, string.Equals(Path.GetFileName(path), TraceHelper.MarkerFileName, StringComparison.OrdinalIgnoreCase)));
             }
         }
 
@@ -648,7 +656,7 @@ internal sealed class TraceUserFiles : ITraceUserFiles
 
     public long BootSeconds() => TraceMarker.BootSecondsNow();
 
-    public bool ProcessAlive(int pid)
+    public bool? ProcessAlive(int pid)
     {
         try
         {
@@ -666,10 +674,9 @@ internal sealed class TraceUserFiles : ITraceUserFiles
         catch (System.ComponentModel.Win32Exception ex)
         {
             // A process this user may not query: another account's, a protected one that reused the id, or, under Administrator
-            // protection, the helper itself, which runs as another account. It counts as gone, so at worst the notice says a trace
-            // may still be running when it is ending: the safe side, against missing a recording session left behind.
-            _log.Warn("trace: process " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " could not be queried (" + Describe(ex) + "), so it counts as gone.");
-            return false;
+            // protection, the helper itself, which runs as another account. The caller decides what not knowing means.
+            _log.Warn("trace: process " + pid.ToString(System.Globalization.CultureInfo.InvariantCulture) + " could not be queried (" + Describe(ex) + ").");
+            return null;
         }
     }
 }
