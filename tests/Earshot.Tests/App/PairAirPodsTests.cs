@@ -156,6 +156,12 @@ public sealed class PairAirPodsTests
             CollectionAssert.Contains(tray.Block.Calls, "set-device:" + FixRig.NewAirPodsAddress);
             Assert.IsFalse(tray.Block.Calls.Contains("setup"));
             Assert.AreEqual(FixRig.NewAirPodsContainer, tray.Settings.Current.PinnedContainerId);
+
+            // Live test 24 starts set up and passes on these lines.
+            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.Started);
+            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.Paired);
+            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.Adopted);
+            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.Answered);
         });
     }
 

@@ -49,6 +49,19 @@ public sealed class RadioCheckTests
             string.Join(" | ", log.Entries.Select(e => e.Message)));
     }
 
+    // Live test 24 passes the radio read on this line.
+    [TestMethod]
+    public async Task AnOkReadIsLoggedAsLiveTest24ReadsIt()
+    {
+        var log = new CapturingLog();
+        var check = new RadioCheck(new FakeRadioApi(_ => Task.FromResult(Adapter(RadioStateValues.On))), new FakeNodes(Node()), log: log);
+
+        RadioCheckResult r = await check.CheckAsync(CancellationToken.None);
+
+        Assert.AreEqual(RadioCheckState.Ok, r.State);
+        LiveTests.LiveTest24Lines.AssertLogged(log, LiveTests.LiveTest24Lines.RadioOk);
+    }
+
     [TestMethod]
     public async Task AnAdapterWithClassicAnOnRadioAndNoProblemIsOkAndSaysNothing()
     {

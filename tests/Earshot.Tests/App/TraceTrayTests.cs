@@ -112,6 +112,7 @@ public sealed class TraceTrayTests
             tray.Context.RecordTraceFromSettings();
             PressRecordOnTheNote(tray, recorder);
             Assert.AreEqual(1, recorder.Recorded);
+            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.TraceStarted);
 
             recorder.BeginRecording();
             WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.Running), "the running card");
@@ -124,6 +125,7 @@ public sealed class TraceTrayTests
 
             recorder.Finish(Saved);
             WaitFor(() => tray.Cards.Shown.Any(c => c.Content.Status == TraceCopy.SavedIn(Folder)), "the saved card");
+            LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.TraceSaved);
         });
     }
 

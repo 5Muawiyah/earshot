@@ -177,6 +177,11 @@ public sealed class RadioCardTests
             CardContent card = tray.Cards.Shown[^1].Content;
             Assert.AreEqual(line, card.Status);
             Assert.AreEqual(RadioLines.BluetoothSettingsButton, card.Action?.Label);
+            if ((RadioCheckState)radioState == RadioCheckState.Off)
+            {
+                LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.RadioOffAfterConnect);
+            }
+
             Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Action?.Label is "Fix connection" or "Connect in Windows"), "Nothing that cannot help is offered.");
             StringAssert.DoesNotMatch(card.Status, new System.Text.RegularExpressions.Regex("reset|Reset|Apple|setup button", System.Text.RegularExpressions.RegexOptions.CultureInvariant));
 
