@@ -1418,7 +1418,11 @@ until it is used. The paired list is given 5 seconds (a waiting budget), after
 which the look says nothing and logs earshot-timeout. At start, a card from this
 look answers for the pairs, so the coordinator's card about unprotected AirPods
 is not shown over it. The pin is matched by its container alone: the same
-AirPods paired again keep their address under a new container. Before it says
+AirPods paired again keep their address under a new container. When exactly one
+paired set has the pinned address (a Fix that paired them again, or the person
+in Windows), that set is the same pair, so it is taken with no question,
+through the same path as a choice (the gate first once set up); after a failed
+Connect the card says so and to try Connect again. Before it says
 a pair is gone or none is paired, the look reads the radio (one second): a PC
 whose Bluetooth is off, switched off, broken or missing gets the radio's line
 and button instead, and the pinned pair's readings are kept. A radio that

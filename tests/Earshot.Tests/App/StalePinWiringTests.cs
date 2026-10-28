@@ -59,6 +59,20 @@ public sealed class StalePinWiringTests
         rig.Pairing.Paired.Add(new PairedDevice("paired-second", "AirPods Pro", FixRig.SecondAirPodsAddress, FixRig.SecondAirPodsContainer));
     }
 
+    // The pinned AirPods paired again, by Fix or in Windows: the same address under a new container.
+    private static readonly Guid PairedAgainContainer = new("11111111-2222-4333-8444-555555555509");
+
+    private static void PairThePinnedPairAgain(FixRig rig)
+    {
+        string address = RecordedNodes.AirPodsAddress;
+        rig.Nodes.Inner = new FakeNodeApi(rig.Nodes.Inner.Nodes.Concat(
+        [
+            new FakeNode(@"BTHENUM\DEV_" + address + @"\b&5e6f7a8b&0&BLUETOOTHDEVICE_" + address, PairedAgainContainer, "AirPods Pro"),
+            new FakeNode(@"BTHENUM\{0000110B-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&2027\b&5e6f7a8b&0&" + address + "_C00000000", PairedAgainContainer),
+        ]));
+        rig.Pairing.Paired.Add(new PairedDevice("paired-again", "AirPods Pro", address, PairedAgainContainer));
+    }
+
     private static FixRig NothingPairedRig() => new(new FakeNodeApi(Array.Empty<FakeNode>()), pinned: false);
 
     private static CardContent Last(TrayHarness tray) => tray.Cards.Shown[^1].Content;
@@ -287,6 +301,45 @@ public sealed class StalePinWiringTests
             Assert.IsFalse(armed, "The pairing started while the paired list was read.");
             Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.StaleChosen), string.Join(" | ", tray.Cards.Statuses));
             Assert.IsTrue(tray.Log.Entries.Any(e => e.Message.Contains("a pairing started while it looked", StringComparison.Ordinal)));
+        });
+    }
+
+    // A Fix that pairs the AirPods again gives them a new container under the same address. That is the pair Earshot uses, not
+    // a different one, so the tray and the gate take the new container with no question. Before, the tray kept the removed
+    // container, and the next look asked which pair to use.
+    [TestMethod]
+    public void ThePinnedPairPairedAgainUnderANewContainerIsTakenWithNoQuestion()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            PairThePinnedPairAgain(rig);
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig), settings: PinTheRigsPair);
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(PairedAgainContainer, tray.Settings.Current.PinnedContainerId);
+            Assert.AreEqual(RecordedNodes.AirPodsAddress, tray.Settings.Current.PinnedAddress);
+            CollectionAssert.Contains(tray.Block.Calls, "set-device:" + RecordedNodes.AirPodsAddress, "The gate is given the new container first, as for a choice.");
+            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Status == PairAirPodsText.StaleChosen), string.Join(" | ", tray.Cards.Statuses));
+            Assert.IsFalse(rig.Pairing.Calls.Any(c => c.StartsWith("unpair:", StringComparison.Ordinal)));
+        });
+    }
+
+    // A pair with another address is a different pair, so the person is still asked.
+    [TestMethod]
+    public void WithThePinnedPairPairedAgainAndAnotherPairOnlyTheSameAddressIsTaken()
+    {
+        StaThread.Run(() =>
+        {
+            using var rig = new FixRig();
+            RemoveThePinnedPair(rig);
+            PairThePinnedPairAgain(rig);
+            AddASecondPairedPair(rig);
+            using var tray = new TrayHarness(snapshot: NoDevice(), pairAirPods: Services(rig), settings: PinTheRigsPair);
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(PairedAgainContainer, tray.Settings.Current.PinnedContainerId, "The second pair's address is not the pinned one, so it is never taken.");
         });
     }
 

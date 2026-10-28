@@ -78,6 +78,8 @@ internal static class PairAirPodsText
 
     public const string StaleChosen = "Your AirPods were removed in Windows. Choose which pair Earshot should use.";
 
+    public const string PairedAgain = "These AirPods were paired again in Windows, so Earshot uses them now. Try Connect again.";
+
     public static string MarkerNotWritten(int code) =>
         "Earshot could not save its note of this pairing (code 0x" + code.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) + "), so nothing was paired. Try again.";
 

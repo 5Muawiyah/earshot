@@ -466,6 +466,30 @@ internal sealed partial class TrayContext
                         return RadioStopped();
                 }
 
+                // The same AirPods paired again (by Fix, or by the person in Windows) keep their address under a new container.
+                // That is not a different pair, so there is no question: the new container is taken through the same path as a
+                // choice, which gives it to the gate first once Earshot is set up. Nothing is said about the pairs then, so the
+                // checks after the look run as they would for a pin still paired; a failed connect says to try again instead of
+                // offering Fix for a pairing that is new.
+                if (PairedAgain(result.Others, settings.PinnedAddress) is { } again)
+                {
+                    _log.Info("Pairing check (" + reason + "): the pinned AirPods were paired again under a new container, which Earshot now uses.");
+                    DeviceChoiceResult applied = await ApplyDeviceChoiceAsync(new PickerChoice(again.Name, again.Name, again.Address12, again.ContainerId), place);
+                    if (applied == DeviceChoiceResult.NotApplied)
+                    {
+                        // The refusal is already on a card, or Earshot is closing.
+                        return false;
+                    }
+
+                    if (reason == "connect failed" && applied == DeviceChoiceResult.Applied)
+                    {
+                        ShowCard(again.Name, PairAirPodsText.PairedAgain, place);
+                        return false;
+                    }
+
+                    return applied == DeviceChoiceResult.Applied;
+                }
+
                 _log.Info("The pinned AirPods are no longer paired, so their last readings and link are dropped.");
                 _widgetStatus?.ForgetPair("the pinned AirPods are no longer paired");
                 if (result.Others.Count == 0)
@@ -511,6 +535,19 @@ internal sealed partial class TrayContext
 
             return _elevatedRun == PairRun && !_closing ? PairingStartedWhileLooking() : true;
         }
+    }
+
+    // The one other pair with the pinned address, or null: with no address pinned, or two pairs under it, there is nothing to
+    // tell them apart by, so the person chooses.
+    private static OtherAirPods? PairedAgain(IReadOnlyList<OtherAirPods> others, string pinnedAddress)
+    {
+        if (string.IsNullOrEmpty(pinnedAddress))
+        {
+            return null;
+        }
+
+        List<OtherAirPods> same = others.Where(o => string.Equals(o.Address12, pinnedAddress, StringComparison.OrdinalIgnoreCase)).ToList();
+        return same.Count == 1 ? same[0] : null;
     }
 
     private enum RadioSays
