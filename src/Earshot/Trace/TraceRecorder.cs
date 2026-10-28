@@ -398,11 +398,11 @@ internal sealed class TraceRecorder : ITraceRecorder
     }
 }
 
-// The real files: the helper's result and trace under %ProgramData%\Earshot\trace\<nonce>, readable by this user because the
-// helper granted it, and the folder the person finds the copy in.
 // One marker's text, and whether it is this session's own.
 internal readonly record struct TraceMarkerText(string Text, bool ThisSession);
 
+// The real files: the helper's result and trace under %ProgramData%\Earshot\trace\<nonce>, readable by this user because the
+// helper granted it, and the folder the person finds the copy in.
 internal sealed class TraceUserFiles : ITraceUserFiles
 {
     private readonly string _traceFolder;
