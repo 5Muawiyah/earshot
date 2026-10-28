@@ -20,6 +20,10 @@ internal sealed class FakeTraySignals : ITrayTraceSignals
         OnRequestStop?.Invoke();
     }
     public bool IsDone => _done.Task.IsCompleted;
+    private int _waiting;
+
+    // A wait for done still running when the signals were disposed.
+    public bool WaitingWhenDisposed { get; private set; }
 
     public bool WaitDone(CancellationToken ct)
     {
@@ -28,6 +32,7 @@ internal sealed class FakeTraySignals : ITrayTraceSignals
             return true;
         }
 
+        Interlocked.Increment(ref _waiting);
         try
         {
             _done.Task.Wait(ct);
@@ -37,10 +42,18 @@ internal sealed class FakeTraySignals : ITrayTraceSignals
         {
             return false;
         }
+        finally
+        {
+            Interlocked.Decrement(ref _waiting);
+        }
     }
 
     public void SetCopied() => CopiedSet = true;
-    public void Dispose() => Disposed = true;
+    public void Dispose()
+    {
+        WaitingWhenDisposed = Volatile.Read(ref _waiting) > 0;
+        Disposed = true;
+    }
 }
 
 internal sealed class FakeTraySignalFactory : ITrayTraceSignalsFactory
@@ -164,6 +177,23 @@ public sealed class TraceRecorderTests
 
             Assert.IsTrue(condition(), "Timed out waiting for the recorder.");
         }
+    }
+
+    // Exit while the helper runs: the launch ends as cancelled. The wait for the helper's done signal is ended and waited for
+    // before the signals are disposed. Before, it was left waiting on the disposed signals.
+    [TestMethod]
+    public async Task ACancelledLaunchEndsTheWaitForDoneBeforeTheSignalsAreDisposed()
+    {
+        var rig = new Rig();
+        Task<TraceResult> run = rig.Recorder.RecordAsync(CancellationToken.None);
+        await Rig.Until(() => rig.Calls.Any(c => c.StartsWith("launch ", StringComparison.Ordinal)));
+
+        rig.Launcher.Completion.SetCanceled();
+        TraceResult result = await run;
+
+        Assert.AreEqual(TraceOutcome.Refused, result.Outcome);
+        Assert.IsTrue(rig.Factory.Signals.Disposed);
+        Assert.IsFalse(rig.Factory.Signals.WaitingWhenDisposed, "The wait for done was still running on the disposed signals.");
     }
 
     [TestMethod]

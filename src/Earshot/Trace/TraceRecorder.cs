@@ -184,7 +184,25 @@ internal sealed class TraceRecorder : ITraceRecorder
         Task<ElevatedRun> helper = Task.Run(() => _launcher.RunAsync(executable, arguments, ct), CancellationToken.None);
         using var waitCancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
         Task<bool> done = Task.Run(() => signals.WaitDone(waitCancel.Token), CancellationToken.None);
+        try
+        {
+            return await AfterLaunchAsync(nonce, signals, helper, waitCancel, done).ConfigureAwait(false);
+        }
+        finally
+        {
+            // The wait for done is ended and waited for on every path, a throw included, so it is never still waiting when the
+            // caller disposes the signals.
+            await waitCancel.CancelAsync().ConfigureAwait(false);
+            await ((Task)done).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            if (done.Exception is { } failed)
+            {
+                _log.Warn("trace: the wait for the helper's done signal failed (" + failed.InnerException?.GetType().Name + ").");
+            }
+        }
+    }
 
+    private async Task<TraceResult> AfterLaunchAsync(string nonce, ITrayTraceSignals signals, Task<ElevatedRun> helper, CancellationTokenSource waitCancel, Task<bool> done)
+    {
         Task first = await Task.WhenAny(helper, done).ConfigureAwait(false);
         bool saidDone = first == done && await done.ConfigureAwait(false);
         if (!saidDone)
