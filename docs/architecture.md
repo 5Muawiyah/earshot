@@ -1541,7 +1541,8 @@ another account has not yet been run. Its read and delete failures go to the mac
 log. Like install and fix-apply, the helper refuses to run when its environment
 (the user's, since it is raised from the user's session) sets a variable that
 makes the runtime load other code, use another runtime or write a file where it
-says. A trace changes no device, service or pairing, and nothing in the trace
+says. The refusal stops Earshot's own work; code the runtime loaded before
+Earshot's first line ran has already run, which is why the person is told. A trace changes no device, service or pairing, and nothing in the trace
 code touches the network.
 
 ### Send to
