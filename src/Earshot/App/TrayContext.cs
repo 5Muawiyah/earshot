@@ -461,7 +461,7 @@ internal sealed partial class TrayContext : ApplicationContext
 
         // The settings page lists the connected displays as they were when it was drawn, so a display that comes or goes
         // while the card is open redraws the page (and a choice made from the old list is refused, SetGaugeDisplay).
-        _window.DisplayChanged += (_, _) => { _widgetCardPresenter?.DisplayChanged(); _caseOpenCardPresenter?.DisplayChanged(); };
+        _window.DisplayChanged += (_, _) => { _widgetCardPresenter?.DisplayChanged(); };
 
         // AppBarRegistration's own notification callback (ABM_NEW's uCallbackMessage): ABN_STATECHANGE and
         // ABN_POSCHANGED poke the watcher for an immediate re-measure; ABN_FULLSCREENAPP hides the gauge at
@@ -640,7 +640,7 @@ internal sealed partial class TrayContext : ApplicationContext
             return;
         }
 
-        if (_widgetCardPresenter is not null)
+        if (_askedCardWired)
         {
             OpenWidgetCard(byKeyboard);
         }
@@ -2162,10 +2162,8 @@ internal sealed partial class TrayContext : ApplicationContext
         // a call here): without this, a card already open when a connect or disconnect started anywhere
         // (the tray icon, the menu, a hotkey, not just the card's own button) kept showing the button it
         // last rendered until the next IWidgetStatus.Changed happened to arrive. Refresh is a no-op when no
-        // card is open. The case-open notice's own button reads the same IsBusy through the same callbacks,
-        // so it needs exactly the same refresh; Refresh is a no-op there too when no notice is open.
+        // card is open; an unasked card's button reads the same IsBusy through the same callbacks and is refreshed by it too.
         _widgetCardPresenter?.Refresh();
-        _caseOpenCardPresenter?.Refresh();
 
         // The tray's own busy flags change only beside a call to this method, and the block coordinator's Changed
         // event ends here too, so this is where the copy of the busy state that the streaming coordinator reads is

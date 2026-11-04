@@ -361,7 +361,7 @@ internal static class CardKit
 
     public static WidgetCard NewCard(bool dark, bool notice = false)
     {
-        var card = new WidgetCard(new CapturingLog(), notice);
+        var card = new WidgetCard(new CapturingLog(), notice ? CardOpening.Unasked : CardOpening.Asked);
         card.SetTheme(InkFor(dark), highContrast: false);
         return card;
     }

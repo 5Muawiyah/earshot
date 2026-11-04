@@ -40,7 +40,7 @@ internal sealed partial class WidgetCard
 
     internal IReadOnlyList<CardControl> CurrentControls()
     {
-        if (_notice)
+        if (_unasked)
         {
             return IsCompactShown ? CompactControls() : NoticeControls();
         }
@@ -374,7 +374,7 @@ internal sealed partial class WidgetCard
             return;
         }
 
-        if (_notice)
+        if (_unasked)
         {
             return;
         }

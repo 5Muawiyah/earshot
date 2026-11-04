@@ -15,12 +15,11 @@ internal sealed partial class TrayContext
     // "Refresh battery" in the menu opens the card and starts the same refresh the icon does.
     private void OnRefreshBatteryClicked()
     {
-        if (_widgetCardPresenter is not { } presenter)
+        if (_widgetCardPresenter is not { } presenter || !_askedCardWired)
         {
             return;
         }
 
-        _caseOpenCardPresenter?.Hide();
         if (GaugeBoundsIfShown() is { } bounds)
         {
             presenter.RequestRefresh(bounds, bounds.Location);

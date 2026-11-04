@@ -96,7 +96,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     public WidgetCardPresenter(
         Func<WidgetCard> createCard, WidgetCardPresenterCallbacks callbacks, Action<Action> uiPost, TimeProvider time, ILog log,
         IWidgetCardHost? host = null, Func<bool>? animationsEnabled = null, Func<Rectangle, Rectangle>? workAreaFor = null,
-        Func<WidgetCard, IFrameClock>? frameClockFor = null)
+        Func<WidgetCard, IFrameClock>? frameClockFor = null, UnaskedParts? unasked = null)
     {
         ArgumentNullException.ThrowIfNull(createCard);
         ArgumentNullException.ThrowIfNull(callbacks);
@@ -110,6 +110,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         _log = log;
         _host = host;
         _animationsEnabled = animationsEnabled;
+        _unaskedParts = unasked;
 
         // Each card's frames come from the display it is on (VBlankFrameClock); a test hands in a fake clock.
         _frameClockFor = frameClockFor ?? (card => new VBlankFrameClock(() => card.IsHandleCreated ? card.Handle : 0, uiPost, log, new NoVBlankOutputs()));
@@ -178,16 +179,16 @@ internal sealed partial class WidgetCardPresenter : IDisposable
     // The system's look changed (the theme, the accent, the text size, transparency or a high-contrast theme): the
     // card on screen takes the theme again, reads the look and is laid out and drawn again, keeping its bottom edge.
     // A card that is not on screen reads the look when it is next shown.
-    public void ReapplyLook() => _uiPost(ReapplyLookOnUiThread);
+    public void ReapplyLook() => _uiPost(() => { ReapplyLookOnUiThread(); ReapplyUnaskedLook(); });
 
     // Re-renders the card with the latest snapshot, if it is on screen. IWidgetStatus.Changed is documented
     // as already raised on the UI thread, but this still posts, so a test or a future caller on another
     // thread is safe too.
-    public void Refresh() => _uiPost(RefreshOnUiThread);
+    public void Refresh() => _uiPost(() => { RefreshOnUiThread(); RefreshUnasked(); });
 
     // The displays changed (a monitor added or removed, a scale changed): the open card reads its scale again, and keeps its
     // bottom edge as it grows or shrinks. The only time an open card's scale is read after the show.
-    public void DisplayChanged() => _uiPost(DisplayChangedOnUiThread);
+    public void DisplayChanged() => _uiPost(() => { DisplayChangedOnUiThread(); DisplayChangedUnasked(); });
 
     public void Dispose()
     {
@@ -205,6 +206,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         StopRefreshTimer();
         StopSpinnerTimer();
         EndBatteryRefresh();
+        DisposeUnasked();
         if (_card is not null)
         {
             Unsubscribe(_card);
@@ -219,6 +221,10 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         {
             return;
         }
+
+        // The owner asked for a card: one nobody asked for closes first, so the two are never on screen together, even when this
+        // click is then taken as the second half of a double click.
+        CloseUnasked("an asked card was opened");
 
         if (_card is { IsDisposed: false, Visible: true, IsExiting: false })
         {
@@ -266,6 +272,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             return;
         }
 
+        CloseUnasked("an asked card was opened");
         _updateFrom = WidgetCardView.Main;
         _view = WidgetCardView.Update;
         _spinnerFrame = 0;
@@ -283,6 +290,8 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false, int? dpi = null)
     {
+        CloseUnasked("an asked card was opened");
+        _log.Write(LogLevel.Debug, "Card: shown asked (" + (openedByKeyboard ? "keyboard" : gaugeBounds is null ? "tray icon" : "gauge") + ").");
         _dpiLatch.FixAtShow(dpi, _callbacks.Dpi);
         Rectangle anchor = gaugeBounds ?? new Rectangle(fallbackPoint, Size.Empty);
         _place = CardPlace.AtClick(gaugeBounds is { } gauge ? new Point(gauge.X + (gauge.Width / 2), gauge.Y) : fallbackPoint);
@@ -408,9 +417,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         return values;
     }
 
-    // Shared with CaseOpenCardPresenter, which renders the exact same three columns from the exact same
-    // callbacks for its own WidgetCard(notice: true) instance; only the Where line differs, and WidgetCard
-    // itself overrides that for any notice-mode instance regardless of what this model carries. A notice is
+    // Shared by the unasked openings, which render the exact same three columns from the exact same
+    // callbacks for its own unasked WidgetCard instance; only the Where line differs, and WidgetCard
+    // itself overrides that for any unasked instance regardless of what this model carries. A notice is
     // always the main view.
     internal static WidgetCardModel BuildModel(WidgetCardPresenterCallbacks callbacks, TimeProvider time) =>
         BuildModel(callbacks, time, WidgetCardView.Main, null);

@@ -69,7 +69,7 @@ public sealed class WidgetRuntimeToggleTests
     }
 
     // TrayContext.OnCaseOpened only ever runs from the real IWidgetStatus.CaseOpened event, which nothing
-    // in this suite raises: WidgetCaseOpenCardWiredForTest above proves a CaseOpenCardPresenter exists, but
+    // in this suite raises: WidgetCaseOpenCardWiredForTest above proves the unasked card is wired, but
     // a mutant that dropped the "_widgetStatus.CaseOpened += OnCaseOpened" subscription in WireWidget, or
     // that made OnCaseOpened's body do nothing, would leave every existing assertion in this file exactly
     // as green as it is now. RaiseCaseOpenedForTest drives OnCaseOpened directly, the same way
@@ -93,7 +93,7 @@ public sealed class WidgetRuntimeToggleTests
                 settings: s => s.Widget = s.Widget with { ShowOnTaskbar = false, CaseOpenCardOn = true, Enabled = true });
             tray.PumpUntilIdle();
             Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "Sanity: the case-open card must be wired first.");
-            Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.StartsWith("Case-open card", StringComparison.Ordinal)), "Sanity: nothing has raised CaseOpened yet.");
+            Assert.IsFalse(tray.Log.Entries.Any(e => e.Message.StartsWith("Card:", StringComparison.Ordinal)), "Sanity: nothing has raised CaseOpened yet.");
 
             tray.Context.RaiseCaseOpenedForTest();
             tray.PumpUntilIdle();
@@ -101,14 +101,14 @@ public sealed class WidgetRuntimeToggleTests
             // QUNS_BUSY is now refused display by display (a full-screen application keeps the card off its own display only),
             // so the gate's line is the per-display one at Debug, or the notification-state one at Info for any other state.
             Assert.IsTrue(
-                tray.Log.Entries.Any(e => e.Message.StartsWith("Case-open card", StringComparison.Ordinal)),
+                tray.Log.Entries.Any(e => e.Message.StartsWith("Card:", StringComparison.Ordinal)),
                 "OnCaseOpened must actually reach the presenter's own gate, not merely a wired but inert " +
                 "presenter. Log: " + string.Join(" | ", tray.Log.Entries.Select(e => e.Level + ":" + e.Message)));
         });
     }
 
     // Before the fix, a left click on the gauge while the case-open notice was already showing left the
-    // notice sitting there: CaseOpenCardGate.OwnCardOpen already refuses to show a fresh notice over the
+    // notice sitting there: the presenter already refuses to show a fresh notice over the
     // owner's own card, but nothing closed the reverse, so a click opened a second Earshot window stacked
     // on the first rather than replacing it. A fake ICardEnvironment (TrayHarness's own
     // cardEnvironmentFactory, defaulting to QUNS_ACCEPTS_NOTIFICATIONS) lets the notice genuinely reach
@@ -139,7 +139,7 @@ public sealed class WidgetRuntimeToggleTests
     // Before the fix, a notice already open when a connect or disconnect started anywhere else (the tray
     // icon here, but the menu or a hotkey read the same IsBusy) kept showing the button it last rendered,
     // exactly the staleness TheOpenCardsButtonDisablesTheMomentAnyToggleStartsAndReEnablesWhenItEnds already
-    // proves is fixed for the gauge-anchored card: CaseOpenCardPresenter had no Refresh() at all, so nothing
+    // proves is fixed for the gauge-anchored card: the unasked card had no Refresh() at all, so nothing
     // ever re-rendered the notice's button once it was up. Mirrors that test's own technique exactly, for
     // the notice instead of the card.
     [TestMethod]

@@ -38,8 +38,12 @@ internal sealed partial class TrayContext
     // field is the real one only; this is what a redraw goes to.
     private IGaugeSurface? _gaugeSurface;
     private WidgetCardPresenter? _widgetCardPresenter;
-    private CaseOpenCardPresenter? _caseOpenCardPresenter;
     private WidgetCardPresenterCallbacks? _widgetCardCallbacks;
+    private UnaskedGate? _unaskedGate;
+
+    // Whether the card the owner asks for is wired: the gauge's pipeline built it, or an update page was asked for. The presenter
+    // itself exists from the data pipeline on, for the cards nobody asked for, so its existence says nothing about this.
+    private bool _askedCardWired;
 
     // Builds the gauge's card, hidden, a little after the first taskbar layout (CardPrewarm), so the first click opens as fast
     // as a later one. Only where the surfaces are real: a tray whose surfaces are fakes (a test) makes no window it was not asked for.
@@ -160,23 +164,19 @@ internal sealed partial class TrayContext
                 GaugePosition: () => _registry.Settings.Current.Widget.GaugePosition,
                 RefreshBattery: RefreshBatteryForCard,
                 QueryHistory: end => _widgetStatus?.QueryHistory(end) ?? HistoryStore.Window([], end),
-                SendToRowOn: () => SendToAccess.CardRow(_registry.Settings.Current.Widget, noticeCard: false),
+                SendToRowOn: () => SendToAccess.CardRow(_registry.Settings.Current.Widget, unasked: false),
                 OpenSendTo: () => OpenSendTo(openedByKeyboard: false),
                 LowBatteryThreshold: () => _registry.Settings.Current.Widget.LowBatteryThresholdPercent);
 
-            var caseOpenGate = new CaseOpenCardGate(
+            // The one presenter opens the asked card and the unasked ones: built here, with the data pipeline, so a case opening
+            // is shown with no gauge on the taskbar.
+            _unaskedGate = new UnaskedGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCardOn,
                 Closing: () => _closing,
                 HandBackInProgress: () => _coordinator.HandBackInProgress,
                 SessionEndInProgress: () => _coordinator.SessionEndInProgress,
-                OwnCardOpen: () => _widgetCardPresenter?.IsShown ?? false,
                 Options: () => CaseOpenCardOptions.From(_registry.Settings.Current.Widget));
-            _caseOpenCardPresenter = new CaseOpenCardPresenter(
-                () => CreateWidgetCard(notice: true), _widgetCardCallbacks, caseOpenGate,
-                _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log), _registry.UiPost, _time, _log,
-                new SystemCaseOpenCardScene(_displaySource, ShownGaugeBounds),
-                animationsEnabled: CardAnimationsEnabled(),
-                frameClockFor: card => NewFrameClock(() => card.IsHandleCreated ? card.Handle : 0));
+            BuildWidgetCardPresenter();
         }
 
         if (_registry.Settings.Current.Widget.ShowOnTaskbar)
@@ -301,7 +301,7 @@ internal sealed partial class TrayContext
         _secondaryGauges?.OnForegroundChanged(e.RootClassName);
 
         // A full-screen application coming to the front on a display the case-open card is on closes that display's card.
-        _caseOpenCardPresenter?.RecheckFullScreen();
+        _widgetCardPresenter?.RecheckFullScreen();
     }
 
     private void OnShellWindowChanged(object? sender, ShellWindowChangedEventArgs e)
@@ -389,7 +389,7 @@ internal sealed partial class TrayContext
                 _secondaryGauges?.NotifyFullScreenApp(opening);
                 if (opening)
                 {
-                    _caseOpenCardPresenter?.RecheckFullScreen();
+                    _widgetCardPresenter?.RecheckFullScreen();
                 }
                 else
                 {
@@ -418,7 +418,7 @@ internal sealed partial class TrayContext
     // any consumer wants them (WidgetSettings.WithWatcherRecomputed), independently of whether the gauge
     // itself is shown.
     internal bool WidgetDataPipelineWiredForTest => _widgetStatus is not null;
-    internal bool WidgetCaseOpenCardWiredForTest => _caseOpenCardPresenter is not null;
+    internal bool WidgetCaseOpenCardWiredForTest => _widgetCardPresenter is not null && _unaskedGate is not null;
 
     // Whether the gauge-anchored card is currently open, for tests: the same IsShown a real gauge click
     // (OnWidgetCardRequested) or close would change.
@@ -443,16 +443,16 @@ internal sealed partial class TrayContext
 
     // Whether the case-open notice is currently open, for tests: the same IsShown a real CaseOpened event,
     // a gauge click closing it or the tray closing would change.
-    internal bool WidgetCaseOpenCardIsShownForTest => _caseOpenCardPresenter?.IsShown ?? false;
+    internal bool WidgetCaseOpenCardIsShownForTest => _widgetCardPresenter?.IsUnaskedShown ?? false;
 
     // The open notice's own last-rendered ButtonEnabled, for tests: null when no notice is open.
-    internal bool? WidgetCaseOpenCardButtonEnabledForTest => _caseOpenCardPresenter?.CurrentModelForTest?.ButtonEnabled;
+    internal bool? WidgetCaseOpenCardButtonEnabledForTest => _widgetCardPresenter?.UnaskedModelForTest?.ButtonEnabled;
 
     // The case-open card's own gate, read straight through: which of the coordinator's own HandBackInProgress
     // and SessionEndInProgress each of the gate's two matching legs actually reads. False (not null) when
     // nothing is wired yet, since "not in progress" and "nothing to ask" read the same to a caller here.
-    internal bool WidgetCaseOpenGateHandBackInProgressForTest => _caseOpenCardPresenter?.HandBackInProgressForTest ?? false;
-    internal bool WidgetCaseOpenGateSessionEndInProgressForTest => _caseOpenCardPresenter?.SessionEndInProgressForTest ?? false;
+    internal bool WidgetCaseOpenGateHandBackInProgressForTest => _widgetCardPresenter?.HandBackInProgressForTest ?? false;
+    internal bool WidgetCaseOpenGateSessionEndInProgressForTest => _widgetCardPresenter?.SessionEndInProgressForTest ?? false;
 
     // Drives the same path a real left click on the gauge does, LeftClickConnects off, without simulating
     // an actual click on the real GaugeWindow this pipeline builds.
@@ -461,14 +461,14 @@ internal sealed partial class TrayContext
     // How many times a shown gauge-anchored card was given the look again, how many frames the real taskbar gauge has pushed,
     // whether the card's focus cue is on, and whether the cards were given motion, for tests.
     internal int WidgetCardLookReappliesForTest => _widgetCardPresenter?.LookReappliesForTest ?? 0;
-    internal int WidgetCaseOpenCardLookReappliesForTest => _caseOpenCardPresenter?.LookReappliesForTest ?? 0;
+    internal int WidgetCaseOpenCardLookReappliesForTest => _widgetCardPresenter?.UnaskedLookReappliesForTest ?? 0;
     internal int WidgetGaugePushCountForTest => _gaugeWindow?.PushCount ?? 0;
     internal bool? WidgetCardFocusCueVisibleForTest => _widgetCardPresenter?.FocusCueVisibleForTest;
     internal bool? WidgetCardHasMotionForTest => _widgetCardPresenter?.HasMotionForTest;
 
     // Whether the cards this tray makes would slide and fade, from the same choice both presenters are given.
     internal bool WidgetCardAnimationsChosenForTest => CardAnimationsEnabled() is not null;
-    internal bool? WidgetCaseOpenCardHasMotionForTest => _caseOpenCardPresenter?.HasMotionForTest;
+    internal bool? WidgetCaseOpenCardHasMotionForTest => _widgetCardPresenter?.UnaskedHasMotionForTest;
 
     // The Connect/Disconnect button on the widget card goes through the exact path the tray icon's own
     // left click and the menu's toggle item already use (Launch -> ToggleAsync -> BlockCoordinator), just
@@ -502,9 +502,9 @@ internal sealed partial class TrayContext
 
     // Every widget card is made here, so what all of them share is set in one place: the accent is the owner's
     // Windows accent colour, the same one the gauge's ring uses, and an open card repaints when it changes.
-    private WidgetCard CreateWidgetCard(bool notice)
+    private WidgetCard CreateWidgetCard(CardOpening opening)
     {
-        WidgetCard card = CreateWidgetCard(_log, notice, AccentColourService.Shared(_log), LookService());
+        WidgetCard card = CreateWidgetCard(_log, opening, AccentColourService.Shared(_log), LookService());
 
         // The card's window calls go into the frame and UI stall log, when the tray has one (UiStallMonitor).
         if (_frameLog is UiStallMonitor stallLog)
@@ -515,9 +515,9 @@ internal sealed partial class TrayContext
         return card;
     }
 
-    internal static WidgetCard CreateWidgetCard(ILog log, bool notice, IAccentColours accent, SystemLookService? look = null)
+    internal static WidgetCard CreateWidgetCard(ILog log, CardOpening opening, IAccentColours accent, SystemLookService? look = null)
     {
-        var card = new WidgetCard(log, notice);
+        var card = new WidgetCard(log, opening);
         card.AttachAccent(accent);
         if (look is not null)
         {
@@ -527,17 +527,35 @@ internal sealed partial class TrayContext
         return card;
     }
 
-    // The gauge-anchored card's presenter, built once. The gauge's own pipeline builds it, and so does an update
-    // page request when the gauge is off, since that page is drawn on this card.
-    private WidgetCardPresenter EnsureWidgetCardPresenter()
+    // The card presenter, built once: it opens the card the owner asks for (a gauge click, a shortcut, an update page) and the
+    // cards nobody asked for (the case opening). The data pipeline builds it, since a case opening needs a window with no gauge on
+    // the taskbar.
+    private WidgetCardPresenter BuildWidgetCardPresenter()
     {
         if (_widgetCardPresenter is null)
         {
-            _widgetCardPresenter = new WidgetCardPresenter(() => CreateWidgetCard(notice: false), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost, CardAnimationsEnabled(), anchor => SystemDisplaySource.WorkAreaFor(_displaySource, anchor), frameClockFor: card => NewFrameClock(() => card.IsHandleCreated ? card.Handle : 0));
+            UnaskedParts? unasked = _unaskedGate is { } gate
+                ? new UnaskedParts(
+                    () => CreateWidgetCard(CardOpening.Unasked), gate, _cardEnvironmentFactory?.Invoke() ?? new SystemCardEnvironment(_log),
+                    new SystemUnaskedScene(_displaySource, ShownGaugeBounds))
+                : null;
+            _widgetCardPresenter = new WidgetCardPresenter(
+                () => CreateWidgetCard(CardOpening.Asked), _widgetCardCallbacks!, _registry.UiPost, _time, _log, CardHost, CardAnimationsEnabled(),
+                anchor => SystemDisplaySource.WorkAreaFor(_displaySource, anchor), frameClockFor: card => NewFrameClock(() => card.IsHandleCreated ? card.Handle : 0),
+                unasked: unasked);
             WireLook();
         }
 
         return _widgetCardPresenter;
+    }
+
+    // The same presenter, for the card the owner asks for: the gauge's own pipeline builds it, and so does an update page request
+    // when the gauge is off, since that page is drawn on this card.
+    private WidgetCardPresenter EnsureWidgetCardPresenter()
+    {
+        WidgetCardPresenter presenter = BuildWidgetCardPresenter();
+        _askedCardWired = true;
+        return presenter;
     }
 
     // The update page on the widget card, above the gauge when it is shown, else near the cursor, for a check that found a
@@ -550,7 +568,6 @@ internal sealed partial class TrayContext
             return false;
         }
 
-        _caseOpenCardPresenter?.Hide();
         WidgetCardPresenter presenter = EnsureWidgetCardPresenter();
         if (GaugeBoundsIfShown() is { } bounds)
         {
@@ -629,7 +646,6 @@ internal sealed partial class TrayContext
             if (scaleChanged)
             {
                 _widgetCardPresenter?.DisplayChanged();
-                _caseOpenCardPresenter?.DisplayChanged();
             }
         }
 
@@ -655,10 +671,9 @@ internal sealed partial class TrayContext
 
         _widgetSnapshotCache = _widgetStatus.Current;
         RenderGaugeIfShown();
-        _widgetCardPresenter?.Refresh();
 
-        // The case-open card shows the same live figures, so it follows them while it is open.
-        _caseOpenCardPresenter?.Refresh();
+        // The asked card and any unasked one show the same live figures, so they follow them while they are open.
+        _widgetCardPresenter?.Refresh();
     }
 
     private void RenderGaugeIfShown()
@@ -678,7 +693,7 @@ internal sealed partial class TrayContext
     // fallback instead.
     //
     // The case-open notice's own gate already refuses to show itself over the owner's own card
-    // (CaseOpenCardGate.OwnCardOpen), but nothing closed the reverse: a click on the gauge while the notice
+    // (the presenter's own asked-card gate), but nothing closed the reverse: a click on the gauge while the notice
     // was already open left it sitting there, one Earshot window stacked on another, until its own dismiss
     // timer eventually cleared it. Hide is a no-op when nothing is open, so this runs unconditionally
     // rather than only when the notice happens to be showing.
@@ -688,12 +703,10 @@ internal sealed partial class TrayContext
     // start; the gauge takes no keyboard focus, so a click on it is always a click.
     private void OpenWidgetCard(bool openedByKeyboard)
     {
-        if (_widgetCardPresenter is not { } presenter)
+        if (_widgetCardPresenter is not { } presenter || !_askedCardWired)
         {
             return;
         }
-
-        _caseOpenCardPresenter?.Hide();
 
         if (GaugeBoundsIfShown() is { } bounds)
         {
@@ -713,7 +726,7 @@ internal sealed partial class TrayContext
     private void OnOpenCardHotkey()
     {
         _log.Info("Hotkey: open or close the card.");
-        if (_widgetCardPresenter is not null)
+        if (_askedCardWired)
         {
             OpenWidgetCard(openedByKeyboard: true);
         }
@@ -737,12 +750,12 @@ internal sealed partial class TrayContext
             _widgetSnapshotCache = status.Current;
         }
 
-        _caseOpenCardPresenter?.RequestShow(GaugeBoundsIfShown());
+        _widgetCardPresenter?.CaseOpened(GaugeBoundsIfShown());
     }
 
     // IWidgetStatus.CaseClosed, on the UI thread: the linked pair's case-known messages stopped, so the case-open card
     // closes on every display, whatever its own close time says.
-    private void OnCaseClosed(object? sender, CaseClosedEventArgs e) => _caseOpenCardPresenter?.CaseClosed();
+    private void OnCaseClosed(object? sender, CaseClosedEventArgs e) => _widgetCardPresenter?.CaseClosed();
 
     // Every gauge on screen now: the main one and those on other displays, for placing the case-open card above the gauge
     // on its display.
@@ -857,8 +870,6 @@ internal sealed partial class TrayContext
         _widgetCardPresenter?.Dispose();
         _widgetCardPresenter = null;
         CloseSendTo();
-        _caseOpenCardPresenter?.Dispose();
-        _caseOpenCardPresenter = null;
         DisposeForegroundSource();
         DisposeShellWindowSource();
         _taskbarWatcher?.Dispose();

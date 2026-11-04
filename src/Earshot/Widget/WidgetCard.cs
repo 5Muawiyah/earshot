@@ -20,11 +20,11 @@ internal readonly record struct SetupTarget(SetupTargetKind Kind, int Index);
 // second gauge click within SystemInformation.DoubleClickTime of a deactivate-close does not reopen it, the
 // same gesture as a second click on the volume flyout's own icon. The other reasons it simply hides for.
 //
-// ClickOutside is notice mode only: a click that landed on the card but missed both the button and the
-// switch. A notice-mode card is never activated (WS_EX_NOACTIVATE), so it never deactivates either; this
+// ClickOutside is an unasked card only: a click that landed on the card but missed both the button and the
+// switch. An unasked card is never activated (WS_EX_NOACTIVATE), so it never deactivates either; this
 // is its only way to notice "the owner clicked past it".
 //
-// CloseButton is notice mode only too: the close button that stands where the gear is on the gauge's card.
+// CloseButton is an unasked card only too: the close button that stands where the gear is on the gauge's card.
 //
 // HoldEnded is a compact row whose hold ran out: the card folds away.
 internal enum WidgetCardCloseReason { Deactivated, Escape, Action, ClickOutside, CloseButton, HoldEnded }
@@ -93,14 +93,13 @@ internal sealed record WidgetCardModel(
 // volume flyout), so CreateParams omits WS_EX_NOACTIVATE and ControlStyles.Selectable is left at its
 // default (true) rather than turned off.
 //
-// notice: true is the case-open card (CaseOpenCardPresenter), its own instance, never shared with the
-// gauge-anchored card: WS_EX_NOACTIVATE is set once in CreateParams and a style set at creation is not
-// toggled at run time, so the two modes cannot be the same live window. Everything notice mode needs beyond
-// CreateParams/WndProc/ShowWithoutActivation (already wired for it before this) is guarded on the _notice
-// field directly, in place: the Where line reads "Case open" always (OnPaint), Enter/Escape/Tab do nothing
-// (OnKeyDown), no focus rectangle is ever painted (DrawButton/DrawSwitch), a close button (the Cancel glyph) stands
-// where the gear is and closes it, and a click that misses the controls closes it too (OnMouseUp), since a
-// notice-mode card is never activated and so never deactivates either.
+// An unasked card (CardOpening.Unasked) is the one a thing other than the owner opened, such as the case opening. It is its own
+// instance, never shared with the asked card: WS_EX_NOACTIVATE is set once in CreateParams and a style set at creation is not
+// toggled at run time, so the two cannot be the same live window. Everything it needs beyond
+// CreateParams/WndProc/ShowWithoutActivation is guarded on the _unasked field directly, in place: the Where line reads "Case
+// open" always (OnPaint), Enter/Escape/Tab do nothing (OnKeyDown), no focus rectangle is ever painted (DrawButton/DrawSwitch), a
+// close button (the Cancel glyph) stands where the gear is and closes it, and a click that misses the controls closes it too
+// (OnMouseUp), since an unasked card is never activated and so never deactivates either.
 internal sealed partial class WidgetCard : Form
 {
     // The accent used until something supplies the system's own (AccentSource): the Windows default blue,
@@ -110,7 +109,7 @@ internal sealed partial class WidgetCard : Form
     internal static readonly Color AccentDark = DefaultCardAccent.Dark;
 
     private readonly ILog _log;
-    private readonly bool _notice;
+    private readonly bool _unasked;
     private WidgetCardModel _model = WidgetCardModel.Empty;
     private int _dpi = CardPlacement.BaseDpi;
     private CardPalette _palette = CardTheme.Light;
@@ -138,18 +137,18 @@ internal sealed partial class WidgetCard : Form
     public event EventHandler? SendToRequested;
     private SetupTarget? _leftButtonDownOnSetupTarget;
 
-    public WidgetCard(ILog log, bool notice = false)
+    public WidgetCard(ILog log, CardOpening opening = CardOpening.Asked)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
-        _notice = notice;
+        _unasked = opening == CardOpening.Unasked;
 
         Text = TrayStatus.AppName;
         // AccessibleName was never set (null, confirmed by reading it directly rather than assuming a
         // fallback to Text): a screen reader had nothing here to tell this card apart from the gauge, the
         // tray icon or any other Earshot window. GaugeWindow already sets its own explicit name for the
         // same reason; this card gets one that also tells the ordinary card and the case-open notice apart.
-        AccessibleName = TrayStatus.AppName + ": " + (notice ? WidgetCopy.CaseOpen : "AirPods");
+        AccessibleName = TrayStatus.AppName + ": " + (_unasked ? WidgetCopy.CaseOpen : "AirPods");
         _baseAccessibleName = AccessibleName;
         AccessibleRole = AccessibleRole.Window;
         FormBorderStyle = FormBorderStyle.None;
@@ -186,10 +185,10 @@ internal sealed partial class WidgetCard : Form
     // is observed: the card hides itself first, see RequestClose) and does its own bookkeeping.
     public event EventHandler<WidgetCardCloseReason>? CloseRequested;
 
-    // A notice-mode card is shown without being activated: the property says whether a form is activated when it is shown,
+    // An unasked card is shown without being activated: the property says whether a form is activated when it is shown,
     // so even the show itself takes no focus (and WS_EX_NOACTIVATE and MA_NOACTIVATE keep it so afterwards).
     // https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.form.showwithoutactivation
-    protected override bool ShowWithoutActivation => _notice;
+    protected override bool ShowWithoutActivation => _unasked;
 
     // For tests.
     internal bool ShowsWithoutActivationForTest => ShowWithoutActivation;
@@ -205,7 +204,7 @@ internal sealed partial class WidgetCard : Form
                 cp.ExStyle |= NativeMethods.WS_EX_LAYERED;
             }
 
-            if (_notice)
+            if (_unasked)
             {
                 cp.ExStyle |= NativeMethods.WS_EX_NOACTIVATE;
             }
@@ -222,8 +221,8 @@ internal sealed partial class WidgetCard : Form
     // Which control of the sub-page has the focus, for tests.
     internal SetupTarget SetupFocusTarget => _setupFocus;
 
-    // The view this card draws: notice mode always draws the main view, whatever the model says.
-    internal WidgetCardView EffectiveView => _notice ? WidgetCardView.Main : _model.View;
+    // The view this card draws: an unasked card always draws the main view, whatever the model says.
+    internal WidgetCardView EffectiveView => _unasked ? WidgetCardView.Main : _model.View;
 
     // The layouts the last Render computed, for tests.
     internal WidgetCardLayout.Layout CurrentMainLayout => _mainLayout;
@@ -286,9 +285,9 @@ internal sealed partial class WidgetCard : Form
         base.Dispose(disposing);
     }
 
-    // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for a
-    // notice-mode instance regardless of what the model's own Snapshot.Where says. For tests.
-    internal string WhereLineText => _notice ? WidgetCopy.CaseOpen : WidgetCopy.Where(_model.Snapshot.Where, _model.OtherDeviceLabel);
+    // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for an
+    // unasked instance regardless of what the model's own Snapshot.Where says. For tests.
+    internal string WhereLineText => _unasked ? WidgetCopy.CaseOpen : WidgetCopy.Where(_model.Snapshot.Where, _model.OtherDeviceLabel);
 
     // True once DWM accepted the translucent backdrop and DwmExtendFrameIntoClientArea for this window's
     // life; false means the opaque palette paint is used instead.
@@ -450,7 +449,7 @@ internal sealed partial class WidgetCard : Form
 
     private WidgetCardLayout.Layout ComputeMainLayout(Graphics measure, WidgetCardModel model)
     {
-        bool showUpdate = model.UpdateVersion is not null && !_notice;
+        bool showUpdate = model.UpdateVersion is not null && !_unasked;
         int updateButtonWidth = 0;
         if (showUpdate)
         {
@@ -462,8 +461,8 @@ internal sealed partial class WidgetCard : Form
         }
 
         return WidgetCardLayout.Compute(
-            _dpi, model.ShowSwitch, showGear: true, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, showRefresh: !_notice,
-            textScale: _look.TextScale, showSendTo: model.ShowSendTo && !_notice);
+            _dpi, model.ShowSwitch, showGear: true, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, showRefresh: !_unasked,
+            textScale: _look.TextScale, showSendTo: model.ShowSendTo && !_unasked);
     }
 
     private WidgetCardLayout.SetupLayout ComputeSetupLayout(Graphics measure, SetupViewModel setup)
@@ -542,7 +541,7 @@ internal sealed partial class WidgetCard : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (_notice && m.Msg == NativeMethods.WM_MOUSEACTIVATE)
+        if (_unasked && m.Msg == NativeMethods.WM_MOUSEACTIVATE)
         {
             m.Result = NativeMethods.MA_NOACTIVATE;
             return;
@@ -583,7 +582,7 @@ internal sealed partial class WidgetCard : Form
 
         // A set-up page stays open when the card loses focus: the owner reaches for his case and his phone
         // in the middle of it. Escape, Cancel, Back and Done are the ways out.
-        if (!_notice && EffectiveView is WidgetCardView.Main or WidgetCardView.Settings)
+        if (!_unasked && EffectiveView is WidgetCardView.Main or WidgetCardView.Settings)
         {
             RequestClose(WidgetCardCloseReason.Deactivated);
         }
@@ -614,9 +613,9 @@ internal sealed partial class WidgetCard : Form
     protected override void OnKeyDown(KeyEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
-        if (_notice)
+        if (_unasked)
         {
-            // No focus, no focus visual, keyboard does nothing: a notice-mode card is never activated
+            // No focus, no focus visual, keyboard does nothing: an unasked card is never activated
             // (WS_EX_NOACTIVATE), so it should never receive a key in practice; this guard makes that true
             // even if a key event ever reached it regardless.
             return;
@@ -711,7 +710,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnGear = e.Button == MouseButtons.Left && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
         _leftButtonDownOnUpdate = e.Button == MouseButtons.Left && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
         _leftButtonDownOnRefresh = e.Button == MouseButtons.Left && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
-        _leftButtonDownOnStatus = e.Button == MouseButtons.Left && !_notice && BluetoothOff && layout.WhereLine.Contains(e.Location);
+        _leftButtonDownOnStatus = e.Button == MouseButtons.Left && !_unasked && BluetoothOff && layout.WhereLine.Contains(e.Location);
         _leftButtonDownOnSendTo = e.Button == MouseButtons.Left && !layout.SendTo.IsEmpty && layout.SendTo.Contains(e.Location);
     }
 
@@ -800,10 +799,10 @@ internal sealed partial class WidgetCard : Form
             _focus = WidgetCardFocus.Switch;
             ActivateFocused();
         }
-        else if (_notice)
+        else if (_unasked)
         {
-            // A notice-mode card is dismissed by a click outside the button and the switch: only reachable
-            // in notice mode, since the normal card already closes on deactivation
+            // An unasked card is dismissed by a click outside the button and the switch: only reachable
+            // in an unasked card, since the normal card already closes on deactivation
             // for a click anywhere else.
             RequestClose(WidgetCardCloseReason.ClickOutside);
         }
@@ -917,7 +916,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         DrawRefreshIcon(g, layout);
-        if (_notice)
+        if (_unasked)
         {
             // The case-open card's close button: the Cancel glyph, or the clear button's own cross without the font.
             if (!CardPaint.TryGlyph(g, FluentGlyphs.Cancel, layout.Gear, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
@@ -987,7 +986,7 @@ internal sealed partial class WidgetCard : Form
             order.Add(WidgetCardFocus.Refresh);
         }
 
-        if (!_notice && BluetoothOff)
+        if (!_unasked && BluetoothOff)
         {
             order.Add(WidgetCardFocus.Status);
         }
@@ -1008,14 +1007,10 @@ internal sealed partial class WidgetCard : Form
             }
 
             ToggleRequested?.Invoke(this, EventArgs.Empty);
-            if (CaseOpenCardRules.ConnectClosesCard(_notice))
-            {
-                RequestClose(WidgetCardCloseReason.Action);
-            }
         }
         else if (_focus == WidgetCardFocus.Gear)
         {
-            if (_notice)
+            if (_unasked)
             {
                 // The notice's close button, in the gear's place.
                 RequestClose(WidgetCardCloseReason.CloseButton);
@@ -1431,7 +1426,7 @@ internal sealed partial class WidgetCard : Form
 
         if (BluetoothOff)
         {
-            if (!_notice && _focus == WidgetCardFocus.Status && FocusShown)
+            if (!_unasked && _focus == WidgetCardFocus.Status && FocusShown)
             {
                 CardPaint.Focus(g, bounds, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
             }
@@ -1494,7 +1489,7 @@ internal sealed partial class WidgetCard : Form
                 return (FluentGlyphs.Warning, WidgetCopy.OpenTheCaseToShowBattery, colours.Caution);
             }
 
-            char glyph = !_notice && _model.Snapshot.Where == AirPodsWhere.Elsewhere ? FluentGlyphs.CellPhone : FluentGlyphs.OnThisPc;
+            char glyph = !_unasked && _model.Snapshot.Where == AirPodsWhere.Elsewhere ? FluentGlyphs.CellPhone : FluentGlyphs.OnThisPc;
             return (glyph, WhereLineText, colours.Text);
         }
     }
@@ -1502,7 +1497,7 @@ internal sealed partial class WidgetCard : Form
     // Bluetooth is off: the refresh outcome says so, or the watcher stopped for the radio's absence. The refresh icon and
     // Connect are disabled while it is.
     internal bool BluetoothOff =>
-        !_notice
+        !_unasked
         && (_model.Refresh?.Outcome == BatteryRefreshOutcome.BluetoothOff
             || (_model.Snapshot.Watcher == WidgetWatcherState.Stopped && _model.Snapshot.WatcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode));
 
@@ -1560,7 +1555,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         DrawText(g, rect, connect ? WidgetCopy.Connect : WidgetCopy.Disconnect, text, TypeRole.Body, StringAlignment.Center);
-        if (!_notice && _focus == WidgetCardFocus.Button && FocusShown)
+        if (!_unasked && _focus == WidgetCardFocus.Button && FocusShown)
         {
             CardPaint.Focus(g, rect, radius, colours, _dpi);
         }
@@ -1598,7 +1593,7 @@ internal sealed partial class WidgetCard : Form
         var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
         CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi, Knob(SettingsRowId.PauseBud, track, _model.AutoPauseOn));
 
-        if (!_notice && _focus == WidgetCardFocus.Switch && FocusShown)
+        if (!_unasked && _focus == WidgetCardFocus.Switch && FocusShown)
         {
             CardPaint.Focus(g, rect, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
         }

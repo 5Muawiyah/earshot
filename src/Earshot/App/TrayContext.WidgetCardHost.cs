@@ -136,7 +136,7 @@ internal sealed partial class TrayContext
             Write("case-open card (card)", s => s.Widget = (s.Widget with { CaseOpenCardOn = on }).WithWatcherRecomputed(), place);
             if (!on)
             {
-                _tray._caseOpenCardPresenter?.Hide();
+                _tray._widgetCardPresenter?.HideUnasked();
             }
         }
 

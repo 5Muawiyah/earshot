@@ -28,7 +28,7 @@ public sealed class WidgetCardTests
         Phase5.CardSta.Run(() =>
         {
             using var ordinary = new WidgetCard(new CapturingLog());
-            using var notice = new WidgetCard(new CapturingLog(), notice: true);
+            using var notice = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
 
             Assert.AreEqual("Earshot: AirPods", ordinary.AccessibleName);
             Assert.AreEqual("Earshot: " + WidgetCopy.CaseOpen, notice.AccessibleName);
@@ -291,7 +291,7 @@ public sealed class WidgetCardTests
     {
         Phase5.CardSta.Run(() =>
         {
-            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            using var card = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             nint handle = card.Handle;
             long style = Phase5.TestWindows.ExtendedStyle(handle);
             Assert.AreEqual((long)NativeMethods.WS_EX_NOACTIVATE, style & NativeMethods.WS_EX_NOACTIVATE);
@@ -304,7 +304,7 @@ public sealed class WidgetCardTests
     {
         Phase5.CardSta.Run(() =>
         {
-            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            using var card = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             card.SetTheme(Color.Black, highContrast: false);
             card.Render(Model(Snapshot(where: AirPodsWhere.Elsewhere), otherDeviceLabel: "iPhone"), 96);
 
@@ -353,7 +353,7 @@ public sealed class WidgetCardTests
             Application.DoEvents();
             nint before = Phase5.TestWindows.GetActiveWindow();
 
-            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            using var card = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             card.SetTheme(Color.Black, highContrast: false);
             card.Render(Model(Snapshot()), 96);
             card.Location = new Point(200, 50);
@@ -417,7 +417,7 @@ public sealed class WidgetCardTests
     }
 
     [TestMethod]
-    public void EnterOnTheFocusedButtonRaisesExactlyOneToggleRequestAndCloses()
+    public void EnterOnTheFocusedButtonRaisesExactlyOneToggleRequestAndLeavesTheCardOpen()
     {
         Phase5.CardDesktop.Run(() =>
         {
@@ -434,7 +434,7 @@ public sealed class WidgetCardTests
             SendKey(card.Handle, Keys.Enter);
 
             Assert.AreEqual(1, toggles);
-            Assert.IsFalse(card.Visible, "Pressing Connect/Disconnect closes the card.");
+            Assert.IsTrue(card.Visible, "Pressing Connect or Disconnect leaves the card open.");
         });
     }
 
@@ -551,7 +551,7 @@ public sealed class WidgetCardTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            using var card = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             card.SetTheme(Color.Black, highContrast: false);
             card.Render(Model(Snapshot(), buttonEnabled: true), 96);
             card.Location = new Point(50, 50);
@@ -580,7 +580,7 @@ public sealed class WidgetCardTests
     {
         Phase5.CardDesktop.Run(() =>
         {
-            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            using var card = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             card.SetTheme(Color.Black, highContrast: false);
             card.Render(Model(Snapshot()), 96);
             card.Location = new Point(50, 50);
@@ -801,7 +801,7 @@ public sealed class WidgetCardTests
     {
         Phase5.CardSta.Run(() =>
         {
-            using var card = new WidgetCard(new CapturingLog(), notice: true);
+            using var card = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             card.SetTheme(Color.Black, highContrast: false);
             card.Render(PageModel(Page(SetupIcon.Spinner, "Checking", null, Secondary)), 96);
             using Bitmap bitmap = Render(card);

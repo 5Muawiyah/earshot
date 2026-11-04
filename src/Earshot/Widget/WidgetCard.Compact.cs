@@ -6,7 +6,7 @@ using Earshot.Tray;
 namespace Earshot.Widget;
 
 // The compact form of the card: the same window folded to one row (a glyph, the words, and a button when the state has an action).
-// Only an unasked card (notice mode, never activated) shows it. What it draws, and how it grows into the full card and folds back:
+// Only an unasked card (an unasked card, never activated) shows it. What it draws, and how it grows into the full card and folds back:
 //   - grow and fold move the window to its new height point to point with the bottom edge kept (the card's own height motion), the
 //     old content fading out as the new fades in (CompactMotion has the numbers); a row replaced in place crossfades in 83 ms;
 //   - the row holds its time once its entrance has finished; the pointer over it stops the clock and leaving restarts it with what
@@ -30,7 +30,7 @@ internal sealed partial class WidgetCard
     public event EventHandler? CompactBodyClicked;
 
     // Whether the card is showing its compact form now.
-    internal bool IsCompactShown => _notice && _shownForm == CardForm.Compact && _compactLayout is not null;
+    internal bool IsCompactShown => _unasked && _shownForm == CardForm.Compact && _compactLayout is not null;
 
     internal CardForm ShownForm => _shownForm;
 
@@ -38,7 +38,7 @@ internal sealed partial class WidgetCard
 
     // ---- Render
 
-    private bool WantsCompact(WidgetCardModel model) => _notice && model.Form == CardForm.Compact && model.Compact is not null;
+    private bool WantsCompact(WidgetCardModel model) => _unasked && model.Form == CardForm.Compact && model.Compact is not null;
 
     private void RenderCompact(WidgetCardModel model, CompactContent content)
     {

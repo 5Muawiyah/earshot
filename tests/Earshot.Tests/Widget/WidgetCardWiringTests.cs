@@ -38,7 +38,7 @@ public sealed class WidgetCardWiringTests
         Phase5.CardSta.Run(() =>
         {
             var accent = new FakeAccent();
-            using WidgetCard light = TrayContext.CreateWidgetCard(new CapturingLog(), notice: false, accent);
+            using WidgetCard light = TrayContext.CreateWidgetCard(new CapturingLog(), CardOpening.Asked, accent);
             light.SetTheme(Color.Black, highContrast: false);
             using (Bitmap bitmap = RenderWithReading(light, 60))
             {
@@ -46,7 +46,7 @@ public sealed class WidgetCardWiringTests
                 Assert.AreNotEqual(WidgetCard.AccentLight, BarFill(light, bitmap));
             }
 
-            using WidgetCard dark = TrayContext.CreateWidgetCard(new CapturingLog(), notice: false, accent);
+            using WidgetCard dark = TrayContext.CreateWidgetCard(new CapturingLog(), CardOpening.Asked, accent);
             dark.SetTheme(Color.White, highContrast: false);
             using (Bitmap bitmap = RenderWithReading(dark, 60))
             {
@@ -61,7 +61,7 @@ public sealed class WidgetCardWiringTests
         Phase5.CardSta.Run(() =>
         {
             var accent = new FakeAccent();
-            using WidgetCard notice = TrayContext.CreateWidgetCard(new CapturingLog(), notice: true, accent);
+            using WidgetCard notice = TrayContext.CreateWidgetCard(new CapturingLog(), CardOpening.Unasked, accent);
             notice.SetTheme(Color.Black, highContrast: false);
 
             using Bitmap bitmap = RenderWithReading(notice, 60);
@@ -76,7 +76,7 @@ public sealed class WidgetCardWiringTests
         Phase5.CardSta.Run(() =>
         {
             var accent = new FakeAccent();
-            using WidgetCard card = TrayContext.CreateWidgetCard(new CapturingLog(), notice: false, accent);
+            using WidgetCard card = TrayContext.CreateWidgetCard(new CapturingLog(), CardOpening.Asked, accent);
             card.SetTheme(Color.Black, highContrast: false);
             Color before;
             using (Bitmap bitmap = RenderWithReading(card, 60))
@@ -103,7 +103,7 @@ public sealed class WidgetCardWiringTests
             var log = new CapturingLog();
             WidgetCard? card = null;
             using var presenter = new WidgetCardPresenter(
-                () => card = TrayContext.CreateWidgetCard(log, notice: false, accent), CardKit.Callbacks(), CardKit.Inline, new Streaming.TestTimeProvider(), log);
+                () => card = TrayContext.CreateWidgetCard(log, CardOpening.Asked, accent), CardKit.Callbacks(), CardKit.Inline, new Streaming.TestTimeProvider(), log);
             presenter.RequestShow(CardKit.Gauge, CardKit.Gauge.Location);
             Application.DoEvents();
             Assert.IsTrue(presenter.IsShown);
@@ -122,7 +122,7 @@ public sealed class WidgetCardWiringTests
         Phase5.CardSta.Run(() =>
         {
             var accent = new FakeAccent();
-            WidgetCard card = TrayContext.CreateWidgetCard(new CapturingLog(), notice: false, accent);
+            WidgetCard card = TrayContext.CreateWidgetCard(new CapturingLog(), CardOpening.Asked, accent);
             Assert.AreEqual(1, accent.Subscribers);
 
             card.Dispose();
@@ -204,15 +204,15 @@ public sealed class WidgetCardWiringTests
             var gauge = new Rectangle(work.Left + (work.Width / 2) - 37, work.Bottom + 4, 74, 40);
             var log = new CapturingLog();
             WidgetCard? card = null;
-            var gate = new CaseOpenCardGate(() => true, () => false, () => false, () => false, () => false);
-            using var presenter = new CaseOpenCardPresenter(
-                () => card = new WidgetCard(log, notice: true), CardKit.Callbacks(GaugePosition.NextToApps), gate,
-                new Phase5.FakeCardEnvironment(), CardKit.Inline, new Streaming.TestTimeProvider(), log);
+            var gate = new UnaskedGate(() => true, () => false, () => false, () => false);
+            using var presenter = new WidgetCardPresenter(
+                () => new WidgetCard(log), CardKit.Callbacks(GaugePosition.NextToApps), CardKit.Inline, new Streaming.TestTimeProvider(), log,
+                unasked: new UnaskedParts(() => card = new WidgetCard(log, CardOpening.Unasked), gate, new Phase5.FakeCardEnvironment()));
 
-            presenter.RequestShow(gauge);
+            presenter.CaseOpened(gauge);
             Application.DoEvents();
 
-            Assert.IsTrue(presenter.IsShown);
+            Assert.IsTrue(presenter.IsUnaskedShown);
             Assert.AreEqual(gauge.X + (gauge.Width / 2), card!.Bounds.X + (card.Bounds.Width / 2), 1, "Centred on the gauge, as the main card is.");
         });
     }

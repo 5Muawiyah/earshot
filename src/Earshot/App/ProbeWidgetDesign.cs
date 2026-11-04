@@ -302,7 +302,7 @@ internal static partial class Program
     {
         try
         {
-            using var card = new WidgetCard(log, notice);
+            using var card = new WidgetCard(log, notice ? CardOpening.Unasked : CardOpening.Asked);
             var look = new SystemLook(textScale, Transparency: !highContrast, HighContrast: highContrast);
             card.AttachLook(() => look);
             card.SetTheme(ink, highContrast);

@@ -23,7 +23,7 @@ internal sealed partial class WidgetCard
     // The AirPods are connected to this PC, no pair is linked and no figure of any kind is shown: the line says what makes
     // one show, with an earbud icon, in the place the age takes once a battery has been read.
     internal bool AsksToOpenTheCase =>
-        !_notice
+        !_unasked
         && _model.Snapshot.Where == AirPodsWhere.ThisPc
         && _model.Snapshot.Selection == BroadcastSelectionState.Listening
         && _model.ShownParts.NewestReadAt is null;

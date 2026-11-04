@@ -284,7 +284,7 @@ internal sealed partial class WidgetCard
     // The pointer moved, went down or up, or left: the fill under it fades to hover or pressed and the one it left fades out.
     private void TrackHot(Point? point, bool pressed)
     {
-        Rectangle? hot = point is { } p && (!_notice || IsCompactShown) && !_exiting ? IconButtonAt(p) : null;
+        Rectangle? hot = point is { } p && (!_unasked || IsCompactShown) && !_exiting ? IconButtonAt(p) : null;
         if (hot == _hot && pressed == _hotPressed)
         {
             return;

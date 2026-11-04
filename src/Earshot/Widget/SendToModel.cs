@@ -95,10 +95,10 @@ internal sealed class SendToActions(Action connect, Action handBack, Action open
 // and shortcuts are on, so clearing it turns it off). Turning one off leaves the others as they are.
 internal static class SendToAccess
 {
-    public static bool CardRow(WidgetSettings widget, bool noticeCard)
+    public static bool CardRow(WidgetSettings widget, bool unasked)
     {
         ArgumentNullException.ThrowIfNull(widget);
-        return widget.SendToOnCard && !noticeCard;
+        return widget.SendToOnCard && !unasked;
     }
 
     public static bool GaugeMenuItem(WidgetSettings widget, bool openedFromGauge)

@@ -181,7 +181,7 @@ internal static class CaseOpenCardFullScreen
     // notification mode (as the tray's other unrequested cards allow), or a full-screen application, which hides it only
     // on that application's display.
     public static bool AllowsAnyDisplay(int state) =>
-        CardPresenter.AcceptsUnrequestedCard(state) || state is Shell.QUNS_BUSY or Shell.QUNS_RUNNING_D3D_FULL_SCREEN;
+        UnaskedGate.AcceptsUnrequestedCard(state) || state is Shell.QUNS_BUSY or Shell.QUNS_RUNNING_D3D_FULL_SCREEN;
 
     // A full-screen application covers this display: the state says one runs, and the foreground window covers this
     // display's bounds (with one display, the state alone, since it can only be that display; with several and a foreground

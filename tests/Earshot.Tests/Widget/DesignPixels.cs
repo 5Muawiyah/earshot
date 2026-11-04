@@ -31,7 +31,7 @@ internal static class DesignPixels
     // The ink a card is told about: white for a dark card, black for a light one; high contrast is told its own flag.
     public static WidgetCard NewCard(DesignTheme theme, double textScale, bool notice = false)
     {
-        var card = new WidgetCard(new CapturingLog(), notice);
+        var card = new WidgetCard(new CapturingLog(), notice ? CardOpening.Unasked : CardOpening.Asked);
         bool hc = theme == DesignTheme.HighContrast;
         var look = new SystemLook(textScale, Transparency: !hc, HighContrast: hc);
         card.AttachLook(() => look);

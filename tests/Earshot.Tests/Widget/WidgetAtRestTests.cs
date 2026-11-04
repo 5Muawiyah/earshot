@@ -95,7 +95,7 @@ public sealed class WidgetAtRestTests
 
     // Not caught, and cannot be by anything this scanner does: an Action (or Action<T>, Func<T>, and so on)
     // is exactly how much of the widget's own architecture already crosses a UI-post boundary on purpose
-    // (WidgetCardPresenter and CaseOpenCardPresenter both take one, uiPost: Action<Action>, to run work on
+    // (WidgetCardPresenter takes one, uiPost: Action<Action>, to run work on
     // the UI thread), so a delegate-typed field or parameter cannot be forbidden outright without also
     // forbidding that. Once constructed, invoking it calls whatever method its target was bound to at
     // runtime, which carries no type information at the call site (Invoke on any delegate type takes and

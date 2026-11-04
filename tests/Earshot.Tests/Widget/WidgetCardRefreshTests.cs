@@ -244,7 +244,7 @@ public sealed class WidgetCardRefreshTests
     {
         Phase5.CardSta.Run(() =>
         {
-            using var notice = new WidgetCard(new CapturingLog(), notice: true);
+            using var notice = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             notice.Render(CardKit.MainModel(), 96);
 
             Assert.IsTrue(notice.CurrentMainLayout.Refresh.IsEmpty);

@@ -103,8 +103,6 @@ internal sealed partial class TrayContext
             return;
         }
 
-        _caseOpenCardPresenter?.Hide();
-
         // The scale goes with the request: the main gauge's own scale (_widgetLayoutDpi) is read from the main taskbar and is not
         // this display's, and a read of it between the click and the card being shown must not change what the card is drawn at.
         presenter.RequestShow(bounds, bounds.Location, openedByKeyboard: false, dpi: gauge.Dpi);

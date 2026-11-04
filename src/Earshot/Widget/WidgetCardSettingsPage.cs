@@ -43,7 +43,7 @@ internal sealed partial class WidgetCard
     // The shortcut row waiting for a key press, or null.
     internal SettingsRowId? CapturingShortcut => _capturing;
 
-    private bool OnSettingsPage => !_notice && _model.View == WidgetCardView.Settings && _settingsLayout is not null && _model.Settings is not null;
+    private bool OnSettingsPage => !_unasked && _model.View == WidgetCardView.Settings && _settingsLayout is not null && _model.Settings is not null;
 
     // The tallest the card may be, or 0 for no limit: the space above the taskbar, which the presenter works out from the
     // work area of the gauge's display. A settings page taller than this is as tall as this and scrolls under its header.
@@ -153,7 +153,7 @@ internal sealed partial class WidgetCard
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
-        if (!_notice && !_exiting && OnSettingsPage && !_scrollDragging && SettingsScrolls)
+        if (!_unasked && !_exiting && OnSettingsPage && !_scrollDragging && SettingsScrolls)
         {
             ScrollSettingsTo(_settingsScroll + CardScroll.WheelPixels(e.Delta, SystemInformation.MouseWheelScrollLines, _dpi, SettingsViewport.Height));
             if (e is HandledMouseEventArgs handled)
@@ -737,7 +737,7 @@ internal sealed partial class WidgetCard
     protected override void OnKeyPress(KeyPressEventArgs e)
     {
         ArgumentNullException.ThrowIfNull(e);
-        if (!_notice && _editingText)
+        if (!_unasked && _editingText)
         {
             HandleSettingsChar(e.KeyChar);
             e.Handled = true;
@@ -750,7 +750,7 @@ internal sealed partial class WidgetCard
     // or system key.
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (!_notice && _capturing is not null)
+        if (!_unasked && _capturing is not null)
         {
             HandleSettingsKey(keyData);
             return true;

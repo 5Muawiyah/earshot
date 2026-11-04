@@ -57,7 +57,7 @@ public sealed record WidgetSettings
     // what is read now.
     public bool CaseOpenCard { get; set; } = true;
 
-    // The case-open card (CaseOpenCardPresenter): on by default, for a new install and an existing one alike (the owner's
+    // The case-open card (an unasked opening of the card): on by default, for a new install and an existing one alike (the owner's
     // decision of 2 October 2026). A new member rather than the old one above, so a file that never held it, which is every
     // file written before v1.4, reads as on, whatever the old member says.
     public bool CaseOpenCardOn { get; set; } = true;

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Tray;
+using Earshot.Widget;
 
 namespace Earshot.Popup;
 
@@ -170,22 +171,6 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
             _card = null;
         }
     }
-
-    // True for the notification states in which a card nobody clicked for may show.
-    internal static bool AcceptsUnrequestedCard(int state) =>
-        state is Shell.QUNS_ACCEPTS_NOTIFICATIONS or Shell.QUNS_APP;
-
-    internal static string NotificationStateName(int state) => state switch
-    {
-        Shell.QUNS_NOT_PRESENT => "QUNS_NOT_PRESENT",
-        Shell.QUNS_BUSY => "QUNS_BUSY",
-        Shell.QUNS_RUNNING_D3D_FULL_SCREEN => "QUNS_RUNNING_D3D_FULL_SCREEN",
-        Shell.QUNS_PRESENTATION_MODE => "QUNS_PRESENTATION_MODE",
-        Shell.QUNS_ACCEPTS_NOTIFICATIONS => "QUNS_ACCEPTS_NOTIFICATIONS",
-        Shell.QUNS_QUIET_TIME => "QUNS_QUIET_TIME",
-        Shell.QUNS_APP => "QUNS_APP",
-        _ => "QUNS " + state.ToString(CultureInfo.InvariantCulture),
-    };
 
     // A card that is on screen, or any card when there is no hold, goes up at once. Otherwise it is held, replacing what was
     // held, and the hold ends SettleDelay after the first card of it.
@@ -373,12 +358,12 @@ internal sealed class CardPresenter : ICardPresenter, IDisposable
             return false;
         }
 
-        if (AcceptsUnrequestedCard(reading.State))
+        if (UnaskedGate.AcceptsUnrequestedCard(reading.State))
         {
             return true;
         }
 
-        _log.Info("Not shown, Windows is not taking notifications now (" + NotificationStateName(reading.State) + "): " + what + ".");
+        _log.Info("Not shown, Windows is not taking notifications now (" + UnaskedGate.NotificationStateName(reading.State) + "): " + what + ".");
         return false;
     }
 

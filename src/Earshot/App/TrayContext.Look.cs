@@ -63,6 +63,5 @@ internal sealed partial class TrayContext
     {
         _lookReappliesAsked++;
         _widgetCardPresenter?.ReapplyLook();
-        _caseOpenCardPresenter?.ReapplyLook();
     }
 }

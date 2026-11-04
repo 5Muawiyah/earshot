@@ -57,8 +57,8 @@ public sealed class SendToAccessTests
         WidgetSettings on = new();
         WidgetSettings off = on with { SendToOnCard = false };
 
-        Assert.IsTrue(SendToAccess.CardRow(on, noticeCard: false));
-        Assert.IsFalse(SendToAccess.CardRow(off, noticeCard: false));
+        Assert.IsTrue(SendToAccess.CardRow(on, unasked: false));
+        Assert.IsFalse(SendToAccess.CardRow(off, unasked: false));
         Assert.IsTrue(SendToAccess.GaugeMenuItem(off, openedFromGauge: true), "The gauge menu is untouched.");
         Assert.IsTrue(SendToShortcut.IsOn(new HotkeySettings()), "The shortcut is untouched.");
     }
@@ -66,7 +66,7 @@ public sealed class SendToAccessTests
     [TestMethod]
     public void TheCaseOpenCardNeverHasTheRow()
     {
-        Assert.IsFalse(SendToAccess.CardRow(new WidgetSettings(), noticeCard: true));
+        Assert.IsFalse(SendToAccess.CardRow(new WidgetSettings(), unasked: true));
     }
 
     [TestMethod]
@@ -78,7 +78,7 @@ public sealed class SendToAccessTests
 
         Assert.IsTrue(Menu(on, openedFromGauge: true).SendTo.Visible);
         Assert.IsFalse(Menu(off, openedFromGauge: true).SendTo.Visible);
-        Assert.IsTrue(SendToAccess.CardRow(off.Widget, noticeCard: false), "The card row is untouched.");
+        Assert.IsTrue(SendToAccess.CardRow(off.Widget, unasked: false), "The card row is untouched.");
         Assert.IsTrue(SendToShortcut.IsOn(off.Hotkeys), "The shortcut is untouched.");
     }
 
@@ -109,7 +109,7 @@ public sealed class SendToAccessTests
 
         Assert.IsFalse(SendToShortcut.IsOn(hotkeys));
         Assert.IsFalse(SendToShortcut.IsOn(new HotkeySettings { Enabled = false }));
-        Assert.IsTrue(SendToAccess.CardRow(settings.Widget, noticeCard: false), "The card row is untouched.");
+        Assert.IsTrue(SendToAccess.CardRow(settings.Widget, unasked: false), "The card row is untouched.");
         Assert.IsTrue(SendToAccess.GaugeMenuItem(settings.Widget, openedFromGauge: true), "The gauge menu is untouched.");
     }
 

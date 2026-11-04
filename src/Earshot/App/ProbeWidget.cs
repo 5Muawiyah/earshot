@@ -239,7 +239,7 @@ internal static partial class Program
             $"{namePrefix}-{dpi}dpi-{inkName}.png"));
         try
         {
-            using var card = new WidgetCard(log, notice);
+            using var card = new WidgetCard(log, notice ? CardOpening.Unasked : CardOpening.Asked);
             card.SetTheme(ink, highContrast: false);
             // The card is never actually composited by DWM here (the window handle, if it exists at all,
             // is never shown), so its own translucent-backdrop clear leaves nothing for the capture to

@@ -171,7 +171,7 @@ public sealed class WidgetCardPresenterTests
     }
 
     [TestMethod]
-    public void PressingConnectRoutesThroughRequestToggleWithThePlaceAboveTheGaugeAndClosesTheCard()
+    public void PressingConnectRoutesThroughRequestToggleWithThePlaceAboveTheGaugeAndLeavesTheCardOpen()
     {
         Phase5.CardDesktop.Run(() =>
         {
@@ -190,7 +190,7 @@ public sealed class WidgetCardPresenterTests
             Assert.AreEqual(1, callbacks.ToggleCalls.Count, "Exactly one toggle request.");
             CardPlace place = callbacks.ToggleCalls[0];
             Assert.AreEqual(new Point(Gauge.X + (Gauge.Width / 2), Gauge.Y), place.ClickPoint, "The place follows the gauge, so the result card lands above it.");
-            Assert.IsFalse(presenter.IsShown, "The card closes once Connect/Disconnect is pressed.");
+            Assert.IsTrue(presenter.IsShown, "The card stays open through a Connect or Disconnect.");
         });
     }
 
