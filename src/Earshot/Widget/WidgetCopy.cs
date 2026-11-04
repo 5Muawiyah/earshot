@@ -392,6 +392,22 @@ internal static class WidgetCopy
     public const string GaugeNotOnThisPc = "Not on this PC";
     public const string GaugeNoRecentReading = "No recent reading";
 
+    // The gauge's words while a connect or disconnect runs and for the moment after: its tooltip and what a screen reader says.
+    public const string GaugeConnecting = "Connecting";
+    public const string GaugeConnected = "Connected";
+    public const string GaugeDidntConnect = "Didn't connect";
+    public const string GaugeDisconnecting = "Disconnecting";
+    public const string GaugeDidntDisconnect = "Didn't disconnect";
+
+    // The words for a story the gauge is telling, or null when it tells none.
+    public static string? GaugeStoryWords(GaugeStoryView story) => story.Kind switch
+    {
+        GaugeStoryKind.Spinning => story.Connect ? GaugeConnecting : GaugeDisconnecting,
+        GaugeStoryKind.Tick => GaugeConnected,
+        GaugeStoryKind.Cross => story.Connect ? GaugeDidntConnect : GaugeDidntDisconnect,
+        _ => null,
+    };
+
     // "L 70%   R 60%": the buds that have a reading, left first, three spaces apart. A bud with none is left out, never shown
     // as a dash or a guess.
     public static string GaugeBudsLine(int? left, int? right)

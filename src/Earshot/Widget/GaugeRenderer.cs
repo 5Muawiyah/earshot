@@ -15,6 +15,12 @@ namespace Earshot.Widget;
 //   away, case value  ring track and arc in tertiary, the case mark in tertiary, the value in tertiary,
 //                     the bolt when the case was charging; a live case value is drawn in full ink
 //
+// While a connect or disconnect is told (GaugeContent.Story, GaugeStoryFrame) the number's place and the arc are the story's:
+//   connecting       the mark as the state has it, the track, a 90 degree accent sweep, the number slot and the bolt empty
+//   connected        the arc at the live level (the track only without one), a tick in the accent in the number's place
+//   failed           the track only, a cross in caution in the number's place
+//   leaving          the glyph fades out as the number (or the phone) comes back, the arc at what the state draws at rest
+//
 // GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit): GDI text (TextRenderer) writes alpha
 // 0 and would vanish on a layered window (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
 //
@@ -66,7 +72,12 @@ internal static class GaugeRenderer
     // The same, part way through a motion: hover is the hover fill's strength (0 none, 1 full), and ring, when given, is where
     // the ring's arc is drawn to (a percentage, which may be fractional while it moves point to point to a new value). The
     // number is always the content's own: it changes at once.
-    public static Bitmap Render(GaugeContent content, GaugePalette palette, GaugeLayout layout, double hover, string fontFamily, double? ring)
+    //
+    // frame is the story's frame (the sweep's start and extent and what is in the number's place); with none, a content that has a
+    // story is drawn as the story's still state (the sweep at 12 o'clock, the tick or the cross whole), and one that has none is
+    // drawn as it is at rest.
+    public static Bitmap Render(
+        GaugeContent content, GaugePalette palette, GaugeLayout layout, double hover, string fontFamily, double? ring, GaugeStoryFrame? frame = null)
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(fontFamily);
@@ -78,6 +89,12 @@ internal static class GaugeRenderer
         g.Clear(Color.Transparent);
 
         FillBackground(g, palette, layout, hover);
+        if (frame is not null || content.Story.Kind != GaugeStoryKind.None)
+        {
+            DrawStory(g, content, palette, layout, fontFamily, frame ?? GaugeStoryFrame.Still(content));
+            return bitmap;
+        }
+
         double sweep = ring ?? content.Percent ?? 0;
 
         // A last reading is drawn in tertiary ink throughout; the earbud pair stays at full ink on this PC,
@@ -125,6 +142,114 @@ internal static class GaugeRenderer
 
         return bitmap;
     }
+
+    // The gauge while its story is told, or while it leaves: the mark as the state draws it, the track, the arc the frame gives, and
+    // in the number's place the number (or, with the AirPods on another device, the phone) at the frame's strength and the glyph at
+    // its own. The bolt goes with the number.
+    private static void DrawStory(Graphics g, GaugeContent content, GaugePalette palette, GaugeLayout layout, string fontFamily, GaugeStoryFrame frame)
+    {
+        Color ink = content.Tertiary ? palette.Tertiary : palette.Ink;
+        switch (content.Mode)
+        {
+            case GaugeMode.Reading:
+                DrawEarbudPair(g, layout, palette.Ink);
+                break;
+            case GaugeMode.CaseAway:
+                DrawCaseMark(g, CaseMarkRect(layout), ink);
+                break;
+            case GaugeMode.OnOtherDevice:
+            case GaugeMode.MarkOnly:
+                DrawEarbudPair(g, layout, palette.Tertiary);
+                break;
+            case GaugeMode.NotOnThisPc:
+            default:
+                DrawEarbudPair(g, layout, palette.Disabled);
+                break;
+        }
+
+        // Leaving, the ring is drawn only for the states that have one at rest, so a ring that is not theirs goes as the glyph does.
+        bool leaving = frame.Phase == GaugeStoryKind.None;
+        if (!leaving || content.Mode is GaugeMode.Reading or GaugeMode.CaseAway or GaugeMode.MarkOnly)
+        {
+            DrawRingTrack(g, layout, palette);
+        }
+
+        Color arc = frame.Phase == GaugeStoryKind.Spinning ? palette.Accent : content.Tertiary ? palette.Tertiary : content.Low ? palette.Caution : palette.Accent;
+        DrawSweep(g, layout, arc, frame.Start, frame.Extent);
+
+        if (frame.NumberOpacity > 0)
+        {
+            if (content.Mode is GaugeMode.Reading or GaugeMode.CaseAway)
+            {
+                DrawNumber(g, layout, content, palette, fontFamily, frame.NumberOpacity);
+                if (content.Charging)
+                {
+                    DrawBolt(g, layout, Fade(ink, frame.NumberOpacity));
+                }
+            }
+            else if (content.Mode == GaugeMode.OnOtherDevice)
+            {
+                DrawPhone(g, layout, Fade(palette.Tertiary, frame.NumberOpacity));
+            }
+        }
+
+        if (frame.Glyph != GaugeSlotGlyph.None && frame.GlyphOpacity > 0)
+        {
+            bool tick = frame.Glyph == GaugeSlotGlyph.Tick;
+            DrawStoryGlyph(g, layout, tick, Fade(tick ? palette.Tick : palette.Caution, frame.GlyphOpacity));
+        }
+    }
+
+    // An arc from start for extent degrees (GDI+ angles) with round caps; the whole circle from 360.
+    private static void DrawSweep(Graphics g, GaugeLayout layout, Color colour, double start, double extent)
+    {
+        if (extent <= 0)
+        {
+            return;
+        }
+
+        PointF c = RingCentre(layout);
+        float r = layout.RingRadius;
+        var square = new RectangleF(c.X - r, c.Y - r, r * 2, r * 2);
+        using var pen = new Pen(colour, layout.RingStroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        if (extent >= 360)
+        {
+            g.DrawEllipse(pen, square);
+        }
+        else
+        {
+            g.DrawArc(pen, square, (float)start, (float)extent);
+        }
+    }
+
+    // The tick (E73E) or the cross (E711), 12 px at 100%, centred in the number's place; drawn as lines where no icon font is
+    // installed.
+    private static void DrawStoryGlyph(Graphics g, GaugeLayout layout, bool tick, Color colour)
+    {
+        if (DrawGlyph(g, tick ? FluentGlyphs.CheckMark : FluentGlyphs.Cancel, layout.NumberSlot, layout.Bolt.Height, colour))
+        {
+            return;
+        }
+
+        float size = layout.Bolt.Height;
+        float left = layout.NumberSlot.X + ((layout.NumberSlot.Width - size) / 2f);
+        float top = layout.NumberSlot.Y + ((layout.NumberSlot.Height - size) / 2f);
+        PointF At(float x, float y) => new(left + (x * size), top + (y * size));
+        using var pen = new Pen(colour, Math.Max(1f, size / 8f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+        if (tick)
+        {
+            g.DrawLines(pen, [At(0.12f, 0.54f), At(0.38f, 0.78f), At(0.88f, 0.24f)]);
+        }
+        else
+        {
+            g.DrawLine(pen, At(0.2f, 0.2f), At(0.8f, 0.8f));
+            g.DrawLine(pen, At(0.8f, 0.2f), At(0.2f, 0.8f));
+        }
+    }
+
+    // The colour at a fraction of its own alpha.
+    private static Color Fade(Color colour, double opacity) =>
+        Color.FromArgb((int)Math.Round(colour.A * Math.Clamp(opacity, 0, 1), MidpointRounding.AwayFromZero), colour);
 
     // The gauge for a picture of an order on the settings page: the gauge as it is, with the number's place marked by a
     // neutral bar when there is no number to show and the bolt drawn as an outline when it is not charging, so all three
@@ -257,7 +382,8 @@ internal static class GaugeRenderer
     }
 
     // The number is its digits and nothing before them: a plain figure in the broadcast's steps, never an approximate one.
-    private static void DrawNumber(Graphics g, GaugeLayout layout, GaugeContent content, GaugePalette palette, string fontFamily)
+    // opacity is the number's own strength while it fades in or out beside the story's glyph; whole at rest.
+    private static void DrawNumber(Graphics g, GaugeLayout layout, GaugeContent content, GaugePalette palette, string fontFamily, double opacity = 1)
     {
         if (content.Percent is not { } percent)
         {
@@ -268,7 +394,7 @@ internal static class GaugeRenderer
         int typePixels = layout.TypePixels;
         float cell = DigitCell(fontFamily, typePixels);
         using var font = new Font(fontFamily, typePixels, FontStyle.Regular, GraphicsUnit.Pixel);
-        using var brush = new SolidBrush(content.Tertiary ? palette.Tertiary : content.Low ? palette.Caution : palette.Ink);
+        using var brush = new SolidBrush(Fade(content.Tertiary ? palette.Tertiary : content.Low ? palette.Caution : palette.Ink, opacity));
         using var format = new StringFormat(StringFormat.GenericTypographic) { LineAlignment = StringAlignment.Center, Alignment = StringAlignment.Near };
         float x = layout.NumberSlot.X + ((layout.NumberSlot.Width - (cell * text.Length)) / 2f);
         foreach (char digit in text)

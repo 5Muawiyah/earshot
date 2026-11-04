@@ -8,6 +8,7 @@ namespace Earshot.Widget;
 //   own figure reads "Windows reads 70%".
 //   Away with the case's value: "Not on this PC. Case 80%, last read 2 h ago".
 //   On another device: "On iPhone", with the case when it has a value. Otherwise the gauge's own one line.
+//   While a connect or disconnect is told: its words alone ("Connecting", "Connected", "Didn't connect"), said when they change.
 internal static class GaugeSpeech
 {
     public const string Name = "AirPods battery";
@@ -16,6 +17,11 @@ internal static class GaugeSpeech
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         GaugeContent content = GaugeContent.From(snapshot, now, settings);
+        if (WidgetCopy.GaugeStoryWords(content.Story) is { } words)
+        {
+            return words;
+        }
+
         ShownBattery shown = BatteryFreshness.Shown(snapshot, now);
         switch (content.Mode)
         {

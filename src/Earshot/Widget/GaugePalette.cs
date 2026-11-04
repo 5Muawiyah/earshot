@@ -14,10 +14,10 @@ namespace Earshot.Widget;
 //
 // A last reading is drawn in the card's own tertiary token, so it looks the same on the gauge as on the card.
 //
-// In a high contrast theme the system's own text colour draws the ink, caution and the arc is Highlight, stale and
+// In a high contrast theme the system's own text colour draws the ink, caution and the tick, the arc is Highlight, stale and
 // disabled are GrayText and the track is GrayText (see DesignTokens).
 internal readonly record struct GaugePalette(
-    Color Ink, Color Track, Color Caution, Color Accent, Color HoverFill, Color IdleFill, Color Tertiary, Color Disabled)
+    Color Ink, Color Track, Color Caution, Color Accent, Color HoverFill, Color IdleFill, Color Tertiary, Color Disabled, Color Tick)
 {
     // The hover fill of a window nobody is pointing at: alpha 1 of 255, invisible on any background but not
     // 0, so the whole gauge is one clickable target (a layered window passes a click through where its alpha
@@ -35,11 +35,11 @@ internal readonly record struct GaugePalette(
         {
             return new GaugePalette(
                 highContrastInk, t.GaugeRingTrack, highContrastInk, system.Highlight,
-                t.SubtleHover, Color.FromArgb(IdleAlpha, highContrastInk), t.TextTertiary, t.TextDisabled);
+                t.SubtleHover, Color.FromArgb(IdleAlpha, highContrastInk), t.TextTertiary, t.TextDisabled, highContrastInk);
         }
 
         Color baseInk = lightTheme ? Color.Black : Color.White;
         return new GaugePalette(
-            t.TextPrimary, t.GaugeRingTrack, t.Caution, accent, t.SubtleHover, Color.FromArgb(IdleAlpha, baseInk), t.TextTertiary, t.TextDisabled);
+            t.TextPrimary, t.GaugeRingTrack, t.Caution, accent, t.SubtleHover, Color.FromArgb(IdleAlpha, baseInk), t.TextTertiary, t.TextDisabled, accent);
     }
 }

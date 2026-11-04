@@ -9,15 +9,18 @@ namespace Earshot.Widget;
 // (GaugeWindow).
 //
 // Hover and Ring are where the hover fill and the ring's arc are drawn: at rest, 0 or 1 and the content's own percentage; part
-// way through a motion, the frame's values, so each frame of a motion is a push and nothing at rest is.
-internal sealed record GaugePushKey(GaugeContent Content, GaugePalette Palette, GaugeLayout Layout, double Hover, string FontFamily, Point Location, double Ring)
+// way through a motion, the frame's values, so each frame of a motion is a push and nothing at rest is. The content carries the
+// story (a sweep, a tick or a cross), and Frame is where the sweep and the fades of it are, or null with no story drawn.
+internal sealed record GaugePushKey(
+    GaugeContent Content, GaugePalette Palette, GaugeLayout Layout, double Hover, string FontFamily, Point Location, double Ring, GaugeStoryFrame? Frame = null)
 {
     public static GaugePushKey Of(GaugeContent content, GaugePalette palette, GaugeLayout layout, bool hover, string fontFamily, Point location) =>
         Of(content, palette, layout, hover ? 1 : 0, fontFamily, location, content?.Percent ?? 0);
 
-    public static GaugePushKey Of(GaugeContent content, GaugePalette palette, GaugeLayout layout, double hover, string fontFamily, Point location, double ring)
+    public static GaugePushKey Of(
+        GaugeContent content, GaugePalette palette, GaugeLayout layout, double hover, string fontFamily, Point location, double ring, GaugeStoryFrame? frame = null)
     {
         ArgumentNullException.ThrowIfNull(content);
-        return new GaugePushKey(content with { Tooltip = "" }, palette, layout, hover, fontFamily, location, ring);
+        return new GaugePushKey(content with { Tooltip = "" }, palette, layout, hover, fontFamily, location, ring, frame);
     }
 }

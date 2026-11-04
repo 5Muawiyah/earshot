@@ -20,8 +20,9 @@ internal enum GaugeMode
     CaseAway,
 }
 
-// The numbers the gauge's text depends on and the owner can change.
-internal readonly record struct GaugeDisplaySettings(int LowBatteryThresholdPercent, string OtherDeviceLabel)
+// The numbers the gauge's text depends on and the owner can change, and the story it is telling (GaugeStory) while a connect
+// or disconnect runs, which every gauge draws the same.
+internal readonly record struct GaugeDisplaySettings(int LowBatteryThresholdPercent, string OtherDeviceLabel, GaugeStoryView Story = default)
 {
     public static GaugeDisplaySettings Default => new(WidgetSettings.DefaultLowBatteryThresholdPercent, "iPhone");
 }
@@ -54,7 +55,20 @@ internal sealed record GaugeContent(
     // The mark, the ring, the number and the bolt are drawn in tertiary ink: the value is a last reading.
     public bool Tertiary { get; init; }
 
+    // What the gauge tells of a connect or disconnect that runs: a sweep in place of the number, then a tick or a cross. The mode
+    // and the figure stay as they are, so the sweep, the tick and the end are drawn from what is true beneath. While it is told
+    // the tooltip is its words alone.
+    public GaugeStoryView Story { get; init; }
+
     public static GaugeContent From(WidgetSnapshot snapshot, DateTimeOffset now, GaugeDisplaySettings settings)
+    {
+        GaugeContent content = Underneath(snapshot, now, settings);
+        return WidgetCopy.GaugeStoryWords(settings.Story) is { } words
+            ? content with { Story = settings.Story, Tooltip = words }
+            : content;
+    }
+
+    private static GaugeContent Underneath(WidgetSnapshot snapshot, DateTimeOffset now, GaugeDisplaySettings settings)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         string label = settings.OtherDeviceLabel ?? "";
