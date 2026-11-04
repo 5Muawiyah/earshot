@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 

@@ -2,7 +2,6 @@ using System.Drawing;
 using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Tray;
 using Earshot.Tests.Phase1;
 using Earshot.Widget;

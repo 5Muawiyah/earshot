@@ -1,5 +1,5 @@
 using System.Drawing;
-using Earshot.Popup;
+using Earshot.Widget;
 
 namespace Earshot.Tests.Phase5;
 

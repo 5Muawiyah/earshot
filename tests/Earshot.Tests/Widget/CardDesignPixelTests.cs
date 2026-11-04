@@ -49,7 +49,7 @@ public sealed class CardDesignPixelTests
             (Bitmap bitmap, WidgetCardLayout.Layout layout, Color surface, _) = Draw(card, Model(Snapshot(TimeSpan.FromSeconds(5))), theme, dpi);
             using Bitmap owned = bitmap;
 
-            Assert.AreEqual(Earshot.Popup.CardPlacement.Scale(360, dpi), bitmap.Width);
+            Assert.AreEqual(Earshot.Widget.CardPlacement.Scale(360, dpi), bitmap.Width);
             Assert.AreEqual(layout.Height, bitmap.Height);
             AssertNear(surface, bitmap.GetPixel(2, 2), 1, "The surface");
             AssertNear(surface, bitmap.GetPixel(bitmap.Width - 3, bitmap.Height - 3), 1, "The surface");
@@ -86,7 +86,7 @@ public sealed class CardDesignPixelTests
 
             // A part at 70%: its track shows beyond the fill, 1 px high in the middle of the bar.
             WidgetCardLayout.ColumnLayout left = layout.Left;
-            int trackRow = left.Bar.Y + ((left.Bar.Height - Math.Max(1, Earshot.Popup.CardPlacement.Scale(1, dpi))) / 2);
+            int trackRow = left.Bar.Y + ((left.Bar.Height - Math.Max(1, Earshot.Widget.CardPlacement.Scale(1, dpi))) / 2);
             AssertNear(DesignPixels.Over(c.Track, surface), bitmap.GetPixel(left.Bar.Right - 2, trackRow), 2, "The track, Progress track");
             AssertNear(surface, bitmap.GetPixel(left.Bar.Right - 2, left.Bar.Y), 1, "Above the 1 px track the surface shows: the track is not the bar's height");
         });

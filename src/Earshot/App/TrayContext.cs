@@ -7,7 +7,6 @@ using Earshot.Contracts;
 using Earshot.Hotkeys;
 using Earshot.Icons;
 using Earshot.Infra;
-using Earshot.Popup;
 using Earshot.Streaming;
 using Earshot.Tray;
 using Earshot.Voice;

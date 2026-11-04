@@ -1,6 +1,6 @@
 using Earshot.Icons;
 
-namespace Earshot.Popup;
+namespace Earshot.Widget;
 
 // The colours one card is painted with. HighContrast is true when they are the system colours.
 internal sealed record CardPalette(Color Background, Color Title, Color Status, Color Border, bool HighContrast);

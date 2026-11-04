@@ -5,7 +5,7 @@ using Earshot.Icons;
 using Earshot.Interop;
 using Earshot.Tray;
 
-namespace Earshot.Popup;
+namespace Earshot.Widget;
 
 // SHQueryUserNotificationState as it returned: the HRESULT and, when that succeeded, a QUNS_* value.
 internal readonly record struct NotificationStateReading(int HResult, int State);

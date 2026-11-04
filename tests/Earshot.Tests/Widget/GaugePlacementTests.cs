@@ -1,6 +1,5 @@
 using System.Drawing;
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 

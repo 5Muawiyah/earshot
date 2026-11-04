@@ -4,7 +4,7 @@ using System.Windows.Forms;
 using Earshot.App;
 using Earshot.Contracts;
 using Earshot.Infra;
-using Earshot.Popup;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase5;

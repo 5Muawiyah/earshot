@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Diagnostics;
 using Earshot.Infra;
-using Earshot.Popup;
+using Earshot.Widget;
 using Earshot.Tray;
 using Earshot.Update;
 

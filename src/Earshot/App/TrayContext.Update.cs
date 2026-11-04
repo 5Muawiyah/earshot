@@ -4,7 +4,7 @@ using Earshot.Boot.Gate;
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Infra;
-using Earshot.Popup;
+using Earshot.Widget;
 using Earshot.Tray;
 using Earshot.Update;
 

@@ -143,7 +143,7 @@ internal static class CardMotion
     // downward.
     public static int TravelFor(Rectangle anchor, Rectangle workArea, int dpi)
     {
-        int travel = Popup.CardPlacement.Scale(TravelAt96, dpi);
+        int travel = CardPlacement.Scale(TravelAt96, dpi);
         if (anchor.Width <= 0 || anchor.Height <= 0)
         {
             return travel;

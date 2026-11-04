@@ -1473,7 +1473,7 @@ internal sealed class TrayHarness : IDisposable
         TimeProvider? time = null,
         int? taskbarWatcherPollIntervalMs = null,
         bool showIcon = false,
-        Func<Earshot.Popup.ICardEnvironment>? cardEnvironmentFactory = null,
+        Func<Earshot.Widget.ICardEnvironment>? cardEnvironmentFactory = null,
         Earshot.Widget.IDisplaySource? displaySource = null,
         Func<Earshot.Widget.IGaugeSurface>? gaugeSurfaceFactory = null,
         Func<IReadOnlyList<Earshot.Widget.DisplayInfo>, Earshot.Widget.ForegroundWindowReading?>? foregroundWindowProbe = null,

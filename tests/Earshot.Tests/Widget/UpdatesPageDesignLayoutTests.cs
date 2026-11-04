@@ -106,7 +106,7 @@ public sealed class UpdatesPageDesignLayoutTests
                 }
 
                 Assert.IsLessThanOrEqualTo(l.Frame.Height, previousBottom, stage + " at " + dpi + "/" + t);
-                Assert.AreEqual(Earshot.Popup.CardPlacement.Scale(360, dpi), l.Frame.Width);
+                Assert.AreEqual(Earshot.Widget.CardPlacement.Scale(360, dpi), l.Frame.Width);
             }
         }
     }

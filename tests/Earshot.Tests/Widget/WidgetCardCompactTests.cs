@@ -1,6 +1,5 @@
 using System.Drawing;
 using System.Windows.Forms;
-using Earshot.Popup;
 using Earshot.Tests;
 using Earshot.Tests.Phase5;
 using Earshot.Widget;

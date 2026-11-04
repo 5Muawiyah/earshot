@@ -3,7 +3,6 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using Earshot.App;
 using Earshot.Contracts;
-using Earshot.Popup;
 using Earshot.Tray;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;

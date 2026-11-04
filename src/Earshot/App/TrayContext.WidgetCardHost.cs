@@ -1,7 +1,6 @@
 using Earshot.Composition;
 using Earshot.Contracts;
 using Earshot.Hotkeys;
-using Earshot.Popup;
 using Earshot.Tray;
 using Earshot.Update;
 using Earshot.Widget;

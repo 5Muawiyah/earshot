@@ -1,5 +1,4 @@
 using System.Drawing;
-using Earshot.Popup;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -85,7 +84,7 @@ public sealed class WidgetCardLayoutTests
     {
         foreach (int dpi in new[] { 96, 120, 144 })
         {
-            int S(int v) => Earshot.Popup.CardPlacement.Scale(v, dpi);
+            int S(int v) => Earshot.Widget.CardPlacement.Scale(v, dpi);
             SubPageFrame.FrameLayout frame = SubPageFrame.Compute(dpi, bodyHeight: S(100), buttonCount: 2);
 
             Assert.AreEqual(S(360), frame.Width);

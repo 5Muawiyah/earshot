@@ -1,5 +1,4 @@
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Widget;
 
 namespace Earshot.App;

@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using Earshot.Contracts;
 using Earshot.Interop;
-using Earshot.Popup;
 
 namespace Earshot.Widget;
 

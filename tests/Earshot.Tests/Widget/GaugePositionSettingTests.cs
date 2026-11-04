@@ -73,7 +73,7 @@ public sealed class GaugePositionSettingTests : IDisposable
         var bar = new System.Drawing.Rectangle(0, 1032, 1920, 48);
         var start = new System.Drawing.Rectangle(762, 1032, 45, 48);
         var layout = new TaskbarLayout(
-            0, bar, Earshot.Popup.TaskbarEdge.Bottom, false, new System.Drawing.Rectangle(0, 0, 1920, 1080),
+            0, bar, Earshot.Widget.TaskbarEdge.Bottom, false, new System.Drawing.Rectangle(0, 0, 1920, 1080),
             [start, new System.Drawing.Rectangle(807, 1032, 44, 48), new System.Drawing.Rectangle(1678, 1032, 242, 48)], start,
             96, Earshot.Interop.Shell.QUNS_ACCEPTS_NOTIFICATIONS, Covered: false, GaugeCentreIsGauge: null,
             NotificationArea: new System.Drawing.Rectangle(1678, 1032, 242, 48));

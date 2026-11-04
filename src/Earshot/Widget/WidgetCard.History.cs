@@ -1,4 +1,3 @@
-using Earshot.Popup;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 

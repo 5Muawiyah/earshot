@@ -1,4 +1,3 @@
-using Earshot.Popup;
 using System.Globalization;
 
 namespace Earshot.Widget;

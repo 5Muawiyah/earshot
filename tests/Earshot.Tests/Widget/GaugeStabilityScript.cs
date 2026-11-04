@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Drawing;
 using Earshot.Contracts;
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Tests.Streaming;
 using Earshot.Widget;
 

@@ -1,6 +1,5 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
-using Earshot.Popup;
 
 namespace Earshot.Widget;
 

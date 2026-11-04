@@ -1,7 +1,6 @@
 using Earshot.Interop;
 using Earshot.App;
 using Earshot.Contracts;
-using Earshot.Popup;
 using Earshot.Tray;
 
 namespace Earshot.Widget;

@@ -1,5 +1,5 @@
 using Earshot.Contracts;
-using Earshot.Popup;
+using Earshot.Widget;
 using Earshot.Tray;
 using Earshot.Update;
 

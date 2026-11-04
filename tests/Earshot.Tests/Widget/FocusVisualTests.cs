@@ -175,9 +175,9 @@ public sealed class FocusVisualTests
                     using Bitmap bitmap = RenderWith(card, background);
                     Rectangle button = card.CurrentMainLayout.Button;
                     // The pixel in the middle of the outer stroke: gap and inner stroke, then half the outer one.
-                    int gap = Math.Max(1, Popup.CardPlacement.Scale(1, dpi));
-                    int inner = Math.Max(1, Popup.CardPlacement.Scale(1, dpi));
-                    int outer = Math.Max(1, Popup.CardPlacement.Scale(2, dpi));
+                    int gap = Math.Max(1, CardPlacement.Scale(1, dpi));
+                    int inner = Math.Max(1, CardPlacement.Scale(1, dpi));
+                    int outer = Math.Max(1, CardPlacement.Scale(2, dpi));
                     int offset = gap + inner + (outer / 2);
                     int cx = button.X + (button.Width / 2);
                     int cy = button.Y + (button.Height / 2);

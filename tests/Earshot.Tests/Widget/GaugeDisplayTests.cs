@@ -4,7 +4,6 @@ using System.Runtime.ExceptionServices;
 using Earshot.Contracts;
 using Earshot.Infra;
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 

@@ -2,7 +2,6 @@ using System.Globalization;
 using Earshot.App;
 using Earshot.Contracts;
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Tray;
 
 namespace Earshot.Widget;

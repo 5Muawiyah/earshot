@@ -9,7 +9,6 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using AppNs = Earshot.App;
 using AudioNs = Earshot.Audio;
 using IconsNs = Earshot.Icons;
-using PopupNs = Earshot.Popup;
 using TrayNs = Earshot.Tray;
 
 namespace Earshot.Tests.Widget;
@@ -296,11 +295,11 @@ public sealed class WidgetAtRestTests
         // The allow-list: every external type a widget member, parameter, return, generic argument or
         // method body may reach, enumerated by running a reflection walk of the built widget types against
         // the real assembly and recording every distinct external type it actually touches (App: 3, Audio:
-        // 1, Contracts: 12, Icons: 2, Interop: 29, Popup: 10, Tray: 2 - 59 in total). Nothing else from
-        // these seven namespaces is reachable, including the very types the old deny-list named by hand:
+        // 1, Contracts: 12, Icons: 3, Interop: 29, Tray: 2 - 50 in total). Nothing else from
+        // these six namespaces is reachable, including the very types the old deny-list named by hand:
         // IConnectionController, ConnectResult, ControllerResult and the Null* controllers live in
         // Earshot.Contracts and Earshot.Contracts.Null alongside allowed types, so the namespace itself
-        // cannot be allowed wholesale, only these 59 names; ServiceRegistry (Earshot.Composition) and
+        // cannot be allowed wholesale, only these 50 names; ServiceRegistry (Earshot.Composition) and
         // BlockCoordinator, TrayContext (Earshot.App) are excluded the same way, as are CfgMgr32,
         // BluetoothApis, KsControl, TaskSchedulerCom and IKsControl sitting inside Earshot.Interop next to
         // 29 allowed ones. A type reached that is not here, not under Earshot.Widget itself, and not under
@@ -314,7 +313,7 @@ public sealed class WidgetAtRestTests
             typeof(DeviceSnapshotEventArgs), typeof(EarshotSettings), typeof(ICardPresenter), typeof(IDeviceMonitor),
             typeof(ILog), typeof(ISettingsStore), typeof(LogExtensions), typeof(LogLevel), typeof(StepOutcome),
             typeof(StepOutcomes),
-            typeof(IconsNs.EarbudGlyph), typeof(IconsNs.GlyphState),
+            typeof(IconsNs.EarbudGlyph), typeof(IconsNs.GlyphState), typeof(IconsNs.ThemeReader),
             typeof(APPBARDATA), typeof(BITMAPINFO), typeof(BITMAPINFOHEADER), typeof(BLENDFUNCTION),
             typeof(ComActivation), typeof(Dwm), typeof(IPersistFile), typeof(IPropertyStore), typeof(IShellLinkW),
             typeof(IUIAutomation), typeof(IUIAutomationCacheRequest), typeof(IUIAutomationCondition),
@@ -323,10 +322,6 @@ public sealed class WidgetAtRestTests
             typeof(NativeMethods), typeof(POINT), typeof(PROPERTYKEY), typeof(PROPVARIANT),
             typeof(PropVariantInterop), typeof(PropertyRead<>), typeof(RECT), typeof(SIZE), typeof(Shell),
             typeof(ShellLinkCom), typeof(TRACKMOUSEEVENT), typeof(TaskbarDpi), typeof(UiAutomation),
-            typeof(PopupNs.CardPalette), typeof(PopupNs.CardPlacement),
-            typeof(PopupNs.CardTarget), typeof(PopupNs.CardTheme), typeof(PopupNs.DisplayArea),
-            typeof(PopupNs.ICardEnvironment), typeof(PopupNs.NotificationStateReading),
-            typeof(PopupNs.PlacementScene), typeof(PopupNs.TaskbarEdge),
             typeof(TrayNs.ToggleIntent), typeof(TrayNs.TrayReport),
         };
 

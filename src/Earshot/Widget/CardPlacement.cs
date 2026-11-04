@@ -1,7 +1,7 @@
 using Earshot.Contracts;
 using Earshot.Interop;
 
-namespace Earshot.Popup;
+namespace Earshot.Widget;
 
 // The side of a display the taskbar is on.
 internal enum TaskbarEdge { Bottom, Top, Left, Right }

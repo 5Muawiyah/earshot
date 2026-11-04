@@ -1,6 +1,5 @@
 using System.Globalization;
 using Earshot.Interop;
-using Earshot.Popup;
 
 namespace Earshot.Widget;
 

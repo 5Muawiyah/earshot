@@ -1,7 +1,6 @@
 using System.Drawing;
 using System.Windows.Forms;
 using Earshot.App;
-using Earshot.Popup;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 

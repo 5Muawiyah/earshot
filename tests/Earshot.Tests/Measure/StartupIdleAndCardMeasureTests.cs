@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Windows.Forms;
 using Earshot.Contracts;
 using Earshot.Infra;
-using Earshot.Popup;
 using Earshot.Tests.Phase5;
 using Earshot.Tray;
 using Earshot.Widget;
@@ -197,7 +196,7 @@ public sealed class StartupIdleAndCardMeasureTests
     private static TimeSpan OpenOnce(WidgetCard card)
     {
         var clock = Stopwatch.StartNew();
-        var row = new CompactContent(' ', InkRole.Primary, TrayStatus.CardConnecting, null, null);
+        var row = new CompactContent('\0', InkRole.Primary, TrayStatus.CardConnecting, null, null);
         card.Render(Earshot.Tests.Widget.CardKit.MainModel() with { Form = CardForm.Compact, Compact = row }, 96);
         card.PresentAnimated(new Rectangle(new Point(100, 100), card.ClientSize), 0);
         Application.DoEvents();

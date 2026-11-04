@@ -3,7 +3,6 @@ using Earshot.Contracts;
 using Earshot.Diagnostics;
 using Earshot.Icons;
 using Earshot.Interop;
-using Earshot.Popup;
 using Earshot.Tray;
 using Earshot.Widget;
 using Earshot.Widget.Alert;

@@ -85,7 +85,7 @@ public sealed class WidgetCardWordsTests
             using Bitmap bitmap = CardKit.Render(card);
             Color background = bitmap.GetPixel(0, 0);
             WidgetCardLayout.Layout layout = card.CurrentMainLayout;
-            int box = Earshot.Popup.CardPlacement.Scale(16, 96);
+            int box = Earshot.Widget.CardPlacement.Scale(16, 96);
 
             foreach (Rectangle line in new[] { layout.WhereLine, layout.UpdateCaption })
             {
