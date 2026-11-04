@@ -25,6 +25,9 @@ internal sealed partial class WidgetCardPresenter
 
     private CompactContent? _unaskedCompact;
     private CompactRequest? _unaskedRequest;
+    private (CompactRequest Request, int Token)? _askedNotice;
+    private int _askedNoticeToken;
+    private ITimer? _askedNoticeTimer;
     private Point? _clickAnchor;
     private long _clickAnchorAt;
 
@@ -37,6 +40,12 @@ internal sealed partial class WidgetCardPresenter
         WidgetCardModel model = BuildModel(_callbacks, _time);
         return compact is null ? model : model with { Form = CardForm.Compact, Compact = compact, CompactState = CompactActionState.Idle };
     }
+
+    // The notice the asked card carries now, for tests; null when none.
+    internal CompactContent? AskedNoticeForTest => _askedNotice?.Request.Content;
+
+    // The card he asked for, for tests; null until it was opened.
+    internal WidgetCard? AskedCardForTest => _card;
 
     // The words of the compact row on show, for tests; null when none is.
     internal CompactContent? UnaskedCompactForTest => _unaskedCompact;
@@ -56,6 +65,12 @@ internal sealed partial class WidgetCardPresenter
     public void HideCompact() => _uiPost(() =>
     {
         _waiting.Remove(UnaskedKind.Notice);
+        if (_askedNotice is not null)
+        {
+            ForgetAskedNotice();
+            RenderKeepingBottom();
+        }
+
         if (_unaskedKind == UnaskedKind.Notice && _unaskedCompact is not null)
         {
             CloseUnasked("it was hidden");
@@ -117,11 +132,67 @@ internal sealed partial class WidgetCardPresenter
         }
     }
 
+    // A notice that came while the card he asked for is open: its status row says it (or a strip at the foot of a sub-page does),
+    // with the notice's button, for the hold. A newer notice takes its place. It leaves with the card, or when Hide asks.
     private bool CarryInAskedCard(CompactRequest request, CardDecision decision)
     {
-        _log.Write(LogLevel.Debug, "Card: not shown (" + KindName(request.Content.Kind) + "), an asked card is open.");
-        _ = decision;
-        return false;
+        if (_card is not { IsDisposed: false, Visible: true, IsExiting: false } card)
+        {
+            return false;
+        }
+
+        StopAskedNoticeTimer();
+        _askedNotice = (request, ++_askedNoticeToken);
+        if (decision.Hold is { } hold)
+        {
+            int token = _askedNoticeToken;
+            _askedNoticeTimer = _time.CreateTimer(_ => _uiPost(() => ClearAskedNotice(token)), null, hold, Timeout.InfiniteTimeSpan);
+        }
+
+        RenderKeepingBottom();
+        if (!card.Announce(request.Content.Text))
+        {
+            _log.Write(LogLevel.Debug, "Card: the screen reader notification was not raised.");
+        }
+
+        _log.Write(LogLevel.Debug, "Card: carried by the asked card (" + KindName(request.Content.Kind) + "), " +
+            (decision.Does == CardDoes.FooterStrip ? "in the strip at the foot of the page." : "in the status row."));
+        return true;
+    }
+
+    private void ClearAskedNotice(int token)
+    {
+        if (_askedNotice is not { } carried || carried.Token != token)
+        {
+            return;
+        }
+
+        ForgetAskedNotice();
+        RenderKeepingBottom();
+    }
+
+    // The notice leaves the asked card, without drawing it again: the card is closing, or the caller draws it next.
+    private void ForgetAskedNotice()
+    {
+        StopAskedNoticeTimer();
+        _askedNotice = null;
+    }
+
+    private void StopAskedNoticeTimer()
+    {
+        _askedNoticeTimer?.Dispose();
+        _askedNoticeTimer = null;
+    }
+
+    // The carried notice's button: the notice goes and then what the button does runs; a failure of it is logged.
+    private void OnNoticeActionRequested(object? sender, EventArgs e)
+    {
+        CompactRequest? request = _askedNotice?.Request;
+        string label = request?.Content.Action?.Label ?? string.Empty;
+        _log.Write(LogLevel.Debug, "Card: button pressed" + (request?.OnAction is null ? ", but it has no action." : " (" + label + ")."));
+        ForgetAskedNotice();
+        RenderKeepingBottom();
+        RunNoticeAction(request?.OnAction, label);
     }
 
     // After the card that held the slot closed: the waiting notice that still is true, the most important kind first.

@@ -207,6 +207,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
         StopSpinnerTimer();
         EndBatteryRefresh();
         DisposeUnasked();
+        ForgetAskedNotice();
         if (_card is not null)
         {
             Unsubscribe(_card);
@@ -317,6 +318,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
 
     private void HideOnUiThread()
     {
+        ForgetAskedNotice();
         _view = WidgetCardView.Main;
         _shortcutNote = null;
         StopSpinnerTimer();
@@ -377,6 +379,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
             UpdateVersion = _host?.AvailableUpdateVersion(),
             Settings = _view == WidgetCardView.Settings ? ReadSettings() : null,
             Refresh = RefreshViewForModel(),
+            Notice = _askedNotice?.Request.Content,
         };
     }
 
@@ -474,6 +477,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
         _card.UpdateRequested += OnUpdateRequested;
         _card.SettingChanged += OnSettingChanged;
         _card.CloseRequested += OnCardClosed;
+        _card.NoticeActionRequested += OnNoticeActionRequested;
         return _card;
     }
 
@@ -489,6 +493,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
         card.UpdateRequested -= OnUpdateRequested;
         card.SettingChanged -= OnSettingChanged;
         card.CloseRequested -= OnCardClosed;
+        card.NoticeActionRequested -= OnNoticeActionRequested;
     }
 
     private void OnBluetoothSettingsRequested(object? sender, EventArgs e) => _host?.OpenBluetoothSettings(_place);

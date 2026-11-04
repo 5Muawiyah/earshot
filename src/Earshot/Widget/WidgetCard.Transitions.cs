@@ -39,6 +39,8 @@ internal sealed partial class WidgetCard
     // kept; otherwise the client size is set at once, as it always was.
     private void SizeTo(Size size)
     {
+        // A notice under a sub-page adds its strip to the page's height.
+        size = new Size(size.Width, size.Height + StripHeight);
         Size current = LaidOutSize;
         if (size == current)
         {

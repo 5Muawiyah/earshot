@@ -109,7 +109,21 @@ internal sealed partial class WidgetCard
             });
         }
 
-        if (BluetoothOff)
+        if (NoticeOnStatusRow)
+        {
+            if (Carried is { } notice)
+            {
+                list.Add(new CardControl(
+                    notice.Text, CardControlRole.StaticText, layout.WhereLine, null, false, false, false, true, static () => { }));
+                if (notice.Action is { } action)
+                {
+                    list.Add(new CardControl(
+                        action.Label, CardControlRole.PushButton, NoticeActionRect(), null, false, false,
+                        focus && _focus == WidgetCardFocus.Status, true, () => Press(WidgetCardFocus.Status)));
+                }
+            }
+        }
+        else if (BluetoothOff)
         {
             list.Add(new CardControl(
                 WidgetCopy.BluetoothOff, CardControlRole.PushButton, layout.WhereLine, WidgetCopy.TipBluetoothSettings, false, false,

@@ -124,7 +124,7 @@ internal static class WidgetCardLayout
     // least width the design gives it.
     public static Layout Compute(
         int dpi, bool showSwitch, bool showGear = true, bool showUpdateLine = false, int updateButtonWidth = 0, bool showRefresh = true,
-        double textScale = 1.0, bool showSendTo = false)
+        double textScale = 1.0, bool showSendTo = false, int statusLines = 1)
     {
         int width = WidthFor(dpi);
         int pad = CardPlacement.Scale(PaddingAt96, dpi);
@@ -168,7 +168,9 @@ internal static class WidgetCardLayout
         ColumnLayout box = Col(rightX);
 
         int rowsBottom = left.ReadTime.Bottom;
-        var whereLine = new Rectangle(pad, rowsBottom + section, contentWidth, rowHeight);
+        // The status row is one row, or up to three lines when it carries a notice: 20t a line more, as the compact row grows.
+        int extraLines = Math.Clamp(statusLines, 1, CompactMaxLines) - 1;
+        var whereLine = new Rectangle(pad, rowsBottom + section, contentWidth, rowHeight + (extraLines * Follow(CompactLineAt96, dpi, textScale)));
         int afterLines = whereLine.Bottom;
 
         Rectangle updateLine = Rectangle.Empty;

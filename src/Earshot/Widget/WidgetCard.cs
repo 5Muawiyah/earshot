@@ -71,6 +71,10 @@ internal sealed record WidgetCardModel(
 
     public CompactContent? Compact { get; init; }
 
+    // A notice the asked card carries: on the main page the status row says it, under any other page a strip at the foot does.
+    // An unasked card ignores it; it shows the notice as its own compact row.
+    public CompactContent? Notice { get; init; }
+
     // How far the compact row's button has got: its glyph, a ring while the work runs, a tick when it is done.
     public CompactActionState CompactState { get; init; } = CompactActionState.Idle;
 }
@@ -344,6 +348,16 @@ internal sealed partial class WidgetCard : Form
         _model = model;
         _dpi = dpi > 0 ? dpi : CardPlacement.BaseDpi;
         ReadLook();
+        if (NoticeOnStrip)
+        {
+            using var stripProbe = new Bitmap(1, 1);
+            using Graphics stripMeasure = Graphics.FromImage(stripProbe);
+            MeasureNotice(stripMeasure);
+        }
+        else if (EffectiveView != WidgetCardView.Main)
+        {
+            _stripLayout = null;
+        }
 
         if (WantsCompact(model) && model.Compact is { } compact)
         {
@@ -432,7 +446,7 @@ internal sealed partial class WidgetCard : Form
             _focus = WidgetCardFocus.Button;
         }
 
-        if (_focus == WidgetCardFocus.Status && !BluetoothOff)
+        if (_focus == WidgetCardFocus.Status && !StatusIsAButton)
         {
             _focus = WidgetCardFocus.Button;
         }
@@ -459,9 +473,10 @@ internal sealed partial class WidgetCard : Form
                 (int)Math.Ceiling(size.Width) + (2 * CardPlacement.Scale(WidgetCardLayout.UpdateButtonPaddingAt96, _dpi)));
         }
 
+        int noticeLines = MeasureNotice(measure);
         return WidgetCardLayout.Compute(
             _dpi, model.ShowSwitch, showGear: true, showUpdateLine: showUpdate, updateButtonWidth: updateButtonWidth, showRefresh: !_unasked,
-            textScale: _look.TextScale, showSendTo: model.ShowSendTo && !_unasked);
+            textScale: _look.TextScale, showSendTo: model.ShowSendTo && !_unasked, statusLines: noticeLines);
     }
 
     private WidgetCardLayout.SetupLayout ComputeSetupLayout(Graphics measure, SetupViewModel setup)
@@ -569,6 +584,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnUpdate = false;
         _leftButtonDownOnRefresh = false;
         _leftButtonDownOnStatus = false;
+        _leftButtonDownOnStrip = false;
         _leftButtonDownOnSendTo = false;
         _leftButtonDownOnSetupTarget = null;
         _leftButtonDownOnSettingsTarget = null;
@@ -691,6 +707,11 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
+        if (StripMouseDown(e))
+        {
+            return;
+        }
+
         if (OnSettingsPage)
         {
             SettingsMouseDown(e);
@@ -709,7 +730,7 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnGear = e.Button == MouseButtons.Left && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
         _leftButtonDownOnUpdate = e.Button == MouseButtons.Left && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
         _leftButtonDownOnRefresh = e.Button == MouseButtons.Left && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
-        _leftButtonDownOnStatus = e.Button == MouseButtons.Left && !_unasked && BluetoothOff && layout.WhereLine.Contains(e.Location);
+        _leftButtonDownOnStatus = e.Button == MouseButtons.Left && StatusHit(e.Location);
         _leftButtonDownOnSendTo = e.Button == MouseButtons.Left && !layout.SendTo.IsEmpty && layout.SendTo.Contains(e.Location);
     }
 
@@ -727,6 +748,11 @@ internal sealed partial class WidgetCard : Form
         if (IsCompactShown)
         {
             CompactMouseUp(e);
+            return;
+        }
+
+        if (StripMouseUp(e))
+        {
             return;
         }
 
@@ -759,7 +785,7 @@ internal sealed partial class WidgetCard : Form
         bool activatesGear = e.Button == MouseButtons.Left && _leftButtonDownOnGear && !layout.Gear.IsEmpty && layout.Gear.Contains(e.Location);
         bool activatesUpdate = e.Button == MouseButtons.Left && _leftButtonDownOnUpdate && layout.ShowUpdateLine && layout.UpdateButton.Contains(e.Location);
         bool activatesRefresh = e.Button == MouseButtons.Left && _leftButtonDownOnRefresh && !layout.Refresh.IsEmpty && layout.Refresh.Contains(e.Location);
-        bool activatesStatus = e.Button == MouseButtons.Left && _leftButtonDownOnStatus && BluetoothOff && layout.WhereLine.Contains(e.Location);
+        bool activatesStatus = e.Button == MouseButtons.Left && _leftButtonDownOnStatus && StatusHit(e.Location);
         bool activatesSendTo = e.Button == MouseButtons.Left && _leftButtonDownOnSendTo && !layout.SendTo.IsEmpty && layout.SendTo.Contains(e.Location);
         ClearPressedFlags();
 
@@ -866,12 +892,14 @@ internal sealed partial class WidgetCard : Form
         if (OnSettingsPage && _model.Settings is { } settingsValues && _settingsLayout is { } settingsLayout)
         {
             DrawSettings(g, settingsValues, settingsLayout);
+            DrawStrip(g);
             return;
         }
 
         if (EffectiveView is not (WidgetCardView.Main or WidgetCardView.Settings) && _model.Setup is { } setup && _setupLayout is { } setupLayout)
         {
             DrawSetup(g, setup, setupLayout);
+            DrawStrip(g);
             return;
         }
 
@@ -985,7 +1013,7 @@ internal sealed partial class WidgetCard : Form
             order.Add(WidgetCardFocus.Refresh);
         }
 
-        if (!_unasked && BluetoothOff)
+        if (StatusIsAButton)
         {
             order.Add(WidgetCardFocus.Status);
         }
@@ -1028,7 +1056,14 @@ internal sealed partial class WidgetCard : Form
         }
         else if (_focus == WidgetCardFocus.Status)
         {
-            if (BluetoothOff)
+            if (NoticeOnStatusRow)
+            {
+                if (Carried?.Action is not null)
+                {
+                    NoticeActionRequested?.Invoke(this, EventArgs.Empty);
+                }
+            }
+            else if (BluetoothOff)
             {
                 BluetoothSettingsRequested?.Invoke(this, EventArgs.Empty);
             }
@@ -1407,6 +1442,12 @@ internal sealed partial class WidgetCard : Form
     // otherwise On this PC, or the iPhone, in the primary ink.
     private void DrawStatusRow(Graphics g, Rectangle bounds)
     {
+        if (NoticeOnStatusRow && Carried is { } carried)
+        {
+            DrawCarriedNotice(g, bounds, carried);
+            return;
+        }
+
         CardColours colours = Colours;
         (char glyph, string text, Color ink) = StatusRow;
         int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
@@ -1468,6 +1509,11 @@ internal sealed partial class WidgetCard : Form
         get
         {
             CardColours colours = Colours;
+            if (NoticeOnStatusRow && Carried is { } notice)
+            {
+                return (notice.Glyph, notice.Text, CompactInk(notice.Ink, colours));
+            }
+
             if (BluetoothOff)
             {
                 return (FluentGlyphs.BluetoothOff, WidgetCopy.BluetoothOff, colours.Text);
@@ -1499,6 +1545,11 @@ internal sealed partial class WidgetCard : Form
         !_unasked
         && (_model.Refresh?.Outcome == BatteryRefreshOutcome.BluetoothOff
             || (_model.Snapshot.Watcher == WidgetWatcherState.Stopped && _model.Snapshot.WatcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode));
+
+    // Whether a point is on the part of the status row that can be pressed: a carried notice's button, or the whole row when it leads
+    // to Bluetooth settings.
+    private bool StatusHit(Point point) =>
+        StatusIsAButton && (NoticeOnStatusRow ? NoticeActionRect().Contains(point) : _mainLayout.WhereLine.Contains(point));
 
     private void DrawText(Graphics g, Rectangle bounds, string text, Color colour, TypeRole role, StringAlignment horizontal, bool wrap = false)
     {

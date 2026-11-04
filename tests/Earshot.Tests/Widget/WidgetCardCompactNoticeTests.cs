@@ -425,4 +425,146 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "near the notification area, because the cursor is away from the taskbar (750,0)"), Lines(rig.Log));
         });
     }
+
+    // ---- The card he asked for carries a notice
+
+    [TestMethod]
+    public void ANoticeOverTheMainPageIsSaidByTheStatusRowAndNoSecondWindowOpens()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new NoticeRig(withAsked: true);
+            rig.Presenter.RequestShow(AGauge, AGauge.Location);
+            Application.DoEvents();
+            WidgetCard asked = rig.Presenter.AskedCardForTest!;
+            int height = asked.CurrentMainLayout.Height;
+
+            Assert.IsTrue(rig.Show(Notice("Disconnected")), "Carried counts as shown.");
+
+            Assert.IsFalse(rig.Presenter.IsUnaskedShown, "The two are never on screen together.");
+            Assert.AreEqual("Disconnected", rig.Presenter.AskedNoticeForTest!.Text);
+            Assert.AreEqual("Disconnected", asked.StatusRow.Text);
+            Assert.AreEqual(height, asked.CurrentMainLayout.Height, "A one-line notice needs no more room than the row has.");
+        });
+    }
+
+    [TestMethod]
+    public void ALongNoticeGrowsTheStatusRowToThreeLinesAtMost()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new NoticeRig(withAsked: true);
+            rig.Presenter.RequestShow(AGauge, AGauge.Location);
+            Application.DoEvents();
+            WidgetCard asked = rig.Presenter.AskedCardForTest!;
+            int row = asked.CurrentMainLayout.WhereLine.Height;
+            string longText = string.Join(" ", Enumerable.Repeat("The AirPods did not answer and may be in the case.", 8));
+
+            rig.Show(Notice(longText, action: new CardAction("Connect in Windows", () => { })));
+
+            int grown = asked.CurrentMainLayout.WhereLine.Height;
+            Assert.IsGreaterThan(row, grown, "The row grew.");
+            Assert.AreEqual(row + (2 * TextFit.Grow(WidgetCardLayout.CompactLineAt96, 96, 1.0)), grown, "Three lines at the most.");
+            Assert.IsFalse(asked.NoticeActionBounds.IsEmpty);
+            Assert.AreEqual(asked.CurrentMainLayout.WhereLine.Bottom, asked.NoticeActionBounds.Bottom, "The button stands on the last line.");
+        });
+    }
+
+    [TestMethod]
+    public void TheCarriedNoticesButtonRunsItsActionOnceAndTheCardStaysOpen()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new NoticeRig(withAsked: true);
+            rig.Presenter.RequestShow(AGauge, AGauge.Location);
+            Application.DoEvents();
+            WidgetCard asked = rig.Presenter.AskedCardForTest!;
+            int ran = 0;
+            rig.Show(Notice("Not protected", action: new CardAction("Fix connection", () => ran++)));
+
+            CardKit.Click(asked, asked.NoticeActionBounds);
+            Application.DoEvents();
+
+            Assert.AreEqual(1, ran);
+            Assert.IsNull(rig.Presenter.AskedNoticeForTest, "The notice goes when its button is pressed.");
+            Assert.IsTrue(rig.Presenter.IsShown, "The card he asked for stays.");
+        });
+    }
+
+    [TestMethod]
+    public void ACarriedNoticeLeavesAfterItsHoldAndOnHideAndWithTheCard()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new NoticeRig(withAsked: true);
+            rig.Presenter.RequestShow(AGauge, AGauge.Location);
+            Application.DoEvents();
+
+            rig.Show(Notice("One"));
+            rig.Time.Advance(TimeSpan.FromSeconds(6));
+            Assert.IsNull(rig.Presenter.AskedNoticeForTest, "Six seconds, as a plain notice holds.");
+
+            rig.Show(Notice("Two", action: new CardAction("Fix connection", () => { })));
+            rig.Time.Advance(TimeSpan.FromSeconds(7));
+            Assert.IsNotNull(rig.Presenter.AskedNoticeForTest, "A notice with a button holds twelve.");
+            rig.Time.Advance(TimeSpan.FromSeconds(6));
+            Assert.IsNull(rig.Presenter.AskedNoticeForTest);
+
+            rig.Show(Notice("Three", staysUp: true));
+            rig.Time.Advance(TimeSpan.FromMinutes(5));
+            Assert.IsNotNull(rig.Presenter.AskedNoticeForTest, "It stays until Hide.");
+            rig.Presenter.HideCompact();
+            Assert.IsNull(rig.Presenter.AskedNoticeForTest);
+
+            rig.Show(Notice("Four", staysUp: true));
+            rig.Presenter.RequestShow(AGauge, AGauge.Location);
+            Application.DoEvents();
+            Assert.IsNull(rig.Presenter.AskedNoticeForTest, "The card closed and took the notice with it.");
+        });
+    }
+
+    [TestMethod]
+    public void ANoticeOverASubPageIsAStripAtTheFootWithItsButtonAndTheCardGrowsByIt()
+    {
+        Phase5.CardSta.Run(() =>
+        {
+            using WidgetCard card = CardKit.NewCard(dark: false);
+            WidgetCardModel settings = CardKit.SettingsModel(FakeCardHost.Defaults());
+            card.Render(settings, 96);
+            int plain = card.LaidOutSize.Height;
+            Assert.IsNull(card.CurrentStripLayout);
+
+            var notice = new CompactContent(' ', InkRole.Primary, "Not protected", new CompactAction("Fix connection"), TimeSpan.FromSeconds(12));
+            card.Render(settings with { Notice = notice }, 96);
+
+            Assert.IsNotNull(card.CurrentStripLayout);
+            Assert.AreEqual(plain + card.CurrentStripLayout!.Height, card.LaidOutSize.Height, "Bottom pinned: the page keeps its place and the strip is added.");
+            Rectangle button = card.StripActionBounds;
+            Assert.IsFalse(button.IsEmpty);
+            Assert.IsGreaterThanOrEqualTo(card.LaidOutSize.Height - card.CurrentStripLayout.Height, button.Top, "The button is in the strip.");
+
+            card.Render(settings, 96);
+            Assert.IsNull(card.CurrentStripLayout, "The strip goes with the notice.");
+            Assert.AreEqual(plain, card.LaidOutSize.Height);
+        });
+    }
+
+    [TestMethod]
+    public void AClickOnTheStripsButtonRaisesTheNoticeActionAndNothingUnderIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using WidgetCard card = CardKit.NewCard(dark: false);
+            var notice = new CompactContent(' ', InkRole.Primary, "Not protected", new CompactAction("Fix connection"), TimeSpan.FromSeconds(12));
+            card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()) with { Notice = notice }, 96);
+            card.Show();
+            Application.DoEvents();
+            int raised = 0;
+            card.NoticeActionRequested += (_, _) => raised++;
+
+            CardKit.Click(card, card.StripActionBounds);
+
+            Assert.AreEqual(1, raised);
+        });
+    }
 }
