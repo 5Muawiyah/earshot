@@ -107,7 +107,8 @@ internal static class BatteryFreshness
         return Shown(
             snapshot.Left, snapshot.Right, snapshot.Case, snapshot.Headset,
             onThisPc: snapshot.Where == AirPodsWhere.ThisPc, linked: snapshot.Selection == BroadcastSelectionState.Linked, now,
-            new SavedBattery(snapshot.LastReadings, snapshot.PairedModel));
+            new SavedBattery(snapshot.LastReadings, snapshot.PairedModel),
+            budLiveThisConnection: snapshot.BudLiveThisConnection);
     }
 
     // left, right, caseReading: this run's readings of the broadcast. linked: the broadcast's set is the one linked to the
@@ -115,9 +116,11 @@ internal static class BatteryFreshness
     // any pair's. saved: the owner's pair's saved last readings, shown whether or not a set is linked now.
     // onThisPc: the AirPods are connected to this PC; Windows' own figure, which is for the connected headset and needs no
     // link, and the gauge's figure are given only then.
+    // budLiveThisConnection: a bud has been live since the AirPods last came to this PC. Once it has, Windows' figure is
+    // not shown again until they leave, so the gauge goes from Windows' figure to a bud's reading at most once and never back.
     public static ShownBattery Shown(
         PartReading left, PartReading right, PartReading caseReading, PartReading headset, bool onThisPc, bool linked, DateTimeOffset now,
-        SavedBattery? saved = null)
+        SavedBattery? saved = null, bool budLiveThisConnection = false)
     {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
@@ -135,7 +138,7 @@ internal static class BatteryFreshness
         ShownPart c = Part(caseReading, ChargeComponent.Case, saved, now);
 
         bool freshBud = l.Fresh || r.Fresh;
-        bool windowsShown = !freshBud && IsHeadsetCurrent(headset, onThisPc, now);
+        bool windowsShown = !freshBud && !budLiveThisConnection && IsHeadsetCurrent(headset, onThisPc, now);
         int? windows = windowsShown ? headset.Percent : null;
         DateTimeOffset? windowsAt = windowsShown ? headset.ReadAt : null;
 

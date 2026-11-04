@@ -713,8 +713,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _handsFree.Percent = 68;
         _clock.Advance(WidgetTiming.HeadsetPollInterval - TimeSpan.FromSeconds(45));
 
+        // A bud was live as the AirPods connected, so it counts as live in this stretch: Windows' figure does not come back
+        // when the bud passes the live window (WindowsFigureTests holds the whole rule).
         ShownBattery shown = BatteryFreshness.Shown(service.Current, _clock.GetUtcNow());
-        Assert.AreEqual(68, shown.WindowsPercent, "With no bud fresh and Windows' figure current, it is what is shown.");
+        Assert.IsNull(shown.WindowsPercent, "A bud was live in this connection, so Windows' figure is not shown again.");
+        Assert.AreEqual(68, service.Current.Headset.Percent, "It is still read.");
     }
 
     [TestMethod]

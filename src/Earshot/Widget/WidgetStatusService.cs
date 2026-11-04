@@ -112,6 +112,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private bool _driftLogged;
     private bool _budOrderLogged;
     private bool _alternationLogged;
+    private bool _budLiveThisConnection;
 
     // Everything below is read and written only while holding _gate, so a call from whatever thread the owner's
     // UI runs on and a Received/Stopped callback never race each other.
@@ -2003,6 +2004,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             previous.WatcherErrorName != current.WatcherErrorName ||
             previous.Headset != current.Headset ||
             previous.Selection != current.Selection ||
+            previous.BudLiveThisConnection != current.BudLiveThisConnection ||
             !ReferenceEquals(previous.LastReadings, current.LastReadings) ||
             previous.PairedModel != current.PairedModel ||
             previous.AutoPauseAvailable != current.AutoPauseAvailable;
@@ -2041,16 +2043,37 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         // bud as in or out of the ear.
         PartReading left = fresh ? _left : _left with { InEar = null };
         PartReading right = fresh ? _right : _right with { InEar = null };
+        BroadcastSelectionState selection = _selector.StateAt(now);
+        UpdateBudLiveLatchLocked(where, selection, now);
         return new WidgetSnapshot(
             where, left, right, _case, batteryReadAt, earReadAt, _lidOpenBitSeen ? _lastLidOpenState : null,
             _watcherState, _watcherErrorCode, _watcherErrorName,
             autoPauseAvailable, BuildCountersLocked())
         {
             Headset = _headset,
-            Selection = _selector.StateAt(now),
+            Selection = selection,
             LastReadings = _book,
             PairedModel = _selector.PairedModel ?? _selector.Memory?.Model,
+            BudLiveThisConnection = _budLiveThisConnection,
         };
+    }
+
+    // Windows' figure is shown only until a bud of the linked set is live in a connected stretch. A bud that is live when the
+    // AirPods connect counts. The latch clears when the AirPods are no longer on this PC. Must be called holding _gate, on
+    // every snapshot, so a bud is seen live at the message that made it so.
+    private void UpdateBudLiveLatchLocked(AirPodsWhere where, BroadcastSelectionState selection, DateTimeOffset now)
+    {
+        if (where != AirPodsWhere.ThisPc)
+        {
+            _budLiveThisConnection = false;
+            return;
+        }
+
+        if (!_budLiveThisConnection && selection == BroadcastSelectionState.Linked &&
+            (BatteryFreshness.IsFresh(_left, now) || BatteryFreshness.IsFresh(_right, now)))
+        {
+            _budLiveThisConnection = true;
+        }
     }
 
     // When anything was last read: the newest of the parts' read times. A part the broadcast does not say (the case

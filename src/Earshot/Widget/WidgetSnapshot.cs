@@ -32,6 +32,11 @@ public sealed record WidgetSnapshot(
 
     public ushort? PairedModel { get; init; }
 
+    // A bud of the linked set has been live since the AirPods last came to this PC (or was live as they came). Once it has,
+    // BatteryFreshness does not show Windows' figure again until the AirPods leave, so a source can switch once, Windows
+    // to a bud, and never back.
+    public bool BudLiveThisConnection { get; init; }
+
     public static WidgetSnapshot Empty(WidgetWatcherState watcher) => new(
         AirPodsWhere.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown,
         BatteryReadAt: null, EarReadAt: null, LidOpen: null, watcher, WatcherErrorCode: null, WatcherErrorName: null,
