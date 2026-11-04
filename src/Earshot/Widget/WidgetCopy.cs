@@ -260,7 +260,7 @@ internal static class WidgetCopy
 
     private static string FullyChargedText(string partLabel) => partLabel + " at 100%, fully charged";
 
-    // The compact card (design round 5). Moved to names the other device by the owner's label; with none it says "another device".
+    // The compact card (from the design). Moved to names the other device by the owner's label; with none it says "another device".
     public const string TakeBack = "Take back";
 
     public const string TakingBack = "Taking back";

@@ -4,7 +4,7 @@ namespace Earshot.Widget;
 //   Sequential: a change of form (compact to full, full to compact). The old content fades out over the first 83 ms of 250 and
 //     the new fades in over 83 ms from 167 ms; a fold (full to compact) runs the same crossfade compressed to 167 ms.
 //   Cross: a compact row replaced in place by another: a straight crossfade over 83 ms.
-// Durations are the design's motion table (round 5, "Motion"); every fade is linear.
+// Durations are the design's motion table ("Motion"); every fade is linear.
 internal enum FormFadeKind { Sequential, Cross }
 
 internal static class CompactMotion
