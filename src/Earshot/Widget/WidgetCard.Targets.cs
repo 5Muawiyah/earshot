@@ -121,7 +121,7 @@ internal sealed partial class WidgetCard
     }
 
     // The three battery columns as words a screen reader reads, after the controls (so the keyboard's order and the controls' places
-    // in the list do not move): "Left 70%, charging", "Right about 90%, estimated, read 2 h ago", "Case, no reading".
+    // in the list do not move): "Left 70%, charging", "Right 90%, last read 2 h ago", "Case, no reading".
     private void AddColumns(List<CardControl> list, WidgetCardLayout.Layout layout)
     {
         if (!layout.ShowColumns)

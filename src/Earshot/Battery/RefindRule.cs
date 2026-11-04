@@ -117,7 +117,7 @@ internal static class RefindRule
 
         RefindSample newest = samples.MaxBy(s => s.At);
         DecodedReading reading = ProximityDecoder.Decode(newest.Message, table, newest.At);
-        double rate = ChargeRates.For(book, model, ChargePart.Bud, useAppleBudSeed: true) ?? ChargeRates.AppleBudSeedPercentPerHour;
+        double rate = BroadcastRules.RefindChargePerHour;
 
         PartReading[] now = [reading.Left, reading.Right];
         SavedReading[] saved = [savedLeft, savedRight];

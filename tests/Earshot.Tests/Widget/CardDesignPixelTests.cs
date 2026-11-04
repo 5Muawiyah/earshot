@@ -120,37 +120,6 @@ public sealed class CardDesignPixelTests
         });
     }
 
-    // Estimates: "≈" before the value and the age of the reading it grew from, in the stale style.
-    [TestMethod]
-    [DynamicData(nameof(ThemesAndScales))]
-    public void AnEstimateIsTertiaryHasAnExtraMarkBeforeItsValueAndShowsTheAgeOfItsReading(DesignTheme theme, int dpi, double t)
-    {
-        Phase5.CardSta.Run(() =>
-        {
-            DateTimeOffset read = Now - TimeSpan.FromMinutes(4);
-            ShownBattery estimates = new(
-                new ShownPart(66, true, ReadingKind.Estimated, read) { ReadPercent = 62 },
-                new ShownPart(66, true, ReadingKind.Last, read),
-                new ShownPart(94, false, ReadingKind.Estimated, Now - TimeSpan.FromHours(2)) { ReadPercent = 90 },
-                null, null, null);
-            using WidgetCard card = DesignPixels.NewCard(theme, t);
-            (Bitmap bitmap, WidgetCardLayout.Layout layout, Color surface, CardColours c) = Draw(card, Model(Snapshot(TimeSpan.FromMinutes(4))) with { Parts = estimates }, theme, dpi);
-            using Bitmap owned = bitmap;
-
-            Assert.StartsWith("≈", WidgetCopy.PercentText(66, estimated: true));
-            WidgetCardLayout.ColumnLayout estimate = layout.Left;
-            WidgetCardLayout.ColumnLayout last = layout.Right;
-            (int First, int Last) a = DesignPixels.InkColumns(bitmap, new Rectangle(estimate.Percent.X, estimate.Percent.Y, estimate.BoltSlot.X - estimate.Percent.X, estimate.Percent.Height), surface)!.Value;
-            (int First, int Last) b = DesignPixels.InkColumns(bitmap, new Rectangle(last.Percent.X, last.Percent.Y, last.BoltSlot.X - last.Percent.X, last.Percent.Height), surface)!.Value;
-            Assert.IsGreaterThan(b.Last - b.First, a.Last - a.First, "66% as an estimate is wider than 66% as a last reading: it has the ≈");
-            Assert.IsTrue(CardKit.HasInk(bitmap, estimate.ReadTime, surface), "The age of the reading it grew from");
-            Assert.IsTrue(CardKit.HasInk(bitmap, layout.Case.ReadTime, surface), "The case's estimate shows its age too");
-            Color tertiary = DesignPixels.Over(c.TextTertiary, surface);
-            Color value = DesignPixels.Extreme(bitmap, new Rectangle(estimate.Percent.X, estimate.Percent.Y, estimate.BoltSlot.X - estimate.Percent.X, estimate.Percent.Height), surface);
-            Assert.IsLessThan(0, Closer(value, tertiary, DesignPixels.Over(c.Text, surface)), "The estimate is Text tertiary: " + value);
-        });
-    }
-
     // A charging part shows the bolt in its reserved slot, right of the value; the value stays centred without one.
     [TestMethod]
     [DynamicData(nameof(ThemesAndScales))]

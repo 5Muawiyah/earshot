@@ -25,7 +25,7 @@ internal interface IHistoryStore
 
 // The battery history as one small JSON file, battery-history.json in the widget folder (Paths.BatteryHistoryFile, under
 // EARSHOT_DATA_ROOT when that redirects Earshot's folders). It holds live readings only, of the linked pair only (the
-// caller hands in only those): never a last reading, an estimate or Windows' figure. Each sample is a part, a level, a
+// caller hands in only those): never a last reading or Windows' figure. Each sample is a part, a level, a
 // charging flag and a time, and the file's shape has no member an address, a name or a model could go in.
 //
 // Design choices, none of them from a source: at most one sample per part per minute (SampleInterval; readings come

@@ -45,7 +45,7 @@ public sealed record WidgetSettings
 
     public bool LowBatteryAlert { get; set; } = true;          // an addition: an off switch beside the threshold
 
-    // One notice when a part (left, right, case) reaches 100, live or estimated: on by default, for a new install and an
+    // One notice when a part (left, right, case) reaches 100 in a live reading: on by default, for a new install and an
     // existing one alike, so a file that never held it reads as on.
     public bool FullyChargedNotice { get; set; } = true;
 

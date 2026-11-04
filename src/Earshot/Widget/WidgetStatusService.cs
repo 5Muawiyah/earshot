@@ -13,9 +13,9 @@ namespace Earshot.Widget;
 // BroadcastSelector links the set whose case is opened near the PC, follows it across address changes and drops the
 // link when the set has been lost for too long. The link is in memory only: nothing about it is written, so a restart
 // has none. Only the linked set's messages ever reach the values. Its last fresh reading of each part (value, charging
-// flag, read time and model, never an address or a name) and the charge rates learned from it are kept in the last
+// flag, read time and model, never an address or a name) are kept in the last
 // reading store, read at construction and written on change, and BatteryFreshness shows them (on the card, the gauge and
-// its tooltip) wherever the AirPods are, live while fresh and otherwise as a last reading or an estimate. Windows' own
+// its tooltip) wherever the AirPods are, live while fresh and otherwise as a last reading. Windows' own
 // Hands-Free battery figure, when it has one, is read beside them (every minute while the AirPods are on this PC, at
 // each connect, and when asked) and held apart: it fills in only when no bud has a fresh broadcast value.
 //
@@ -35,7 +35,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly IHandsFreeBatterySource? _handsFree;
     private readonly Action<Action> _runInBackground;
 
-    // Where the owner's pair's last readings and learned rates are kept between runs, or null to keep them in memory only.
+    // Where the owner's pair's last readings are kept between runs, or null to keep them in memory only.
     private readonly ILastReadingStore? _lastReadingStore;
 
     // Where the link to the owner's pair is remembered between runs (LinkMemory), or null to keep it in memory only. Given,
@@ -64,7 +64,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private readonly Lock _gate = new();
     private readonly Dictionary<(byte? Prefix, int Length), long> _unknownForms = new();
     private readonly BroadcastSelector _selector;
-    private readonly ChargeRateLearner _learner = new();
 
     // Rebuilding the shapes list is skipped unless _unknownForms actually changed since the last build: most
     // adverts never touch it at all, so re-allocating it on every one of them would be pointless churn, and
@@ -137,18 +136,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private string? _watcherErrorName;
     private WidgetSnapshot? _lastPublished;
 
-    // The owner's pair's last readings and learned rates (read from the store at construction), what was last written of
-    // them and when, and the latest time anything was worked out at (the estimate's clock, which never goes back).
+    // The owner's pair's last readings (read from the store at construction), what was last written of them and when.
     private LastReadingBook _book;
     private LastReadingBook _savedBook;
     private DateTimeOffset? _lastSavedAt;
-    private DateTimeOffset? _estimateClock;
 
-    // The highest estimate shown for each part's saved reading (read from the store at construction with the readings),
-    // the version of it that was last written, and the order books are taken to be written in (LastReadingStore drops one
-    // that arrives after a later one). All three are touched holding _gate.
-    private readonly EstimateHighWater _highWater;
-    private int _savedMarksVersion;
+    // The order books are taken to be written in (LastReadingStore drops one that arrives after a later one). Touched
+    // holding _gate.
     private long _bookSequence;
 
     // The order link memories are taken to be written in, as for the books: LinkMemoryStore drops one that arrives after a
@@ -237,8 +231,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         _selector.SavedBook = () => _book;
         _selector.LoadMemory(_linkMemoryStore?.Load());
         _savedMemory = _selector.Memory;
-        _highWater = new EstimateHighWater(_book.Marks);
-        _savedMarksVersion = _highWater.Version;
     }
 
     // Whether a worn pair may be found again with no case open (BroadcastRules.RefindEnabled, off by default). Set before
@@ -436,9 +428,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
 
-            // A read time not yet written is written now, so the next start shows the reading as old as it is, and so is an
-            // estimate shown since the last write, so a restart shows no less.
-            if (_lastReadingStore is not null && (!ReferenceEquals(_book, _savedBook) || _highWater.Version != _savedMarksVersion))
+            // A read time not yet written is written now, so the next start shows the reading as old as it is.
+            if (_lastReadingStore is not null && !ReferenceEquals(_book, _savedBook))
             {
                 bookToSave = TakeForSaveLocked(_book);
                 _savedBook = _book;
@@ -1510,27 +1501,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
     }
 
-    // A fresh reading of the linked set, and of no other, goes into the owner's last readings, and the parts' charge runs
-    // learn from it. Returns the book to write when it is due (a value, a flag, a model or a rate changed at once; a read
-    // time alone at most every LastReadingStore.ReadTimeWriteInterval), or null. Must be called holding _gate; the write
-    // itself happens outside it.
+    // A fresh reading of the linked set, and of no other, goes into the owner's last readings. Returns the book to write when
+    // it is due (a value, a flag or a model changed at once; a read time alone at most every
+    // LastReadingStore.ReadTimeWriteInterval), or null. Must be called holding _gate; the write itself happens outside it.
     private LastReadingBook? RecordLastReadingLocked(DecodedReading reading, ushort model, DateTimeOffset at)
     {
         LastReadingBook book = _book.WithReading(reading, model, at);
-        foreach ((ChargeComponent component, PartReading part) in new[]
-        {
-            (ChargeComponent.Left, reading.Left), (ChargeComponent.Right, reading.Right), (ChargeComponent.Case, reading.Case),
-        })
-        {
-            if (part.Percent is int percent && _learner.Observe(component, model, percent, part.Charging == true, at) is { } rate)
-            {
-                book = book.WithRate(rate);
-                _log.Info("Widget: a charge rate was learned for the " + (rate.Part == ChargePart.Case ? "case" : "buds") + ": " +
-                    Math.Round(rate.PercentPerHour).ToString(System.Globalization.CultureInfo.InvariantCulture) + " points an hour over " +
-                    Math.Round(rate.Span.TotalMinutes).ToString(System.Globalization.CultureInfo.InvariantCulture) + " min.");
-            }
-        }
-
         _book = book;
         if (_lastReadingStore is null || ReferenceEquals(book, _savedBook))
         {
@@ -1549,17 +1525,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         return TakeForSaveLocked(book);
     }
 
-    // The book as it is written: the estimates shown for its readings, and the next number in the order of writes. Must be
-    // called holding _gate, so the order of the numbers is the order the books were taken in whichever thread writes first.
-    private LastReadingBook TakeForSaveLocked(LastReadingBook book)
-    {
-        _savedMarksVersion = _highWater.Version;
-        return book with { Marks = _highWater.MarksFor(book), Sequence = ++_bookSequence };
-    }
+    // The book as it is written, with the next number in the order of writes. Must be called holding _gate, so the order of
+    // the numbers is the order the books were taken in whichever thread writes first.
+    private LastReadingBook TakeForSaveLocked(LastReadingBook book) => book with { Sequence = ++_bookSequence };
 
-    // A different pair of AirPods was adopted (the tray pinned another container): the previous pair's last readings, their
-    // estimate marks and the link to its case belong to something that is no longer on this PC, so none of them is shown
-    // against the new pair. The learned charge speeds stay: they are the model's and the case's, and they show no figure. The
+    // A different pair of AirPods was adopted (the tray pinned another container): the previous pair's last readings and the
+    // link to its case belong to something that is no longer on this PC, so none of them is shown against the new pair. The
     // new pair is linked when its case is opened next to the PC, as for any first pair. reason is for the log only.
     public void ForgetPair(string reason)
     {
@@ -1576,8 +1547,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             ResetReadingsLocked();
             _selector.ForgetLink();
             _setsInRange = 0;
-            _highWater.Clear();
-            _book = _book with { Left = null, Right = null, Case = null, Marks = Array.Empty<EstimateMark>() };
+            _book = _book with { Left = null, Right = null, Case = null };
             if (_lastReadingStore is not null)
             {
                 bookToSave = TakeForSaveLocked(_book);
@@ -1603,11 +1573,10 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     // Whatever the linked set held is dropped: after a link that is another set, or a new paired model, nothing
     // of the old values may be shown against the new pair. The saved last readings stay: they are the owner's pair's, and
-    // a newer fresh reading of the linked set replaces them part by part. The charge runs start over.
+    // a newer fresh reading of the linked set replaces them part by part.
     private void ResetReadingsLocked()
     {
         _selectionGeneration++;
-        _learner.Reset();
         _left = PartReading.Unknown;
         _right = PartReading.Unknown;
         _case = PartReading.Unknown;
@@ -1958,7 +1927,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool changed;
         bool caseClosed;
         DateTimeOffset now;
-        LastReadingBook? marksToSave = null;
         lock (_gate)
         {
             if (_closed)
@@ -1971,20 +1939,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             changed = SnapshotChangedIgnoringCounters(_lastPublished, snapshot);
             _lastPublished = snapshot;
             caseClosed = TakeCaseClosedLocked();
-
-            // An estimate a surface has shown since the last write is written, at most as often as a read time alone is.
-            if (_lastReadingStore is not null && _highWater.Version != _savedMarksVersion &&
-                (_lastSavedAt is not DateTimeOffset last || (now - last).Duration() >= LastReadingStore.ReadTimeWriteInterval))
-            {
-                marksToSave = TakeForSaveLocked(_book);
-                _savedBook = _book;
-                _lastSavedAt = now;
-            }
-        }
-
-        if (marksToSave is not null)
-        {
-            _lastReadingStore!.Save(marksToSave);
         }
 
         if (changed)
@@ -2061,11 +2015,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         // bud as in or out of the ear.
         PartReading left = fresh ? _left : _left with { InEar = null };
         PartReading right = fresh ? _right : _right with { InEar = null };
-        if (_estimateClock is null || now > _estimateClock)
-        {
-            _estimateClock = now;
-        }
-
         return new WidgetSnapshot(
             where, left, right, _case, batteryReadAt, earReadAt, _lidOpenBitSeen ? _lastLidOpenState : null,
             _watcherState, _watcherErrorCode, _watcherErrorName,
@@ -2075,8 +2024,6 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             Selection = _selector.StateAt(now),
             LastReadings = _book,
             PairedModel = _selector.PairedModel ?? _selector.Memory?.Model,
-            EstimateClock = _estimateClock,
-            HighWater = _highWater,
         };
     }
 

@@ -103,7 +103,6 @@ public sealed class ForgetPairTests : IDisposable
         Assert.IsNull(service.Current.LastReadings.Left);
         Assert.IsNull(service.Current.LastReadings.Right);
         Assert.IsNull(service.Current.LastReadings.Case);
-        Assert.IsEmpty(service.Current.LastReadings.Marks);
         Assert.IsGreaterThan(0, changed, "The card and the gauge are told.");
         Assert.IsTrue(_log.Entries.Any(e => e.Message.Contains("a different pair was adopted, so the previous pair's last readings and link were dropped", StringComparison.Ordinal)));
         service.Close();
@@ -144,32 +143,6 @@ public sealed class ForgetPairTests : IDisposable
         Assert.AreEqual(100, shown.Left.Percent);
         Assert.AreEqual(100, shown.Right.Percent);
         Assert.AreEqual(90, shown.Case.Percent);
-    }
-
-    [TestMethod]
-    public void TheLearnedChargeSpeedsAreKept()
-    {
-        using WidgetStatusService service = NewService();
-        OwnerCaseOpen(3, budLevel: 0xA, caseLevel: 0x4, charging: AllCharging);
-        DateTimeOffset start = Now;
-        int CaseAt(double minutes) => minutes < 1 ? 4 : minutes < 11 ? 5 : minutes < 21 ? 6 : 7;
-        for (int s = 0; s <= 22 * 60; s++)
-        {
-            bool one = s % 2 == 0;
-            Raise(one ? OwnerLeftBud : OwnerRightBud,
-                BroadcastFixtures.Bud(one, caseNibble: (byte)(AllCharging | CaseAt((Now - start).TotalMinutes)), pairHigh: 0xA, pairLow: 0xA), -55);
-            Tick(1);
-        }
-
-        LearnedRate? learned = service.Current.LastReadings.RateFor(BroadcastFixtures.PairedModel, ChargePart.Case);
-        Assert.IsNotNull(learned, "A charge of the case was seen.");
-
-        service.ForgetPair("test");
-
-        LearnedRate? kept = service.Current.LastReadings.RateFor(BroadcastFixtures.PairedModel, ChargePart.Case);
-        Assert.IsNotNull(kept, "The case is the same case, so its speed stays.");
-        Assert.AreEqual(learned.PercentPerHour, kept.PercentPerHour, 0.001);
-        Assert.IsNull(service.Current.LastReadings.Case);
     }
 
     [TestMethod]

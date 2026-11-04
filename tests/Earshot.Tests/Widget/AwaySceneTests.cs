@@ -10,7 +10,7 @@ namespace Earshot.Tests.Widget;
 // Away from this PC, whole scenes through the real status service, the real selection and link code and the real last
 // reading store under EARSHOT_DATA_ROOT, with a fake watcher and a fake clock: the owner's pair's last readings are saved
 // and shown after a restart with their age, a stranger's pair is never saved or shown, a case opened again replaces the
-// estimate with what it reads, and the file holds no address and no name.
+// last reading with what it reads, and the file holds no address and no name.
 [TestClass]
 public sealed class AwaySceneTests : IDisposable
 {
@@ -180,55 +180,47 @@ public sealed class AwaySceneTests : IDisposable
         Assert.IsFalse(after.Left.HasValue || after.Right.HasValue || after.Case.HasValue, "Nor shown after a restart.");
     }
 
-    // The owner's case charging with the lid open long enough to learn its rate; the lid shut, the case estimated; the lid
-    // opened again, what it reads replaces the estimate.
+    // The owner's case charging with the lid open; the lid shuts at 70%. Whatever the time since, and across a restart with the
+    // clock anywhere, the case reads 70 as a last reading: nothing grows it. The lid opening again reads 80, which replaces it.
     [TestMethod]
-    public void TheCaseOpeningAgainReplacesTheEstimateWhichNeverFellBelowTheLastReading()
+    public void AChargingCaseThatIsShutKeepsItsLastReadingAndTheLidOpeningAgainReplacesIt()
     {
-        using WidgetStatusService service = NewService();
-        OwnerCaseOpen(3, budLevel: 0xA, caseLevel: 0x4, charging: AllCharging);
-
-        // The lid stays open: a message a second, the case stepping up every ten minutes from the first minute.
-        DateTimeOffset start = Now;
-        int CaseAt(double minutes) => minutes < 1 ? 4 : minutes < 11 ? 5 : minutes < 21 ? 6 : 7;
-        for (int s = 0; s <= 22 * 60; s++)
+        using (WidgetStatusService service = NewService())
         {
-            bool one = s % 2 == 0;
-            Raise(one ? OwnerLeftBud : OwnerRightBud,
-                BroadcastFixtures.Bud(one, caseNibble: (byte)(AllCharging | CaseAt((Now - start).TotalMinutes)), pairHigh: 0xA, pairLow: 0xA), -55);
-            Tick(1);
+            OwnerCaseOpen(3, budLevel: 0xA, caseLevel: 0x7, charging: AllCharging);
+
+            foreach (double minutes in new[] { 1.0, 21, 90, 600 })
+            {
+                Tick(minutes * 60);
+                ShownPart box = BatteryFreshness.Shown(service.Current, Now).Case;
+                Assert.AreEqual(70, box.Percent, "At " + minutes + " minutes.");
+                Assert.AreEqual(ReadingKind.Last, box.Kind, "At " + minutes + " minutes.");
+                Tick(-minutes * 60);
+            }
+
+            service.Close();
         }
 
-        LearnedRate? rate = service.Current.LastReadings.RateFor(BroadcastFixtures.PairedModel, ChargePart.Case);
-        Assert.IsNotNull(rate, "A charge of the case was seen, so its rate is learned.");
-        Assert.AreEqual(60.0, rate.PercentPerHour, 1.0, "20 points from the step at 1 minute to the step at 21.");
-
-        // The lid shuts at 70%. Over the next 21 minutes the estimate grows 21 points; it never shows less than 70.
-        DateTimeOffset shut = Now;
-        for (int m = 0; m <= 20; m++)
+        // Restarted, with the clock put forward and back: the same reading.
+        foreach (double hours in new[] { 3.0, -2 })
         {
-            ShownPart box = BatteryFreshness.Shown(service.Current, Now).Case;
-            Assert.IsGreaterThanOrEqualTo(70, box.Percent!.Value, "Never below the last reading, at minute " + m);
-            Tick(60);
+            Tick(hours * 60 * 60);
+            using WidgetStatusService restarted = NewService();
+            ShownPart box = BatteryFreshness.Shown(restarted.Current, Now).Case;
+            Assert.AreEqual(70, box.Percent);
+            Assert.AreEqual(ReadingKind.Last, box.Kind);
+            Tick(-hours * 60 * 60);
         }
 
-        ShownPart grown = BatteryFreshness.Shown(service.Current, Now).Case;
-        Assert.AreEqual(ReadingKind.Estimated, grown.Kind);
-        Assert.AreEqual(90, grown.Percent, "70, read as the lid shut, plus just under 60 an hour for 21 minutes: the learned rate counts from the reading before the start step, a second earlier, so it errs slow.");
-        Assert.AreEqual(70, grown.ReadPercent);
-        Assert.AreEqual("≈90% · 21 min", WidgetCopy.PartLine(grown, Now));
-        Assert.IsGreaterThan(shut - TimeSpan.FromMinutes(2), grown.ReadAt!.Value);
-
-        // The lid opens again: the case reads 80% and has stopped charging. That replaces the estimate at once.
+        using WidgetStatusService again = NewService();
         Tick(10 * 60);
         OwnerCaseOpen(3, budLevel: 0xA, caseLevel: 0x8);
-        ShownPart read = BatteryFreshness.Shown(service.Current, Now).Case;
+        ShownPart read = BatteryFreshness.Shown(again.Current, Now).Case;
         Assert.AreEqual(ReadingKind.Live, read.Kind);
         Assert.AreEqual(80, read.Percent);
 
-        // Shut again, not charging: it stays a last reading at 80, however long.
         Tick(5 * 60 * 60);
-        ShownPart later = BatteryFreshness.Shown(service.Current, Now).Case;
+        ShownPart later = BatteryFreshness.Shown(again.Current, Now).Case;
         Assert.AreEqual(ReadingKind.Last, later.Kind);
         Assert.AreEqual(80, later.Percent);
     }
@@ -254,7 +246,7 @@ public sealed class AwaySceneTests : IDisposable
         Assert.IsFalse(text.Contains("AirPods", StringComparison.OrdinalIgnoreCase), "No name.");
 
         // Every member is one the file's shape allows, and none of them can hold an address or a name.
-        string[] allowed = ["SchemaVersion", "Left", "Right", "Case", "Rates", "Percent", "Charging", "ReadAt", "Model", "Part", "PercentPerHour", "MeasuredAt", "SpanMinutes", "Marks", "ReadPercent", "Spent"];
+        string[] allowed = ["SchemaVersion", "Left", "Right", "Case", "Percent", "Charging", "ReadAt", "Model", "Part", "ReadPercent", "Spent"];
         using var json = System.Text.Json.JsonDocument.Parse(text);
         var names = new List<string>();
         void Walk(System.Text.Json.JsonElement e)
@@ -302,47 +294,6 @@ public sealed class AwaySceneTests : IDisposable
         Assert.AreEqual(lastHeard, new LastReadingStore(StoreFile, _log).Load().Left!.ReadAt, "Close writes the last read time.");
     }
 
-    // The estimate's high-water mark is kept with the last readings: shown at one o'clock, the app closed, the clock put
-    // back and the app started again, the estimate is not lower than it was.
-    [TestMethod]
-    public void AnEstimateShownBeforeARestartIsNotLowerAfterItWhateverTheClockIsSetTo()
-    {
-        DateTimeOffset readAt = Now;
-        new LastReadingStore(StoreFile, _log).Save(new LastReadingBook(
-            null, null, new SavedReading(40, true, readAt, BroadcastFixtures.PairedModel),
-            [new LearnedRate(BroadcastFixtures.PairedModel, ChargePart.Case, 30, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]));
-
-        using (WidgetStatusService first = NewService())
-        {
-            Tick(60 * 60);
-            ShownPart shown = BatteryFreshness.Shown(first.Current, Now).Case;
-            Assert.AreEqual(ReadingKind.Estimated, shown.Kind);
-            Assert.AreEqual(70, shown.Percent, "40 and 30 an hour for an hour.");
-            first.Close();
-        }
-
-        // The clock is set back to twenty minutes after the reading, and the app starts again.
-        Tick(-40 * 60);
-        using (WidgetStatusService second = NewService())
-        {
-            ShownPart after = BatteryFreshness.Shown(second.Current, Now).Case;
-            Assert.AreEqual(ReadingKind.Estimated, after.Kind, "Still an estimate, marked as one.");
-            Assert.AreEqual(70, after.Percent, "Not the 50 that twenty minutes of growth gives.");
-            Assert.AreEqual(40, after.ReadPercent);
-            second.Close();
-        }
-
-        // And to an hour before the reading.
-        Tick(-80 * 60);
-        using WidgetStatusService third = NewService();
-        ShownPart behind = BatteryFreshness.Shown(third.Current, Now).Case;
-        Assert.AreEqual(70, behind.Percent, "Behind the reading itself, still not lower than it was shown.");
-        Assert.AreEqual(ReadingKind.Estimated, behind.Kind);
-
-        // Time then passes beyond where the estimate was: it rises again from the same reading.
-        Tick(3 * 60 * 60);
-        Assert.AreEqual(100, BatteryFreshness.Shown(third.Current, Now).Case.Percent);
-    }
 
     // One bud's message of a same-model stranger's pair: 70% in each bud, 60% in the case, the lid open.
     private void StrangerCaseOpen(double seconds, sbyte rssi, double every = 0.25)

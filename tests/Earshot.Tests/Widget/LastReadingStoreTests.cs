@@ -26,14 +26,7 @@ public sealed class LastReadingStoreTests : IDisposable
         new(
             new SavedReading(70, false, ReadAt, Model),
             new SavedReading(60, true, ReadAt + TimeSpan.FromSeconds(5), Model),
-            new SavedReading(80, true, ReadAt + TimeSpan.FromSeconds(9), Model),
-            [
-                new LearnedRate(Model, ChargePart.Bud, 45.5, ReadAt - TimeSpan.FromHours(1), TimeSpan.FromMinutes(20)),
-                new LearnedRate(Model, ChargePart.Case, 30, ReadAt - TimeSpan.FromHours(2), TimeSpan.FromMinutes(40)),
-            ])
-        {
-            Marks = [new EstimateMark(ChargeComponent.Case, ReadAt + TimeSpan.FromSeconds(9), 80, 93)],
-        };
+            new SavedReading(80, true, ReadAt + TimeSpan.FromSeconds(9), Model));
 
     private void WriteRaw(string text)
     {
@@ -62,11 +55,64 @@ public sealed class LastReadingStoreTests : IDisposable
         Assert.AreEqual(book.Left, loaded.Left);
         Assert.AreEqual(book.Right, loaded.Right);
         Assert.AreEqual(book.Case, loaded.Case);
-        Assert.HasCount(2, loaded.Rates);
-        Assert.AreEqual(book.Rates[0], loaded.Rates[0]);
-        Assert.AreEqual(book.Rates[1], loaded.Rates[1]);
-        Assert.HasCount(1, loaded.Marks);
-        Assert.AreEqual(book.Marks[0], loaded.Marks[0]);
+    }
+
+    // The file of an Earshot that kept charge rates and the marks of grown values. Invented times and values.
+    private const string OldFileWithRatesAndMarks = """
+        { "SchemaVersion": 1,
+          "Left": { "Percent": 70, "Charging": false, "ReadAt": "2026-10-02T09:00:00+00:00", "Model": 8231 },
+          "Right": { "Percent": 60, "Charging": true, "ReadAt": "2026-10-02T09:00:05+00:00", "Model": 8231 },
+          "Case": { "Percent": 80, "Charging": true, "ReadAt": "2026-10-02T09:00:09+00:00", "Model": 8231 },
+          "Rates": [
+            { "Model": 8231, "Part": "bud", "PercentPerHour": 45.5, "MeasuredAt": "2026-10-02T08:00:00+00:00", "SpanMinutes": 20 },
+            { "Model": 8231, "Part": "case", "PercentPerHour": 30, "MeasuredAt": "2026-10-02T07:00:00+00:00", "SpanMinutes": 40 } ],
+          "Marks": [
+            { "Part": "case", "ReadAt": "2026-10-02T09:00:09+00:00", "ReadPercent": 80, "Percent": 93 },
+            { "Part": "right", "ReadAt": "2026-10-02T09:00:05+00:00", "ReadPercent": 60, "Percent": 100 } ],
+          "Spent": [
+            { "Part": "left", "ReadAt": "2026-10-01T09:00:00+00:00", "ReadPercent": 100 } ] }
+        """;
+
+    // Rates and marks are still accepted when a file has them, and never written: an older copy of Earshot can read the new
+    // file because the schema number stays 1 and its members are all optional.
+    [TestMethod]
+    public void AnOldFileWithRatesAndMarksLoadsItsValuesAndASaveWritesNeitherOfThem()
+    {
+        WriteRaw(OldFileWithRatesAndMarks);
+        LastReadingStore store = NewStore();
+
+        LastReadingBook loaded = store.Load();
+
+        Assert.AreEqual(new SavedReading(70, false, ReadAt, Model), loaded.Left);
+        Assert.AreEqual(new SavedReading(60, true, ReadAt + TimeSpan.FromSeconds(5), Model), loaded.Right);
+        Assert.AreEqual(new SavedReading(80, true, ReadAt + TimeSpan.FromSeconds(9), Model), loaded.Case);
+        Assert.HasCount(1, store.LoadSpent(), "The spent mark is not a rate or a mark, and stays.");
+        Assert.IsEmpty(_log.Entries.Where(e => e.Level >= LogLevel.Warn), "An old file is not a problem.");
+
+        store.Save(loaded with { Left = new SavedReading(50, false, ReadAt + TimeSpan.FromMinutes(1), Model) });
+
+        string written = File.ReadAllText(FilePath);
+        foreach (string gone in new[] { "Rates", "Marks", "PercentPerHour", "SpanMinutes", "MeasuredAt" })
+        {
+            Assert.IsFalse(written.Contains(gone, StringComparison.Ordinal), "Not written: " + gone);
+        }
+
+        Assert.IsTrue(written.Contains("Spent", StringComparison.Ordinal));
+        LastReadingBook again = NewStore().Load();
+        Assert.AreEqual(50, again.Left?.Percent);
+        Assert.AreEqual(60, again.Right?.Percent);
+        Assert.AreEqual(80, again.Case?.Percent);
+        Assert.HasCount(1, NewStore().LoadSpent());
+    }
+
+    [TestMethod]
+    public void ABookSavedFromNothingWritesNoRatesOrMarksMembersAtAll()
+    {
+        NewStore().Save(LastReadingBook.Empty with { Left = new SavedReading(70, false, ReadAt, Model) });
+
+        string written = File.ReadAllText(FilePath);
+
+        StringAssert.DoesNotMatch(written, new System.Text.RegularExpressions.Regex("Rates|Marks"));
     }
 
     [TestMethod]
@@ -99,7 +145,6 @@ public sealed class LastReadingStoreTests : IDisposable
 
         Assert.IsNull(loaded.Left);
         Assert.IsNull(loaded.Case);
-        Assert.IsEmpty(loaded.Rates);
         Assert.IsTrue(_log.Has(LogLevel.Warn, "not usable"));
     }
 
@@ -145,8 +190,6 @@ public sealed class LastReadingStoreTests : IDisposable
         Assert.AreEqual(70, loaded.Left?.Percent, "The good entry stays.");
         Assert.IsNull(loaded.Right, "A percent of 900 is dropped.");
         Assert.IsNull(loaded.Case, "A model of 0 is dropped.");
-        Assert.HasCount(1, loaded.Rates, "A negative rate is dropped.");
-        Assert.AreEqual(ChargePart.Bud, loaded.Rates[0].Part);
     }
 
     [TestMethod]

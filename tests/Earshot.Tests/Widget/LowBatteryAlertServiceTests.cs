@@ -288,41 +288,37 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         Assert.AreEqual(0, _notifier.Calls.Count, "A disposed service must not react to further changes.");
     }
 
-    // A last reading and an estimate are not what the battery is now, so neither feeds the latch: no notification, however
-    // low, on this PC.
+    // A last reading is not what the battery is now, so it does not feed the latch: no notification, however low, on this PC.
+    // A charging last reading is shown at the level it was read, never grown.
     [TestMethod]
-    public void AnEstimatedPartAtTenPercentAndALastReadingAtTenPercentDoNotNotify()
+    public void ALastReadingAtFiveOrTenPercentDoesNotNotify()
     {
         using LowBatteryAlertService service = NewService();
         DateTimeOffset readAt = _clock.GetUtcNow() - TimeSpan.FromHours(1);
         const ushort Model = BroadcastFixtures.PairedModel;
 
-        // Left was 5% and charging an hour ago, at 5 points an hour: it is shown as an estimate of 10%.
-        var estimated = new LastReadingBook(
-            new SavedReading(5, true, readAt, Model), null, null,
-            [new LearnedRate(Model, ChargePart.Bud, 5, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]);
-        WidgetSnapshot estimate = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
+        // Left was 5% and charging an hour ago: it is shown as 5%, as it was read.
+        var charging = new LastReadingBook(new SavedReading(5, true, readAt, Model), null, null);
+        WidgetSnapshot away = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = AirPodsWhere.NotInUse,
-            LastReadings = estimated,
+            LastReadings = charging,
             PairedModel = Model,
-            HighWater = new EstimateHighWater(),
         };
-        ShownPart shown = BatteryFreshness.Shown(estimate, _clock.GetUtcNow()).Left;
-        Assert.AreEqual(ReadingKind.Estimated, shown.Kind);
-        Assert.AreEqual(10, shown.Percent);
+        ShownPart shown = BatteryFreshness.Shown(away, _clock.GetUtcNow()).Left;
+        Assert.AreEqual(ReadingKind.Last, shown.Kind);
+        Assert.AreEqual(5, shown.Percent);
 
-        // With the AirPods on this PC the same book is shown as it was read: 5%, a last reading, not grown.
-        ShownPart onThisPc = BatteryFreshness.Shown(estimate with { Where = AirPodsWhere.ThisPc }, _clock.GetUtcNow()).Left;
+        ShownPart onThisPc = BatteryFreshness.Shown(away with { Where = AirPodsWhere.ThisPc }, _clock.GetUtcNow()).Left;
         Assert.AreEqual(ReadingKind.Last, onThisPc.Kind);
         Assert.AreEqual(5, onThisPc.Percent);
 
-        _status.Raise(estimate);
-        Assert.AreEqual(0, _notifier.Calls.Count, "An estimate of 10% is not a low reading.");
+        _status.Raise(away);
+        Assert.AreEqual(0, _notifier.Calls.Count, "A last reading of 5% is not a low reading.");
         Assert.AreEqual(LatchState.Armed, service.LeftLatchStateForTest);
 
-        var last = new LastReadingBook(new SavedReading(10, false, readAt, Model), null, new SavedReading(10, false, readAt, Model), []);
-        WidgetSnapshot lastReading = estimate with { LastReadings = last };
+        var last = new LastReadingBook(new SavedReading(10, false, readAt, Model), null, new SavedReading(10, false, readAt, Model));
+        WidgetSnapshot lastReading = away with { LastReadings = last };
         Assert.AreEqual(ReadingKind.Last, BatteryFreshness.Shown(lastReading, _clock.GetUtcNow()).Left.Kind);
 
         _status.Raise(lastReading);
@@ -330,8 +326,9 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         Assert.AreEqual(LatchState.Armed, service.LeftLatchStateForTest);
         Assert.AreEqual(LatchState.Armed, service.CaseLatchStateForTest);
     }
+
     [TestMethod]
-    public void ALiveLowCaseAlertsOnceAndAnEstimatedOrLastLowCaseNever()
+    public void ALiveLowCaseAlertsOnceAndALastLowCaseNever()
     {
         const ushort Model = BroadcastFixtures.PairedModel;
         using LowBatteryAlertService service = NewService();
@@ -341,28 +338,25 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         Assert.AreEqual(1, _notifier.Calls.Count);
         Assert.AreEqual(("Earshot", "Case at 15%"), _notifier.Calls[0]);
 
-        // A second service, so the case latch starts armed: the case shown as an estimate (5% charging an hour ago at
-        // 5 points an hour is 10%) and as a last reading is not a live value, so it alerts nothing.
+        // A second service, so the case latch starts armed: the case shown as a last reading (5% charging an hour ago) is
+        // not a live value, so it alerts nothing.
         using LowBatteryAlertService fresh = NewService();
         DateTimeOffset readAt = _clock.GetUtcNow() - TimeSpan.FromHours(1);
-        var estimated = new LastReadingBook(
-            null, null, new SavedReading(5, true, readAt, Model),
-            [new LearnedRate(Model, ChargePart.Case, 5, readAt - TimeSpan.FromDays(1), TimeSpan.FromMinutes(30))]);
-        WidgetSnapshot estimate = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
+        var charging = new LastReadingBook(null, null, new SavedReading(5, true, readAt, Model));
+        WidgetSnapshot away = WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = AirPodsWhere.NotInUse,
-            LastReadings = estimated,
+            LastReadings = charging,
             PairedModel = Model,
-            HighWater = new EstimateHighWater(),
         };
-        Assert.AreEqual(ReadingKind.Estimated, BatteryFreshness.Shown(estimate, _clock.GetUtcNow()).Case.Kind);
-        ShownPart onThisPc = BatteryFreshness.Shown(estimate with { Where = AirPodsWhere.ThisPc }, _clock.GetUtcNow()).Case;
+        Assert.AreEqual(ReadingKind.Last, BatteryFreshness.Shown(away, _clock.GetUtcNow()).Case.Kind);
+        ShownPart onThisPc = BatteryFreshness.Shown(away with { Where = AirPodsWhere.ThisPc }, _clock.GetUtcNow()).Case;
         Assert.AreEqual(ReadingKind.Last, onThisPc.Kind);
         Assert.AreEqual(5, onThisPc.Percent);
         _notifier.Calls.Clear();
 
-        _status.Raise(estimate);
-        WidgetSnapshot last = estimate with { LastReadings = new LastReadingBook(null, null, new SavedReading(10, false, readAt, Model), []) };
+        _status.Raise(away);
+        WidgetSnapshot last = away with { LastReadings = new LastReadingBook(null, null, new SavedReading(10, false, readAt, Model)) };
         Assert.AreEqual(ReadingKind.Last, BatteryFreshness.Shown(last, _clock.GetUtcNow()).Case.Kind);
         _status.Raise(last);
 

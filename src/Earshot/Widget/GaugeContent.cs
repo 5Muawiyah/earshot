@@ -16,7 +16,7 @@ internal enum GaugeMode
     OnOtherDevice,
 
     // Not on this PC, with a value of the case to show: the case mark in place of the earbud mark, and the ring, the number
-    // and maybe a bolt for the case's last reading or estimate, all in tertiary ink.
+    // and maybe a bolt for the case's last reading, all in tertiary ink.
     CaseAway,
 }
 
@@ -36,13 +36,11 @@ internal readonly record struct GaugeDisplaySettings(int LowBatteryThresholdPerc
 //   4. on this PC with a value BatteryFreshness lets the gauge draw: Reading
 //   5. on this PC, no value: MarkOnly
 //
-// The number is the one BatteryFreshness.Shown gives: on this PC the lower bud (live, or else its last reading or the
-// estimate grown from it, at any age), or Windows' own figure while that is current and no bud has a live broadcast value;
-// away, the case's. While any bud is live the number is the lower of the live buds only, and "Low battery" is said only
-// for a live figure. A value that is not live is drawn in tertiary ink (Tertiary), an estimate with "≈" before it
-// (Estimated), and the tooltip says "Last read" or "Estimated" with the age of the reading. Nothing here invents, rounds or
-// interpolates a figure (ChargeEstimator is the one place an estimate is made), and a charging flag that is not true is
-// not shown.
+// The number is the one BatteryFreshness.Shown gives: on this PC the lower bud (live, or else its last reading, at any age),
+// or Windows' own figure while that is current and no bud has a live broadcast value; away, the case's. While any bud is live
+// the number is the lower of the live buds only, and "Low battery" is said only for a live figure. A value that is not live
+// is drawn in tertiary ink (Tertiary), and the tooltip says "Last read" with the age of the reading. Nothing here invents,
+// rounds or interpolates a figure, and a charging flag that is not true is not shown.
 internal sealed record GaugeContent(
     GaugeMode Mode,
     int? Percent,          // the number, in Reading and CaseAway only
@@ -53,11 +51,8 @@ internal sealed record GaugeContent(
     // The case mark is drawn in place of the earbud mark.
     public bool CaseMark { get; init; }
 
-    // The mark, the ring, the number and the bolt are drawn in tertiary ink: the value is a last reading or an estimate.
+    // The mark, the ring, the number and the bolt are drawn in tertiary ink: the value is a last reading.
     public bool Tertiary { get; init; }
-
-    // The number is an estimate: "≈" is drawn before it.
-    public bool Estimated { get; init; }
 
     public static GaugeContent From(WidgetSnapshot snapshot, DateTimeOffset now, GaugeDisplaySettings settings)
     {
@@ -79,7 +74,6 @@ internal sealed record GaugeContent(
                 {
                     CaseMark = true,
                     Tertiary = box.Kind != ReadingKind.Live,
-                    Estimated = box.Estimated,
                 };
             }
 
@@ -88,18 +82,17 @@ internal sealed record GaugeContent(
 
         if (shown.Gauge is { } figure)
         {
-            // Low is a claim about now: only a live figure gives it. A last reading or an estimate that is at or under the
-            // level is drawn as it is, in tertiary ink with its age, and never as "Low battery".
+            // Low is a claim about now: only a live figure gives it. A last reading that is at or under the level is drawn as
+            // it is, in tertiary ink with its age, and never as "Low battery".
             bool low = figure.Kind == ReadingKind.Live && figure.Percent <= settings.LowBatteryThresholdPercent;
-            string head = WidgetCopy.GaugeHead(low, figure.Percent, figure.Kind == ReadingKind.Estimated, figure.Charging);
+            string head = WidgetCopy.GaugeHead(low, figure.Percent, figure.Charging);
             string detail = figure.Source == BatterySource.Windows
                 ? WidgetCopy.WindowsReads(figure.Percent)
-                : WidgetCopy.GaugeBudsLine(figure.Left, figure.Right, figure.LeftEstimated, figure.RightEstimated);
+                : WidgetCopy.GaugeBudsLine(figure.Left, figure.Right);
             string tooltip = head + "\r\n" + detail + "\r\n" + WidgetCopy.GaugeAgeLine(figure.Kind, now - figure.ReadAt);
             return new GaugeContent(GaugeMode.Reading, figure.Percent, low, figure.Charging, tooltip)
             {
                 Tertiary = figure.Kind != ReadingKind.Live,
-                Estimated = figure.Kind == ReadingKind.Estimated,
             };
         }
 
@@ -114,6 +107,6 @@ internal sealed record GaugeContent(
     // "\r\nCase 80%\r\nLast read 2 h ago" for the case's value, or nothing when it has none.
     private static string CaseLines(ShownPart box, DateTimeOffset now) =>
         box is { Percent: int percent, ReadAt: DateTimeOffset at }
-            ? "\r\n" + WidgetCopy.GaugeCaseLine(percent, box.Estimated) + "\r\n" + WidgetCopy.GaugeAgeLine(box.Kind, now - at)
+            ? "\r\n" + WidgetCopy.GaugeCaseLine(percent) + "\r\n" + WidgetCopy.GaugeAgeLine(box.Kind, now - at)
             : "";
 }

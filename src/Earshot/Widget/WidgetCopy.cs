@@ -166,14 +166,11 @@ internal static class WidgetCopy
     public static string HistoryGaps(int count) =>
         HistoryNothingHeard + " in " + count.ToString(CultureInfo.InvariantCulture) + (count == 1 ? " stretch." : " stretches.");
 
-    // What a screen reader says for a battery value. It cannot read "≈" as "about", so the spoken form says it in words:
-    // "80%", or "about 80%" for an estimate.
-    public static string SpokenPercent(int percent, bool estimated) =>
-        (estimated ? "about " : "") + percent.ToString(CultureInfo.InvariantCulture) + "%";
+    // What a screen reader says for a battery value: "80%", a plain figure in the broadcast's steps.
+    public static string SpokenPercent(int percent) => percent.ToString(CultureInfo.InvariantCulture) + "%";
 
-    // One part as it is said: "Left 70%, charging" for a live value, "Left about 90%, estimated, read 2 h ago" for an estimate (the
-    // age of the reading it grew from), "Left 70%, last read 2 h ago" for an old reading, "Left, no reading" for none. The charging
-    // flag is left out when withCharging is false (the gauge says it once for the pair).
+    // One part as it is said: "Left 70%, charging" for a live value, "Left 70%, last read 2 h ago" for an old reading, "Left, no
+    // reading" for none. The charging flag is left out when withCharging is false (the gauge says it once for the pair).
     public static string SpokenReading(string label, ShownPart part, DateTimeOffset now, bool withCharging = true)
     {
         if (part.Percent is not int percent)
@@ -181,20 +178,15 @@ internal static class WidgetCopy
             return label + ", " + NoReading.ToLowerInvariant();
         }
 
-        string text = label + " " + SpokenPercent(percent, part.Estimated);
+        string text = label + " " + SpokenPercent(percent);
         if (withCharging && part.Charging == true)
         {
             text += ", charging";
         }
 
-        if (part.Estimated)
-        {
-            text += ", estimated";
-        }
-
         if (!part.Fresh && part.ReadAt is DateTimeOffset at)
         {
-            text += (part.Estimated ? ", read " : ", last read ") + StaleAgeAmount(now - at) + " ago";
+            text += ", last read " + StaleAgeAmount(now - at) + " ago";
         }
 
         return text;
@@ -236,7 +228,7 @@ internal static class WidgetCopy
             return label + " " + NoReading.ToLowerInvariant();
         }
 
-        string value = label + " " + PercentText(percent, part.Estimated);
+        string value = label + " " + PercentText(percent);
         return PartTip(part, now) is { } kind ? value + " (" + kind.ToLowerInvariant() + ")" : value;
     }
 
@@ -257,19 +249,14 @@ internal static class WidgetCopy
 
     public static string LowBatteryCaseText(int percent) => LowBatteryText(CaseLabel, percent);
 
-    // The fully charged notice's line: "Left AirPod at 100%, fully charged" for a live reading, and for an estimate
-    // "Left AirPod ≈100%, estimated from a reading 2 h ago", with the sign before the value as everywhere an estimate is
-    // shown, and the age of the reading the estimate grew from (the notice's own time, StaleAgeAmount), as every estimate carries.
-    public static string FullyChargedLeftText(bool estimated, TimeSpan age) => FullyChargedText(LeftAirPodLabel, estimated, age);
+    // The fully charged notice's line, for a live reading of 100: "Left AirPod at 100%, fully charged", with no age.
+    public static string FullyChargedLeftText() => FullyChargedText(LeftAirPodLabel);
 
-    public static string FullyChargedRightText(bool estimated, TimeSpan age) => FullyChargedText(RightAirPodLabel, estimated, age);
+    public static string FullyChargedRightText() => FullyChargedText(RightAirPodLabel);
 
-    public static string FullyChargedCaseText(bool estimated, TimeSpan age) => FullyChargedText(CaseLabel, estimated, age);
+    public static string FullyChargedCaseText() => FullyChargedText(CaseLabel);
 
-    private static string FullyChargedText(string partLabel, bool estimated, TimeSpan age) =>
-        estimated
-            ? partLabel + " " + EstimateSign + "100%, estimated from a reading " + StaleAgeAmount(age) + " ago"
-            : partLabel + " at 100%, fully charged";
+    private static string FullyChargedText(string partLabel) => partLabel + " at 100%, fully charged";
 
     private static string LowBatteryText(string partLabel, int percent) =>
         partLabel + " at " + percent.ToString(CultureInfo.InvariantCulture) + "%";
@@ -339,10 +326,9 @@ internal static class WidgetCopy
     public const string GaugeAirPods = "AirPods";
     public const string GaugeLowBattery = "Low battery";
 
-    // The tooltip's first line, as the design words it: "AirPods 60%" and "AirPods 60%, charging", "Low battery 15%" while low. An
-    // estimate has "≈" before its value.
-    public static string GaugeHead(bool low, int percent, bool estimated, bool charging) =>
-        (low ? GaugeLowBattery : GaugeAirPods) + " " + PercentText(percent, estimated) + (charging ? ", charging" : "");
+    // The tooltip's first line, as the design words it: "AirPods 60%" and "AirPods 60%, charging", "Low battery 15%" while low.
+    public static string GaugeHead(bool low, int percent, bool charging) =>
+        (low ? GaugeLowBattery : GaugeAirPods) + " " + PercentText(percent) + (charging ? ", charging" : "");
 
     // "AirPods, on iPhone" while the AirPods are in use on the other device, or "AirPods, on another device" with no name given.
     public static string GaugeOnElsewhere(string otherDeviceLabel) =>
@@ -350,40 +336,32 @@ internal static class WidgetCopy
     public const string GaugeNotOnThisPc = "Not on this PC";
     public const string GaugeNoRecentReading = "No recent reading";
 
-    // "L 70%   R 60%": the buds that have a reading, left first, three spaces apart, an estimate with "≈" before it. A bud
-    // with none is left out, never shown as a dash or a guess.
-    public static string GaugeBudsLine(int? left, int? right, bool leftEstimated = false, bool rightEstimated = false)
+    // "L 70%   R 60%": the buds that have a reading, left first, three spaces apart. A bud with none is left out, never shown
+    // as a dash or a guess.
+    public static string GaugeBudsLine(int? left, int? right)
     {
-        string l = left is { } lp ? LeftLabel + " " + PercentText(lp, leftEstimated) : "";
-        string r = right is { } rp ? RightLabel + " " + PercentText(rp, rightEstimated) : "";
+        string l = left is { } lp ? LeftLabel + " " + PercentText(lp) : "";
+        string r = right is { } rp ? RightLabel + " " + PercentText(rp) : "";
         return l.Length > 0 && r.Length > 0 ? l + "   " + r : l + r;
     }
 
-    // The sign an estimate carries before its value, wherever it is shown.
-    public const string EstimateSign = "≈";
+    // "80%": a plain figure in the broadcast's steps of 10.
+    public static string PercentText(int percent) => percent.ToString(CultureInfo.InvariantCulture) + "%";
 
-    // "80%", or "≈80%" for an estimate.
-    public static string PercentText(int percent, bool estimated) =>
-        (estimated ? EstimateSign : "") + percent.ToString(CultureInfo.InvariantCulture) + "%";
-
-    // "Case 80%" or "Case ≈90%", for the gauge's tooltip while the AirPods are away.
-    public static string GaugeCaseLine(int percent, bool estimated) => CaseLabel + " " + PercentText(percent, estimated);
+    // "Case 80%", for the gauge's tooltip while the AirPods are away.
+    public static string GaugeCaseLine(int percent) => CaseLabel + " " + PercentText(percent);
 
     // The tooltip's age line for what kind of value the number is: "Read just now" and the like for a live one, "Last
-    // read 2 h ago" for a last reading, "Estimated, read 2 h ago" for an estimate (the age of the reading it grew from).
+    // read 2 h ago" for a last reading.
     public static string GaugeAgeLine(ReadingKind kind, TimeSpan age) => kind switch
     {
         ReadingKind.Live => GaugeReadLine(age),
-        ReadingKind.Estimated => EstimatedReadLine(age),
         _ => LastReadLine(age),
     };
 
     public static string LastReadLine(TimeSpan age) => "Last read " + StaleAgeAmount(age) + " ago";
 
-    public static string EstimatedReadLine(TimeSpan age) => "Estimated, read " + StaleAgeAmount(age) + " ago";
-
-    // A card column's percent line: "80%" while live, "80% · 2 h" for a last reading and "≈90% · 2 h" for an estimate, the
-    // age being that of the reading shown or grown from. NoReading when the part has none.
+    // A card column's percent line: "80%" while live and "80% · 2 h" for a last reading. NoReading when the part has none.
     public static string PartLine(ShownPart part, DateTimeOffset now)
     {
         if (part.Percent is not int percent)
@@ -391,12 +369,12 @@ internal static class WidgetCopy
             return NoReading;
         }
 
-        string value = PercentText(percent, part.Estimated);
+        string value = PercentText(percent);
         return part.Fresh || part.ReadAt is not DateTimeOffset at ? value : value + " · " + StaleAgeAmount(now - at);
     }
 
-    // A card column's tooltip, a sentence: "Left 70%, charging, read 4 min ago". An estimate says so and gives the age of the
-    // reading it grew from; a live value gives no age. Null when the part has no value.
+    // A card column's tooltip, a sentence: "Left 70%, charging, read 4 min ago". A live value gives no age. Null when the part
+    // has no value.
     public static string? ColumnTip(string label, ShownPart part, DateTimeOffset now)
     {
         if (part.Percent is not int percent)
@@ -404,15 +382,10 @@ internal static class WidgetCopy
             return null;
         }
 
-        string tip = label + " " + PercentText(percent, part.Estimated);
+        string tip = label + " " + PercentText(percent);
         if (part.Charging == true)
         {
             tip += ", charging";
-        }
-
-        if (part.Estimated)
-        {
-            tip += ", estimated";
         }
 
         if (!part.Fresh && part.ReadAt is DateTimeOffset at)
@@ -425,9 +398,7 @@ internal static class WidgetCopy
 
     // A card column's tooltip: what kind of value it is and how old, or null for a live value or none.
     public static string? PartTip(ShownPart part, DateTimeOffset now) =>
-        !part.HasValue || part.Fresh || part.ReadAt is not DateTimeOffset at ? null
-        : part.Estimated ? EstimatedReadLine(now - at)
-        : LastReadLine(now - at);
+        !part.HasValue || part.Fresh || part.ReadAt is not DateTimeOffset at ? null : LastReadLine(now - at);
 
     // "Read just now" only while the reading is current (within BatteryFreshness.FreshWindow, the age at which the card
     // greys it), then "Read 45 s ago" inside the minute and "Read 2 min ago" after it (whole seconds and minutes,

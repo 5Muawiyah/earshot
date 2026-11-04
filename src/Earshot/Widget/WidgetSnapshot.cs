@@ -26,20 +26,11 @@ public sealed record WidgetSnapshot(
     // been lost for too long). Listening: a paired model is known and nothing is linked.
     public BroadcastSelectionState Selection { get; init; } = BroadcastSelectionState.NoPairedModel;
 
-    // The owner's pair's last readings and learned charge rates, as saved across restarts (LastReadingStore), and the
-    // paired model they are shown for: BatteryFreshness shows a saved reading only when its model is this one.
+    // The owner's pair's last readings, as saved across restarts (LastReadingStore), and the paired model they are shown
+    // for: BatteryFreshness shows a saved reading only when its model is this one.
     internal LastReadingBook LastReadings { get; init; } = LastReadingBook.Empty;
 
     public ushort? PairedModel { get; init; }
-
-    // The latest time the service has worked anything out at. An estimate is never worked out for an earlier time, so a
-    // clock that is put back holds it where it was rather than letting it fall.
-    public DateTimeOffset? EstimateClock { get; init; }
-
-    // The highest estimate shown for each saved reading, shared by every snapshot the service builds (and so by every
-    // surface that draws from one): BatteryFreshness raises it as it works out an estimate and never shows less than it
-    // holds for the same reading. Null for a snapshot built by hand, which then works each estimate out afresh.
-    internal EstimateHighWater? HighWater { get; init; }
 
     public static WidgetSnapshot Empty(WidgetWatcherState watcher) => new(
         AirPodsWhere.Unknown, PartReading.Unknown, PartReading.Unknown, PartReading.Unknown,

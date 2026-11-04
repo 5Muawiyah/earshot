@@ -12,7 +12,7 @@ namespace Earshot.Widget;
 //   no recent reading  ring track only, the pair in tertiary
 //   not on this PC   no ring, the pair in disabled
 //   on another device  no ring, the pair in tertiary and the phone glyph in the number slot, tertiary
-//   away, case value  ring track and arc in tertiary, the case mark in tertiary, the value (≈ when estimated) in tertiary,
+//   away, case value  ring track and arc in tertiary, the case mark in tertiary, the value in tertiary,
 //                     the bolt when the case was charging; a live case value is drawn in full ink
 //
 // GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit): GDI text (TextRenderer) writes alpha
@@ -80,7 +80,7 @@ internal static class GaugeRenderer
         FillBackground(g, palette, layout, hover);
         double sweep = ring ?? content.Percent ?? 0;
 
-        // A last reading or an estimate is drawn in tertiary ink throughout; the earbud pair stays at full ink on this PC,
+        // A last reading is drawn in tertiary ink throughout; the earbud pair stays at full ink on this PC,
         // since the AirPods themselves are here.
         Color ink = content.Tertiary ? palette.Tertiary : palette.Ink;
         switch (content.Mode)
@@ -256,8 +256,7 @@ internal static class GaugeRenderer
         }
     }
 
-    // An estimate carries "≈" before its digits in a cell of its own. The slot fits three cells, so "≈100" is drawn at
-    // three quarters of the type size, which fits four.
+    // The number is its digits and nothing before them: a plain figure in the broadcast's steps, never an approximate one.
     private static void DrawNumber(Graphics g, GaugeLayout layout, GaugeContent content, GaugePalette palette, string fontFamily)
     {
         if (content.Percent is not { } percent)
@@ -265,8 +264,8 @@ internal static class GaugeRenderer
             return;
         }
 
-        string text = (content.Estimated ? WidgetCopy.EstimateSign : "") + percent.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        int typePixels = text.Length > 3 ? Math.Max(1, layout.TypePixels * 3 / text.Length) : layout.TypePixels;
+        string text = percent.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        int typePixels = layout.TypePixels;
         float cell = DigitCell(fontFamily, typePixels);
         using var font = new Font(fontFamily, typePixels, FontStyle.Regular, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(content.Tertiary ? palette.Tertiary : content.Low ? palette.Caution : palette.Ink);

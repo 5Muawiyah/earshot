@@ -789,8 +789,7 @@ public sealed class BroadcastSelectorTests
         new(
             new SavedReading(left, budsCharging, at, BroadcastFixtures.PairedModel),
             new SavedReading(right, budsCharging, at, BroadcastFixtures.PairedModel),
-            caseLevel is int level ? new SavedReading(level, caseCharging, at, BroadcastFixtures.PairedModel) : null,
-            []);
+            caseLevel is int level ? new SavedReading(level, caseCharging, at, BroadcastFixtures.PairedModel) : null);
 
     // The owner's pair linked by a case open (right 70, left 40, case 90), with its saved readings handed to the selector,
     // and the given time of silence after it.
@@ -1059,8 +1058,7 @@ public sealed class BroadcastSelectorTests
             book = new LastReadingBook(
                 new SavedReading(70, true, d.Now, BroadcastFixtures.PairedModel),
                 new SavedReading(70, true, d.Now, BroadcastFixtures.PairedModel),
-                new SavedReading(90, true, d.Now, BroadcastFixtures.PairedModel),
-                []);
+                new SavedReading(90, true, d.Now, BroadcastFixtures.PairedModel));
             d.Tick(180);
 
             var seenAll = new List<SelectionObservation>();

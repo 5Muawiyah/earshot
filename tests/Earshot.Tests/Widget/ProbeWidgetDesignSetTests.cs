@@ -15,8 +15,8 @@ public sealed class ProbeWidgetDesignSetTests
     private static readonly string[] CardPictures =
     [
         "card-fresh", "card-greyed", "card-refreshing", "card-refresh-open-the-case",
-        "card-fresh-text-150", "card-greyed-text-150", "card-estimates", "card-estimates-text-150", "card-bluetooth-off", "card-case-open",
-        "card-case-open-estimates", "settings", "settings-text-150", "settings-more-open", "settings-order-open", "settings-case-open-card-open",
+        "card-fresh-text-150", "card-greyed-text-150", "card-bluetooth-off", "card-case-open",
+        "settings", "settings-text-150", "settings-more-open", "settings-order-open", "settings-case-open-card-open",
         "history", "update-up-to-date", "update-available", "update-downloading",
     ];
 
@@ -25,7 +25,7 @@ public sealed class ProbeWidgetDesignSetTests
     private static readonly string[] GaugeStates =
     [
         "gauge-reading", "gauge-charging", "gauge-low", "gauge-no-recent-reading", "gauge-not-on-this-pc",
-        "gauge-on-the-other-device", "gauge-last-reading", "gauge-estimate", "gauge-away-case-last-reading", "gauge-away-case-estimate",
+        "gauge-on-the-other-device", "gauge-last-reading", "gauge-away-case-last-reading",
         "gauge-away-case-charging", "gauge-away-case-live",
     ];
 
@@ -127,14 +127,14 @@ public sealed class ProbeWidgetDesignSetTests
         Assert.IsFalse(Program.TryParseProbeArgs(["probe", "battery", "--set", "design"], out _, out _), "Only probe widget takes a set.");
     }
 
-    // Every new state is in the set: the case-open card, estimates, last readings on the gauge, the case mark, the history page and the
+    // Every new state is in the set: the case-open card, last readings on the gauge, the case mark, the history page and the
     // More row open.
     [TestMethod]
-    public void TheSetCoversTheCaseOpenCardEstimatesLastReadingsTheCaseMarkHistoryAndMoreOpen()
+    public void TheSetCoversTheCaseOpenCardLastReadingsTheCaseMarkHistoryAndMoreOpen()
     {
         string[] required =
         [
-            "card-case-open", "card-estimates", "gauge-last-reading", "gauge-estimate", "gauge-away-case-last-reading", "gauge-away-case-estimate",
+            "card-case-open", "gauge-last-reading", "gauge-away-case-last-reading",
             "gauge-away-case-charging", "gauge-away-case-live", "history", "settings-more-open", "settings-order-open",
         ];
         foreach (string name in required)
@@ -142,7 +142,7 @@ public sealed class ProbeWidgetDesignSetTests
             Assert.IsTrue(CardPictures.Concat(GaugeStates).Contains(name), name + " is in the set.");
         }
 
-        Assert.HasCount(6, Program.ProbeWidgetDesignGaugeContents());
+        Assert.HasCount(4, Program.ProbeWidgetDesignGaugeContents());
     }
 
     [TestMethod]

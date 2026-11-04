@@ -43,15 +43,13 @@ internal static partial class Program
     internal static string ProbeWidgetScaleName(uint dpi) =>
         string.Create(CultureInfo.InvariantCulture, $"{(int)Math.Round(dpi * 100 / 96.0)}pct");
 
-    // The gauge's states drawn from made-up content instead of a snapshot: a last reading and an estimate on this PC, and what the
-    // gauge shows with the AirPods away, the case mark with its value (a last reading, an estimate, one still charging and a live
+    // The gauge's states drawn from made-up content instead of a snapshot: a last reading on this PC, and what the
+    // gauge shows with the AirPods away, the case mark with its value (a last reading, one still charging and a live
     // value). Each is the design's state, in the same words as the snapshot states.
     internal static IReadOnlyList<(string Name, GaugeContent Content)> ProbeWidgetDesignGaugeContents() =>
     [
         ("last-reading", new GaugeContent(GaugeMode.Reading, 62, false, false, "") { Tertiary = true }),
-        ("estimate", new GaugeContent(GaugeMode.Reading, 64, false, false, "") { Tertiary = true, Estimated = true }),
         ("away-case-last-reading", new GaugeContent(GaugeMode.CaseAway, 80, false, false, "") { CaseMark = true, Tertiary = true }),
-        ("away-case-estimate", new GaugeContent(GaugeMode.CaseAway, 90, false, false, "") { CaseMark = true, Tertiary = true, Estimated = true }),
         ("away-case-charging", new GaugeContent(GaugeMode.CaseAway, 55, false, true, "") { CaseMark = true, Tertiary = true }),
         ("away-case-live", new GaugeContent(GaugeMode.CaseAway, 75, false, false, "") { CaseMark = true }),
     ];
@@ -96,7 +94,7 @@ internal static partial class Program
         string fontFamily = TypeRamp.FamilyFor(TypeRole.Gauge);
         var log = new FileLog(Paths.Current.LogFolder);
 
-        // The gauge: every state, then the states of a last reading, an estimate and the case mark, then the six orders (each drawn
+        // The gauge: every state, then the states of a last reading and the case mark, then the six orders (each drawn
         // charging, so the bolt shows).
         var gaugePictures = new List<(string Name, GaugeContent Content, GaugeOrder Order)>();
         foreach ((string state, WidgetSnapshot snapshot) in ProbeWidgetDesignGaugeStates(now))
@@ -139,11 +137,8 @@ internal static partial class Program
             ("card-refresh-open-the-case", Variant("refresh-nothing-heard"), 1.0, false, false, false, false),
             ("card-fresh-text-150", Variant("this-pc"), ProbeWidgetDesignLargeText, false, false, false, false),
             ("card-greyed-text-150", Variant("greyed"), ProbeWidgetDesignLargeText, false, false, false, false),
-            ("card-estimates", DesignEstimatesModel(now), 1.0, false, false, false, false),
-            ("card-estimates-text-150", DesignEstimatesModel(now), ProbeWidgetDesignLargeText, false, false, false, false),
             ("card-bluetooth-off", DesignBluetoothOffModel(now), 1.0, false, false, false, false),
             ("card-case-open", Variant("this-pc"), 1.0, true, false, false, false),
-            ("card-case-open-estimates", DesignEstimatesModel(now), 1.0, true, false, false, false),
             ("settings", DesignSettingsModel(now), 1.0, false, false, false, false),
             ("settings-text-150", DesignSettingsModel(now), ProbeWidgetDesignLargeText, false, false, false, false),
             ("settings-more-open", DesignSettingsModel(now), 1.0, false, true, false, false),
@@ -203,25 +198,6 @@ internal static partial class Program
             ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now, View: WidgetCardView.Settings)
         {
             Settings = values,
-        };
-    }
-
-    // The card with estimates: the buds' values grown from a reading four minutes old, the case's from a reading two hours old. Each is
-    // marked "≈" and shows the age of the reading it grew from.
-    private static WidgetCardModel DesignEstimatesModel(DateTimeOffset now)
-    {
-        WidgetSnapshot snapshot = ProbeWidgetDesignGaugeStates(now)[0].Snapshot;
-        DateTimeOffset budRead = now - TimeSpan.FromMinutes(4);
-        DateTimeOffset caseRead = now - TimeSpan.FromHours(2);
-        var parts = new ShownBattery(
-            new ShownPart(66, true, ReadingKind.Estimated, budRead) { ReadPercent = 62 },
-            new ShownPart(60, false, ReadingKind.Last, budRead),
-            new ShownPart(94, true, ReadingKind.Estimated, caseRead) { ReadPercent = 90 },
-            null, null, null);
-        return new WidgetCardModel(snapshot, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: false,
-            ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now)
-        {
-            Parts = parts,
         };
     }
 

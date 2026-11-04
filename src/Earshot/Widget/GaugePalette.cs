@@ -12,7 +12,7 @@ namespace Earshot.Widget;
 //   caution      #9D5D00               #FCE100
 //   hover        rgba(0,0,0,.0373)     rgba(255,255,255,.0605)
 //
-// A last reading or an estimate is drawn in the card's own tertiary token, so it looks the same on the gauge as on the card.
+// A last reading is drawn in the card's own tertiary token, so it looks the same on the gauge as on the card.
 //
 // In a high contrast theme the system's own text colour draws the ink, caution and the arc is Highlight, stale and
 // disabled are GrayText and the track is GrayText (see DesignTokens).

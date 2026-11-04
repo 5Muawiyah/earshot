@@ -1839,12 +1839,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
     // The owner's saved readings, all read at the given time: left, right and case, the model the paired source reports.
     private static LastReadingBook SavedBook(
-        DateTimeOffset at, int left, int right, int caseLevel = 90, bool budsCharging = false, IReadOnlyList<LearnedRate>? rates = null) =>
+        DateTimeOffset at, int left, int right, int caseLevel = 90, bool budsCharging = false) =>
         new(
             new SavedReading(left, budsCharging, at, BroadcastFixtures.PairedModel),
             new SavedReading(right, budsCharging, at, BroadcastFixtures.PairedModel),
-            new SavedReading(caseLevel, false, at, BroadcastFixtures.PairedModel),
-            rates ?? []);
+            new SavedReading(caseLevel, false, at, BroadcastFixtures.PairedModel));
 
     // A new process: stores over the same files, read at start.
     // refind: whether the service may find a worn pair again with no case open; null leaves the default.
@@ -2030,18 +2029,17 @@ public sealed class WidgetStatusServiceTests : IDisposable
     }
 
     [TestMethod]
-    public void AReFoundLiveReadingReplacesAnEstimateOfOneHundred()
+    public void AReFoundLiveReadingReplacesTheLastReadingWhichWasNeverGrown()
     {
         DateTimeOffset heard = _clock.GetUtcNow() - TimeSpan.FromHours(2);
-        var rates = new[] { new LearnedRate(BroadcastFixtures.PairedModel, ChargePart.Bud, 60, heard - TimeSpan.FromHours(1), TimeSpan.FromMinutes(30)) };
         using WidgetStatusService service = NewRememberingService(
             new LinkMemory(BroadcastFixtures.PairedModel, WidgetFixtures.Colour, heard - TimeSpan.FromMinutes(5), heard),
-            SavedBook(heard, left: 70, right: 70, budsCharging: true, rates: rates));
+            SavedBook(heard, left: 70, right: 70, budsCharging: true));
         service.Start();
 
         ShownBattery before = BatteryFreshness.Shown(service.Current, _clock.GetUtcNow());
-        Assert.AreEqual(ReadingKind.Estimated, before.Left.Kind, "Charging at the last reading, two hours on: an estimate.");
-        Assert.AreEqual(100, before.Left.Percent);
+        Assert.AreEqual(ReadingKind.Last, before.Left.Kind, "Charging at the last reading, two hours on: still the last reading.");
+        Assert.AreEqual(70, before.Left.Percent);
 
         WearThePair(pairHigh: 0x6, pairLow: 0x6);
 

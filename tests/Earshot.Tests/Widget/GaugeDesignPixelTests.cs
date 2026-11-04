@@ -172,38 +172,20 @@ public sealed class GaugeDesignPixelTests
         AssertNoInk(bitmap, layout.ChargingSlot, "No bolt");
     }
 
-    // A last reading and an estimate on this PC: the ring, the value and the bolt in tertiary; the pair stays ink.
+    // A last reading on this PC: the ring, the value and the bolt in tertiary; the pair stays ink.
     [TestMethod]
     [DynamicData(nameof(ThemesAndDpis))]
-    public void ALastReadingAndAnEstimateAreTertiaryThroughout(DesignTheme theme, int dpi)
+    public void ALastReadingIsTertiaryThroughout(DesignTheme theme, int dpi)
     {
         GaugePalette p = Palette(theme);
         GaugeLayout layout = GaugeLayout.For(dpi);
-        foreach (bool estimated in new[] { false, true })
-        {
-            using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.Reading, 62, false, true, "") { Tertiary = true, Estimated = estimated }, theme, dpi);
-            string what = estimated ? "estimate" : "last reading";
+        using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.Reading, 62, false, true, "") { Tertiary = true }, theme, dpi);
 
-            Color arc = OnRing(bitmap, layout, 90);
-            AssertColour(DesignPixels.Over(p.Tertiary, p.Track), arc, 3, "The arc, in tertiary over the track, " + what);
-            AssertInkIs(bitmap, layout.NumberSlot, p.Tertiary, "The value, " + what);
-            AssertInkIs(bitmap, layout.ChargingSlot, p.Tertiary, "The bolt, " + what);
-            AssertColour(p.Ink, MarkPixel(bitmap, layout), 2, "The pair stays ink on this PC, " + what);
-        }
-    }
-
-    // An estimate carries "≈" before its digits, so its ink in the number slot is wider than the same digits as a last reading.
-    [TestMethod]
-    public void AnEstimateHasAnExtraMarkBeforeItsDigits()
-    {
-        GaugeLayout layout = GaugeLayout.For(96);
-        using Bitmap plain = Draw(new GaugeContent(GaugeMode.Reading, 62, false, false, "") { Tertiary = true }, DesignTheme.Light, 96);
-        using Bitmap estimate = Draw(new GaugeContent(GaugeMode.Reading, 62, false, false, "") { Tertiary = true, Estimated = true }, DesignTheme.Light, 96);
-
-        // The background is the idle fill (alpha 1), read inside the window: the corner pixel is outside the rounded rectangle and clear.
-        (int First, int Last) a = DesignPixels.InkColumns(plain, layout.NumberSlot, plain.GetPixel(layout.Width / 2, 2))!.Value;
-        (int First, int Last) b = DesignPixels.InkColumns(estimate, layout.NumberSlot, estimate.GetPixel(layout.Width / 2, 2))!.Value;
-        Assert.IsGreaterThan(a.Last - a.First, b.Last - b.First, "≈ adds a mark.");
+        Color arc = OnRing(bitmap, layout, 90);
+        AssertColour(DesignPixels.Over(p.Tertiary, p.Track), arc, 3, "The arc, in tertiary over the track");
+        AssertInkIs(bitmap, layout.NumberSlot, p.Tertiary, "The value");
+        AssertInkIs(bitmap, layout.ChargingSlot, p.Tertiary, "The bolt, when the content asks for one");
+        AssertColour(p.Ink, MarkPixel(bitmap, layout), 2, "The pair stays ink on this PC");
     }
 
     // The away case: the case mark in tertiary, the ring and the value at the case's value in tertiary, a bolt when it was charging;

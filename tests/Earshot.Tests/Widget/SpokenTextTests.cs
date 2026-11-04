@@ -3,8 +3,8 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Widget;
 
-// What a screen reader is told of a battery value, on the card's columns and on the gauge. "≈" is said as "about", an estimate is
-// said to be one with the age of the reading it grew from, and an old reading says "last read". Pure.
+// What a screen reader is told of a battery value, on the card's columns and on the gauge. A value is a plain figure in the
+// broadcast's steps, and an old reading says "last read" with its age. Pure.
 [TestClass]
 public sealed class SpokenTextTests
 {
@@ -16,8 +16,6 @@ public sealed class SpokenTextTests
 
     private static ShownPart Last(int percent, TimeSpan age, bool? charging = null) => new(percent, charging, ReadingKind.Last, Now - age);
 
-    private static ShownPart Estimate(int percent, TimeSpan age, bool? charging = true) => new(percent, charging, ReadingKind.Estimated, Now - age);
-
     // ---- Card columns
 
     [TestMethod]
@@ -25,14 +23,6 @@ public sealed class SpokenTextTests
     {
         Assert.AreEqual("Left 70%, charging", WidgetCopy.SpokenReading("Left", Live(70, true), Now));
         Assert.AreEqual("Right 80%", WidgetCopy.SpokenReading("Right", Live(80, false), Now));
-    }
-
-    [TestMethod]
-    public void AnEstimatedColumnSaysAboutAndEstimatedAndTheAgeOfTheReadingItGrewFrom()
-    {
-        Assert.AreEqual("Left about 90%, charging, estimated, read 2 h ago", WidgetCopy.SpokenReading("Left", Estimate(90, TwoHours), Now));
-        Assert.AreEqual("Left about 90%, estimated, read 2 h ago", WidgetCopy.SpokenReading("Left", Estimate(90, TwoHours, charging: false), Now));
-        Assert.DoesNotContain("≈", WidgetCopy.SpokenReading("Left", Estimate(90, TwoHours), Now), "The sign is not read well, so the words say it.");
     }
 
     [TestMethod]

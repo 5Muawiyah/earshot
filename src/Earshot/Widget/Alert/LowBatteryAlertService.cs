@@ -81,8 +81,8 @@ internal sealed class LowBatteryAlertService : IDisposable
         ShownBattery shown = BatteryFreshness.Shown(snapshot, _time.GetUtcNow());
         bool alertOn = _settings.Current.Widget.LowBatteryAlert;
 
-        // The fully charged notice reads the same shown values, wherever the pair is: a case charging on a desk, away from this
-        // PC, is the use for an estimate reaching 100. Fed always, notified only while the setting is on.
+        // The fully charged notice reads the same shown values, wherever the pair is, and notifies only for a live reading of
+        // 100. Fed always, notified only while the setting is on.
         bool fullOn = _settings.Current.Widget.FullyChargedNotice;
         NotifyFull(ChargeComponent.Left, shown.Left, fullOn, WidgetCopy.FullyChargedLeftText);
         NotifyFull(ChargeComponent.Right, shown.Right, fullOn, WidgetCopy.FullyChargedRightText);
@@ -118,11 +118,11 @@ internal sealed class LowBatteryAlertService : IDisposable
 
     // Feeds one part to the fully charged latch and keeps the spent marks beside it: a part saved as spent on the reading it is
     // shown from is spent again at the first look (a restart is not a new charge), and a change of the latch is written.
-    private void NotifyFull(ChargeComponent component, ShownPart part, bool on, Func<bool, TimeSpan, string> text)
+    private void NotifyFull(ChargeComponent component, ShownPart part, bool on, Func<string> text)
     {
         int index = (int)component;
         SpentMark? key = part is { HasValue: true, ReadAt: DateTimeOffset readAt, Percent: int percent }
-            ? new SpentMark(component, readAt, part.ReadPercent ?? percent)
+            ? new SpentMark(component, readAt, percent)
             : null;
 
         if (!_spentSeeded[index] && key is not null)
@@ -148,9 +148,7 @@ internal sealed class LowBatteryAlertService : IDisposable
 
         if (step != FullyChargedStep.None && on)
         {
-            // The age is of the reading an estimate grew from (ShownPart.ReadAt), so the notice carries it as the card does.
-            TimeSpan age = part.ReadAt is DateTimeOffset grownFrom ? _time.GetUtcNow() - grownFrom : TimeSpan.Zero;
-            Notify(text(step == FullyChargedStep.Estimated, age));
+            Notify(text());
         }
     }
 

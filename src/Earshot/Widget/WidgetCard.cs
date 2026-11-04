@@ -1210,7 +1210,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         // Like the figure, the mark is of the part's shown reading, but only a live one while the AirPods are on this PC: a last
-        // reading or an estimate (shown at any age, and for AirPods that are away) says nothing of where a bud is now. A raw value of
+        // reading (shown at any age, and for AirPods that are away) says nothing of where a bud is now. A raw value of
         // the snapshot that is not shown must not be drawn either, and nothing decodes an in-ear bit today, so this is only a guard.
         if (shown.Fresh && _model.Snapshot.Where == AirPodsWhere.ThisPc && part.InEar == true)
         {
@@ -1235,12 +1235,12 @@ internal sealed partial class WidgetCard : Form
         DrawBatteryPart(g, column, shown);
     }
 
-    // The ink a value is drawn in: primary while it is fresh, the tertiary token when it is a last reading or an estimate
+    // The ink a value is drawn in: primary while it is fresh, the tertiary token when it is a last reading
     // (the stale style, which replaced a 55% opacity of the primary ink).
     internal Color ValueInk(ShownPart shown) => shown.Fresh ? Colours.Text : Colours.TextTertiary;
 
-    // A live value is drawn in the primary ink and the accent; a last reading or an estimate in the tertiary token, its
-    // read-time line saying its age, and an estimate with "≈" before it. The bar and the charging bolt are absent entirely
+    // A live value is drawn in the primary ink and the accent; a last reading in the tertiary token, its
+    // read-time line saying its age. The bar and the charging bolt are absent entirely
     // when Percent is null: there is nothing to show a bar or a bolt for. The words "No reading" take the value's own place
     // instead: never a number, never a dash standing in for a reading that was never taken. The read-time line is always
     // reserved and empty while the value is fresh (no ticking seconds).
@@ -1270,7 +1270,7 @@ internal sealed partial class WidgetCard : Form
         }
 
         Color ink = ValueInk(shown);
-        DrawText(g, column.Percent, WidgetCopy.PercentText(percent, shown.Estimated), ink, TypeRole.Number, StringAlignment.Center);
+        DrawText(g, column.Percent, WidgetCopy.PercentText(percent), ink, TypeRole.Number, StringAlignment.Center);
         if (shown.Charging == true)
         {
             DrawBolt(g, column.BoltSlot, ink);

@@ -3,39 +3,22 @@ namespace Earshot.Widget;
 // One of the three parts the message reports a level for.
 internal enum ChargeComponent { Left, Right, Case }
 
-// The kind of part a charge rate is for: both buds of one model charge alike, the case on its own.
-internal enum ChargePart { Bud, Case }
-
-// The last fresh reading of one part of the linked pair: the value, the charging flag, when it was read and the model
+// The last confirmed reading of one part of the linked pair: the value, the charging flag, when it was read and the model
 // that sent it. No address, no name and nothing else about the sender is kept.
 internal sealed record SavedReading(int Percent, bool Charging, DateTimeOffset ReadAt, ushort Model);
 
-// A charge rate learned from the owner's own live readings (ChargeRateLearner says what counts): the model and part it
-// is for, percentage points an hour, when it was measured and over how long.
-internal sealed record LearnedRate(ushort Model, ChargePart Part, double PercentPerHour, DateTimeOffset MeasuredAt, TimeSpan Span);
-
-// The highest estimate shown so far for one saved reading of a part: the reading it grew from (its read time and value)
-// and the value shown. An estimate never falls (see EstimateHighWater), so it is kept with the readings: a restart, with
-// the clock set back, then shows no less. A newer reading of the part is another reading, and the mark for the old one is
-// of no use.
-internal sealed record EstimateMark(ChargeComponent Component, DateTimeOffset ReadAt, int ReadPercent, int Percent);
-
-// A part whose fully charged notice is spent, keyed by the reading it was spent on: that reading's read time and value
-// (for an estimate, the saved reading it grew from; for a live 100, the 100). Kept beside the last readings so a restart
-// does not make the same charge new (FullyChargedLatch). It counts only while the part is still shown from that reading:
-// a newer reading is another one, and a live one below 100 re-arms the part as the latch's own rule says.
+// A part whose fully charged notice is spent, keyed by the reading it was spent on: that reading's read time and value.
+// Kept beside the last readings so a restart does not make the same charge new (FullyChargedLatch). It counts only while
+// the part is still shown from that reading: a newer reading is another one, and a live one below 100 re-arms the part as
+// the latch's own rule says.
 internal sealed record SpentMark(ChargeComponent Component, DateTimeOffset ReadAt, int ReadPercent);
 
-// What is kept of the linked pair across restarts: the last fresh reading of each part and the learned rates. Immutable:
-// every change gives a new book, and a reading that changes nothing gives the same one back, so a reference compare
-// says whether anything changed. Pure: no clock and no file here (LastReadingStore reads and writes it).
-internal sealed record LastReadingBook(SavedReading? Left, SavedReading? Right, SavedReading? Case, IReadOnlyList<LearnedRate> Rates)
+// What is kept of the linked pair across restarts: the last confirmed reading of each part. Immutable: every change gives a
+// new book, and a reading that changes nothing gives the same one back, so a reference compare says whether anything
+// changed. Pure: no clock and no file here (LastReadingStore reads and writes it).
+internal sealed record LastReadingBook(SavedReading? Left, SavedReading? Right, SavedReading? Case)
 {
-    public static LastReadingBook Empty { get; } = new(null, null, null, Array.Empty<LearnedRate>());
-
-    // The estimates already shown, one at most for each part (EstimateMark). Not part of the readings: it is set when the
-    // book is taken to be written, and not looked at when two books are compared for a change.
-    public IReadOnlyList<EstimateMark> Marks { get; init; } = Array.Empty<EstimateMark>();
+    public static LastReadingBook Empty { get; } = new(null, null, null);
 
     // The order the service took this book to be written in. A write that arrives after a later one was written is dropped
     // (LastReadingStore), so a slow thread cannot put an older book over a newer. Zero is a book that was not taken for
@@ -54,21 +37,9 @@ internal sealed record LastReadingBook(SavedReading? Left, SavedReading? Right, 
     public SavedReading? Of(ChargeComponent component, ushort? model) =>
         model is ushort m && Of(component) is { } saved && saved.Model == m ? saved : null;
 
-    public LearnedRate? RateFor(ushort model, ChargePart part)
-    {
-        foreach (LearnedRate rate in Rates)
-        {
-            if (rate.Model == model && rate.Part == part)
-            {
-                return rate;
-            }
-        }
-
-        return null;
-    }
-
-    // The book with the parts of one fresh reading of the linked pair. A part the message gives no level for (the case
-    // while the buds are worn, a bud out of range) keeps what it had.
+    // The book with the parts of one confirmed reading of the linked pair. A part the message gives no level for (the case
+    // while the buds are worn, a bud out of range) keeps what it had. A part is read at its own ReadAt when it has one (the
+    // time its value was last repeated), otherwise at the time given.
     public LastReadingBook WithReading(DecodedReading reading, ushort model, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(reading);
@@ -80,31 +51,13 @@ internal sealed record LastReadingBook(SavedReading? Left, SavedReading? Right, 
             : this with { Left = left, Right = right, Case = box };
     }
 
-    // The book with a learned rate in place of the one held for the same model and part.
-    public LastReadingBook WithRate(LearnedRate rate)
-    {
-        ArgumentNullException.ThrowIfNull(rate);
-        var rates = new List<LearnedRate>(Rates.Count + 1);
-        foreach (LearnedRate held in Rates)
-        {
-            if (held.Model != rate.Model || held.Part != rate.Part)
-            {
-                rates.Add(held);
-            }
-        }
-
-        rates.Add(rate);
-        return this with { Rates = rates };
-    }
-
-    // Whether the two books differ in anything but the read times: a value, a charging flag, a model or a rate. A
-    // change of read time alone is written less often (LastReadingStore.ReadTimeWriteInterval).
+    // Whether the two books differ in anything but the read times: a value, a charging flag or a model. A change of read time
+    // alone is written less often (LastReadingStore.ReadTimeWriteInterval).
     public static bool DiffersBeyondReadTimes(LastReadingBook a, LastReadingBook b)
     {
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
-        return !SameValue(a.Left, b.Left) || !SameValue(a.Right, b.Right) || !SameValue(a.Case, b.Case) ||
-            !a.Rates.SequenceEqual(b.Rates);
+        return !SameValue(a.Left, b.Left) || !SameValue(a.Right, b.Right) || !SameValue(a.Case, b.Case);
     }
 
     private static bool SameValue(SavedReading? a, SavedReading? b) =>
@@ -117,7 +70,7 @@ internal sealed record LastReadingBook(SavedReading? Left, SavedReading? Right, 
             return held;
         }
 
-        var saved = new SavedReading(Math.Clamp(percent, 0, 100), incoming.Charging == true, at, model);
+        var saved = new SavedReading(Math.Clamp(percent, 0, 100), incoming.Charging == true, incoming.ReadAt ?? at, model);
         return saved == held ? held : saved;
     }
 }

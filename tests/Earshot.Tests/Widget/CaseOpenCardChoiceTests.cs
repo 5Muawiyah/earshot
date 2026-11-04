@@ -196,11 +196,11 @@ public sealed class CaseOpenCardChoiceTests
         var mixed = live with
         {
             Right = ShownPart.None,
-            Case = new ShownPart(60, true, ReadingKind.Estimated, Now - TimeSpan.FromHours(2)),
+            Case = new ShownPart(60, true, ReadingKind.Last, Now - TimeSpan.FromHours(2)),
         };
         string text = WidgetCopy.CaseOpenAnnouncement(mixed, Now);
         StringAssert.Contains(text, "Right no reading");
-        StringAssert.Contains(text, "Case ≈60% (estimated, read 2 h ago)", "An estimate keeps its sign and the age of its reading.");
+        StringAssert.Contains(text, "Case 60% (last read 2 h ago)", "A last reading keeps the age of its reading.");
     }
 
     // ---- The settings page's row

@@ -7,7 +7,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace Earshot.Tests.Widget;
 
 // The fully charged notice through the alert service: what is shown (BatteryFreshness.Shown) feeds one latch per part, a
-// live or an estimated 100 notifies once per charge, and the setting gates only the notification.
+// live 100 notifies once per charge (a last reading never does), and the setting gates only the notification.
 [TestClass]
 public sealed class FullyChargedNoticeTests : IDisposable
 {
@@ -72,18 +72,15 @@ public sealed class FullyChargedNoticeTests : IDisposable
         };
     }
 
-    // Nothing linked: only what was saved is shown, by the estimate when the part was charging and a rate is known.
-    private WidgetSnapshot Saved(ChargeComponent part, int percent, bool charging, TimeSpan ago, ushort model = Model, bool withRate = true)
+    // Nothing linked: only what was saved is shown, as a last reading, charging or not.
+    private WidgetSnapshot Saved(ChargeComponent part, int percent, bool charging, TimeSpan ago, ushort model = Model)
     {
         DateTimeOffset at = _clock.GetUtcNow() - ago;
         var reading = new SavedReading(percent, charging, at, model);
         var book = new LastReadingBook(
             part == ChargeComponent.Left ? reading : null,
             part == ChargeComponent.Right ? reading : null,
-            part == ChargeComponent.Case ? reading : null,
-            withRate
-                ? [new LearnedRate(model, ChargePart.Case, 30, at, TimeSpan.FromMinutes(20)), new LearnedRate(model, ChargePart.Bud, 30, at, TimeSpan.FromMinutes(20))]
-                : Array.Empty<LearnedRate>());
+            part == ChargeComponent.Case ? reading : null);
         return WidgetSnapshot.Empty(WidgetWatcherState.Started) with
         {
             Where = AirPodsWhere.NotInUse,
@@ -120,41 +117,18 @@ public sealed class FullyChargedNoticeTests : IDisposable
         CollectionAssert.Contains(_notifier.Calls, ("Earshot", "Case at 100%, fully charged"));
     }
 
+    // A charging last reading, however long ago, is never grown to 100, so it never notifies.
     [TestMethod]
-    public void AnEstimatedHundredNotifiesOnceAndIsMarked()
+    public void AChargingLastReadingNeverNotifiesHoweverLongAgo()
     {
         using LowBatteryAlertService service = NewService();
 
-        // 80 percent at 30 points an hour reaches 100 in 40 minutes; 41 minutes on, the estimate is 100.
-        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(20)));
-        Assert.AreEqual(0, _notifier.Calls.Count, "An estimate of 90 is not 100.");
-
-        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(41)));
-        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(45)));
-
-        Assert.AreEqual(1, _notifier.Calls.Count);
-        Assert.AreEqual(("Earshot", "Case ≈100%, estimated from a reading 41 min ago"), _notifier.Calls[0]);
-    }
-
-    [TestMethod]
-    public void AnEstimatedHundredIsNotNotifiedAgainAfterARestart()
-    {
-        // The same reading, 80 percent charging, estimated to 100 before and after the restart: one charge, one notice.
-        var store = new LastReadingStore(_temp.File("last-reading.json"), _log);
-        using (LowBatteryAlertService first = NewService(store))
+        foreach (int minutes in new[] { 20, 41, 45, 600 })
         {
-            _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(41)));
+            _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(minutes)));
         }
 
-        Assert.AreEqual(1, _notifier.Calls.Count);
-
-        // Four minutes on, so the 45 minute old reading below is the same one as the 41 minute old reading above.
-        _clock.Advance(TimeSpan.FromMinutes(4));
-        var reopened = new LastReadingStore(_temp.File("last-reading.json"), _log);
-        using LowBatteryAlertService second = NewService(reopened);
-        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(45)));
-
-        Assert.AreEqual(1, _notifier.Calls.Count, "A restart does not make the same charge new.");
+        Assert.AreEqual(0, _notifier.Calls.Count);
     }
 
     [TestMethod]
@@ -163,32 +137,24 @@ public sealed class FullyChargedNoticeTests : IDisposable
         var store = new LastReadingStore(_temp.File("last-reading.json"), _log);
         using (LowBatteryAlertService first = NewService(store))
         {
-            _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(41)));
+            _status.Raise(Live(box: 100));
         }
 
+        Assert.AreEqual(1, _notifier.Calls.Count);
+
+        // Four minutes on, the saved 100 is the same reading the first run was spent on: a restart is not a new charge.
         _clock.Advance(TimeSpan.FromMinutes(4));
         using LowBatteryAlertService second = NewService(new LastReadingStore(_temp.File("last-reading.json"), _log));
-        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(45)));
+        _status.Raise(Saved(ChargeComponent.Case, 100, charging: true, ago: TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(1)));
+        Assert.AreEqual(1, _notifier.Calls.Count, "A restart does not make the same charge new.");
+
         _status.Raise(Live(box: 90));
         _status.Raise(Live(box: 100));
 
         Assert.AreEqual(2, _notifier.Calls.Count, "A part that came off 100 and charged to it again is a new charge.");
 
         // The second charge is spent in turn, on its own reading.
-        Assert.HasCount(1,new LastReadingStore(_temp.File("last-reading.json"), _log).LoadSpent());
-    }
-
-    [TestMethod]
-    public void AnEstimateThatReachesHundredAndALiveHundredAfterItAreOneNotice()
-    {
-        using LowBatteryAlertService service = NewService();
-
-        _status.Raise(Saved(ChargeComponent.Case, 80, charging: true, ago: TimeSpan.FromMinutes(41)));
-        _status.Raise(Live(box: 100));
-        _status.Raise(Live(box: 100));
-
-        Assert.AreEqual(1, _notifier.Calls.Count);
-        Assert.AreEqual(("Earshot", "Case ≈100%, estimated from a reading 41 min ago"), _notifier.Calls[0]);
+        Assert.HasCount(1, new LastReadingStore(_temp.File("last-reading.json"), _log).LoadSpent());
     }
 
     [TestMethod]
@@ -216,7 +182,7 @@ public sealed class FullyChargedNoticeTests : IDisposable
         Assert.AreEqual(1, _notifier.Calls.Count);
     }
 
-    // Neither an old reading nor an estimate says what the part is doing now, so neither arms it.
+    // An old reading says nothing of what the part is doing now, so it does not arm it.
     [TestMethod]
     public void AnOldReadingBelowHundredDoesNotRearm()
     {

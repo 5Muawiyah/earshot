@@ -111,6 +111,12 @@ internal static class BroadcastRules
 
     public static readonly TimeSpan RefindSpan = TimeSpan.FromSeconds(2);
 
+    // How fast a bud in the case may have charged, in points an hour, for judging whether levels can have come from the last
+    // reading. Design choice: 150, from Apple's tech specs for AirPods Pro 3 (https://support.apple.com/en-us/125135), "5 minutes
+    // in the case provides around 1 hour of listening time" against "up to 8 hours" on one charge, which is 12.5 points in 5
+    // minutes. It is never shown as a figure: only the rule that ships off reads it.
+    public const double RefindChargePerHour = 150;
+
     // How long after the pair was last heard it can still be found again. Apple states up to 8 hours of listening on one
     // charge; past that the discharge allowance below admits any level, so the check against the last reading would prove
     // nothing.

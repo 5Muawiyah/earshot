@@ -58,19 +58,15 @@ public sealed class ReadLineStillnessTests
         Assert.AreEqual("Battery not read yet", WidgetCopy.BatteryReadLine(null, Now));
     }
 
-    // A column's figure that is not live keeps its marking and its age (an estimate its sign), at the level of minutes.
+    // A column's figure that is not live keeps its age, at the level of minutes.
     [TestMethod]
-    public void AColumnThatIsNotLiveKeepsItsMarkingAndItsAgeWithoutCountingSeconds()
+    public void AColumnThatIsNotLiveKeepsItsAgeWithoutCountingSeconds()
     {
-        ShownPart Part(bool estimated, int seconds) => estimated
-            ? new(80, true, ReadingKind.Estimated, Now - TimeSpan.FromSeconds(seconds)) { ReadPercent = 60 }
-            : new(80, false, ReadingKind.Last, Now - TimeSpan.FromSeconds(seconds));
+        ShownPart Part(int seconds) => new(80, false, ReadingKind.Last, Now - TimeSpan.FromSeconds(seconds));
 
-        string last35 = WidgetCopy.PartLine(Part(false, 35), Now);
-        Assert.AreEqual(last35, WidgetCopy.PartLine(Part(false, 55), Now));
+        string last35 = WidgetCopy.PartLine(Part(35), Now);
+        Assert.AreEqual(last35, WidgetCopy.PartLine(Part(55), Now));
         Assert.AreEqual("80% · under 1 min", last35);
-        Assert.AreEqual("≈80% · under 1 min", WidgetCopy.PartLine(Part(true, 40), Now));
-        Assert.AreEqual("Last read under 1 min ago", WidgetCopy.PartTip(Part(false, 40), Now));
-        Assert.AreEqual("Estimated, read under 1 min ago", WidgetCopy.PartTip(Part(true, 40), Now));
+        Assert.AreEqual("Last read under 1 min ago", WidgetCopy.PartTip(Part(40), Now));
     }
 }
