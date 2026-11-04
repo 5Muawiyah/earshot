@@ -236,7 +236,7 @@ public sealed class BatteryLookTests
                 Assert.AreEqual(card.DisabledInk, card.MarkInk(ShownPart.None), "An unknown part's mark is in the disabled ink.");
                 Assert.AreNotEqual(card.DisabledInk, card.MarkInk(Live(70, false)));
                 Assert.AreNotEqual(card.DisabledInk, card.MarkInk(Last(70, Min(4))), "A last reading's mark is not disabled: the part is known.");
-                Assert.IsFalse(CardPaint.DrawnTextLog.Any(d => d.Text == WidgetCopy.NoReading || d.Text == "-" || d.Text == "—" || d.Text.EndsWith('%') && d.Bounds.IntersectsWith(layout.Right.Percent)),
+                Assert.IsFalse(CardPaint.DrawnTextLog.Any(d => d.Text == WidgetCopy.NoReading || d.Text == "-" || d.Text == "\u2014" || d.Text.EndsWith('%') && d.Bounds.IntersectsWith(layout.Right.Percent)),
                     "No number, no words and no dash in an unknown part's place.");
                 bool track = false;
                 for (int x = layout.Right.Bar.Left; x < layout.Right.Bar.Right && !track; x++)

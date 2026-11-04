@@ -87,7 +87,7 @@ public sealed class CardTextFitTests
                     {
                         card.Render(CardKit.MainModel(CardKit.Snapshot()) with { Now = Now }, dpi);
                         using Bitmap bitmap = CardKit.Render(card);
-                        drawnWords.AddRange(CardPaint.DrawnTextLog.Where(d => d.Text == WidgetCopy.NoReading || d.Text is "-" or "—" or "–").Select(d => "dpi " + dpi + ", text " + scale + ": " + d.Text));
+                        drawnWords.AddRange(CardPaint.DrawnTextLog.Where(d => d.Text == WidgetCopy.NoReading || d.Text is "-" or "\u2014" or "\u2013").Select(d => "dpi " + dpi + ", text " + scale + ": " + d.Text));
                     }
                     finally
                     {
