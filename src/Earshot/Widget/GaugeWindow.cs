@@ -150,10 +150,10 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         GaugeLayout layout = GaugeLayout.For(r.Dpi, _order());
         _motion.Show(content, _shown);
 
-        GaugePushKey key = GaugePushKey.Of(content, palette, layout, _motion.Hover, r.FontFamily, r.Bounds.Location, _motion.Ring);
+        GaugePushKey key = GaugePushKey.Of(content, palette, layout, _motion.Hover, r.FontFamily, r.Bounds.Location, _motion.Ring, _motion.Frame);
         if (key != _lastPush)
         {
-            using Bitmap bitmap = GaugeRenderer.Render(content, palette, layout, _motion.Hover, r.FontFamily, _motion.Ring);
+            using Bitmap bitmap = GaugeRenderer.Render(content, palette, layout, _motion.Hover, r.FontFamily, _motion.Ring, _motion.Frame);
             Push(bitmap, r.Bounds.Location);
             PushCount++;
             _lastPush = key;
@@ -367,6 +367,9 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
         }
 
         _shown = false;
+
+        // A window that draws nothing asks for no frames: a sweep that was turning stops, and turns again when it is shown.
+        _motion.Suspend();
         bool ok = NativeMethods.SetWindowPos(Handle, 0, 0, 0, 0, 0,
             NativeMethods.SWP_HIDEWINDOW | NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOZORDER);
         // _shown still moves to false either way: the caller (GaugeController's own Hidden/Off transitions)
