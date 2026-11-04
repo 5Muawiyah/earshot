@@ -195,6 +195,26 @@ public sealed class WidgetRuntimeToggleTests
         });
     }
 
+    // The tray's notices need a window but no widget consumer: with every consumer off there is no data pipeline, and the card still
+    // exists, with the empty snapshot, and is the notices' target.
+    [TestMethod]
+    public void TheNoticesHaveACardEvenWithEveryWidgetConsumerOff()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var notices = new CompactNoticePresenter(new CapturingLog());
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCardOn = false, LowBatteryAlert = false, FullyChargedNotice = false, AutoPause = false }).WithWatcherRecomputed(),
+                notices: notices);
+            tray.PumpUntilIdle();
+
+            Assert.IsFalse(tray.Settings.Current.Widget.Enabled, "Sanity: nothing wants the watcher.");
+            Assert.IsFalse(tray.Context.WidgetDataPipelineWiredForTest, "Sanity: no data pipeline.");
+            Assert.IsTrue(tray.Context.WidgetCaseOpenCardWiredForTest, "The card exists without the pipeline.");
+            Assert.IsTrue(notices.HasTarget, "The notices have a card to show on.");
+        });
+    }
+
     // Before the fix, ApplyWidget's ShowOnTaskbar-off branch tore down the taskbar watcher and the appbar
     // registration but never touched the card presenter it built alongside them (WireGauge's own
     // "if (_gaugeController is null)" block): a card already open above the gauge stayed open and visible

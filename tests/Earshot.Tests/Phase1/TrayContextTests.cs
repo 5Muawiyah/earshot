@@ -1488,7 +1488,8 @@ internal sealed class TrayHarness : IDisposable
         PairAirPodsServices? pairAirPods = null,
         CoordinatorServices? coordinatorServices = null,
         Earshot.Infra.ISettingsLauncher? settingsLauncher = null,
-        Earshot.Tracing.ITraceRecorder? traceRecorder = null)
+        Earshot.Tracing.ITraceRecorder? traceRecorder = null,
+        Earshot.Widget.CompactNoticePresenter? notices = null)
     {
         _dataRoot = new EnvironmentVariableScope(Earshot.Infra.Paths.DataRootVariable, _folder.File("data"));
         NativeHotkeys = nativeHotkeys ?? new FakeNativeHotkeys();
@@ -1556,7 +1557,7 @@ internal sealed class TrayHarness : IDisposable
             Connection = Connection,
             Block = Block,
             Protection = Protection,
-            Cards = Cards,
+            Cards = (ICardPresenter?)notices ?? Cards,
         };
 
         arrange?.Invoke(this);
