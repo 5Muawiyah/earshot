@@ -59,13 +59,14 @@ public sealed class BatteryFreshnessTests
     }
 
     // Replaces "the gauge drops a bud per bud after an hour": the gauge number is the lower of the buds that have a value,
-    // at any age, and with no bud live it is a last reading. While any bud is live it is the lower of the live buds only.
+    // read within the hold of the newer of the two, and with no bud live it is a last reading. A bud read longer before the
+    // other (GaugeFigureTests) does not lower a figure being heard.
     [TestMethod]
     public void TheGaugeKeepsAnOldBudAsALastReading()
     {
         PartReading headset = PartReading.Unknown;
 
-        ShownBattery both = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(10)), Part(80, TimeSpan.FromMinutes(5)), PartReading.Unknown, headset, true, true, Now);
+        ShownBattery both = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(6)), Part(80, TimeSpan.FromMinutes(5)), PartReading.Unknown, headset, true, true, Now);
         Assert.AreEqual(40, both.Gauge?.Percent);
         Assert.AreEqual(ReadingKind.Last, both.Gauge?.Kind);
         Assert.AreEqual(40, both.Gauge?.Left);
@@ -109,7 +110,7 @@ public sealed class BatteryFreshnessTests
         Assert.IsTrue(shown.Gauge?.Charging);
 
         ShownBattery oldBud = BatteryFreshness.Shown(
-            Part(40, TimeSpan.FromHours(2), charging: true), Part(80, TimeSpan.FromHours(1), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
+            Part(40, TimeSpan.FromMinutes(6), charging: true), Part(80, TimeSpan.FromMinutes(5), charging: false), PartReading.Unknown, PartReading.Unknown, true, true, Now);
         Assert.IsTrue(oldBud.Gauge?.Charging, "An old bud the gauge is drawn from was charging when read.");
 
         ShownBattery liveOnly = BatteryFreshness.Shown(
@@ -124,9 +125,9 @@ public sealed class BatteryFreshnessTests
     [TestMethod]
     public void TheGaugeReadTimeIsTheOldestOfTheBudsItIsDrawnFrom()
     {
-        ShownBattery shown = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(10)), Part(80, TimeSpan.FromMinutes(5)), PartReading.Unknown, PartReading.Unknown, true, true, Now);
+        ShownBattery shown = BatteryFreshness.Shown(Part(40, TimeSpan.FromMinutes(6)), Part(80, TimeSpan.FromMinutes(5)), PartReading.Unknown, PartReading.Unknown, true, true, Now);
 
-        Assert.AreEqual(Now - TimeSpan.FromMinutes(10), shown.Gauge?.ReadAt);
+        Assert.AreEqual(Now - TimeSpan.FromMinutes(6), shown.Gauge?.ReadAt);
     }
 
     // A fresh broadcast value wins; Windows' figure is shown only when no bud has one and it is current.

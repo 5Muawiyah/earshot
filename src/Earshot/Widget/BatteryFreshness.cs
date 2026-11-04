@@ -77,6 +77,13 @@ internal static class BatteryFreshness
     // Nothing says Windows clears it on disconnect, so it is never shown for AirPods that are not here.
     public static readonly TimeSpan HeadsetCurrentWindow = TimeSpan.FromSeconds(120);
 
+    // The gauge's number is the lower of the buds read within this long of the newer of the two, so a bud that crosses
+    // FreshWindow while the other is still heard does not drop out of the comparison and come back (the number flipping
+    // between buds). Design choice: the value of BroadcastRules.LostLimit, longer than any recorded gap between messages of a
+    // set (6.14 s) and the span past which a linked set is taken to be lost. A bud read much longer before the other says
+    // nothing of the figure being heard and does not lower it.
+    public static readonly TimeSpan GaugeBudHold = BroadcastRules.LostLimit;
+
     public static bool IsFresh(PartReading part, DateTimeOffset now) => Within(part, now, FreshWindow);
 
     // Windows' figure is current: on this PC, with a value, read within HeadsetCurrentWindow.
@@ -132,7 +139,7 @@ internal static class BatteryFreshness
         int? windows = windowsShown ? headset.Percent : null;
         DateTimeOffset? windowsAt = windowsShown ? headset.ReadAt : null;
 
-        GaugeFigure? gauge = onThisPc ? GaugeFor(l, r, windows, windowsAt, freshBud) : null;
+        GaugeFigure? gauge = onThisPc ? GaugeFor(l, r, windows, windowsAt) : null;
         return new ShownBattery(l, r, c, windows, windowsAt, gauge);
     }
 
@@ -170,22 +177,15 @@ internal static class BatteryFreshness
         return new ShownPart(Math.Clamp(percent, 0, 100), charging, ReadingKind.Last, readAt);
     }
 
-    // A live broadcast bud first, then Windows' figure while it is current, then the buds' last readings at any age. The
-    // broadcast number is the lower of the buds that have a value: an unknown bud is skipped, and with no bud value there is
-    // no number. Of two buds at the same value the live one, then the read one, is the number's. While any bud is live the
-    // number is the lower of the live buds only: another bud's old reading says nothing about now, and must not lower (or
-    // stand beside) a figure that is being heard.
-    private static GaugeFigure? GaugeFor(ShownPart left, ShownPart right, int? windows, DateTimeOffset? windowsAt, bool freshBud)
+    // Windows' figure first, while no bud has been live in this connection and it is current; then the buds. The broadcast
+    // number is the lower of the buds that have a value and were read within GaugeBudHold of the newer of the two: an unknown
+    // bud is skipped, and with no bud value there is no number. Of two buds at the same value the live one, then the fresher,
+    // is the number's. It is a live figure only when the bud it is taken from is live.
+    private static GaugeFigure? GaugeFor(ShownPart left, ShownPart right, int? windows, DateTimeOffset? windowsAt)
     {
-        if (!freshBud && windows is int figure && windowsAt is DateTimeOffset readAt)
+        if (windows is int figure && windowsAt is DateTimeOffset readAt)
         {
             return new GaugeFigure(Math.Clamp(figure, 0, 100), BatterySource.Windows, null, null, false, readAt);
-        }
-
-        if (freshBud)
-        {
-            left = left.Fresh ? left : ShownPart.None;
-            right = right.Fresh ? right : ShownPart.None;
         }
 
         if (!left.HasValue && !right.HasValue)
@@ -193,11 +193,17 @@ internal static class BatteryFreshness
             return null;
         }
 
+        DateTimeOffset newest = NewestBudRead(left, right);
+        left = Held(left, newest);
+        right = Held(right, newest);
+
         ShownPart lower = !right.HasValue ? left
             : !left.HasValue ? right
             : left.Percent < right.Percent ? left
             : right.Percent < left.Percent ? right
-            : Rank(left.Kind) <= Rank(right.Kind) ? left : right;
+            : Rank(left.Kind) < Rank(right.Kind) ? left
+            : Rank(right.Kind) < Rank(left.Kind) ? right
+            : left.ReadAt >= right.ReadAt ? left : right;
 
         DateTimeOffset oldest = DateTimeOffset.MaxValue;
         foreach (ShownPart bud in new[] { left, right })
@@ -211,6 +217,24 @@ internal static class BatteryFreshness
         bool charging = left.Charging == true || right.Charging == true;
         return new GaugeFigure(Math.Clamp(lower.Percent!.Value, 0, 100), BatterySource.Broadcast, left.Percent, right.Percent, charging, oldest, lower.Kind);
     }
+
+    private static DateTimeOffset NewestBudRead(ShownPart left, ShownPart right)
+    {
+        DateTimeOffset newest = DateTimeOffset.MinValue;
+        foreach (ShownPart bud in new[] { left, right })
+        {
+            if (bud.HasValue && bud.ReadAt is DateTimeOffset at && at > newest)
+            {
+                newest = at;
+            }
+        }
+
+        return newest;
+    }
+
+    // The bud when it was read within GaugeBudHold of the newer bud's read time, otherwise nothing.
+    private static ShownPart Held(ShownPart bud, DateTimeOffset newest) =>
+        bud.HasValue && bud.ReadAt is DateTimeOffset at && newest - at <= GaugeBudHold ? bud : ShownPart.None;
 
     private static int Rank(ReadingKind kind) => kind == ReadingKind.Live ? 0 : 1;
 }

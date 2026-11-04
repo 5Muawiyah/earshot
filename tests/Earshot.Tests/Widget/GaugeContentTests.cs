@@ -162,11 +162,11 @@ public sealed class GaugeContentTests
     }
 
     // Replaces "a value older than an hour is dropped bud by bud": the old low bud is still the number, as a last
-    // reading, and the tooltip gives the age of the oldest bud shown.
+    // reading, when it was read within the hold of the other, and the tooltip gives the age of the oldest bud shown.
     [TestMethod]
     public void AnOldLowBudIsStillTheNumberAsALastReading()
     {
-        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromMinutes(2)), Bud(30, age: TimeSpan.FromHours(2))), Now, Settings);
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromHours(2)), Bud(30, age: TimeSpan.FromHours(2) + TimeSpan.FromMinutes(1))), Now, Settings);
 
         Assert.AreEqual(GaugeMode.Reading, c.Mode);
         Assert.AreEqual(30, c.Percent);
@@ -187,9 +187,9 @@ public sealed class GaugeContentTests
     [TestMethod]
     public void TheReadLineIsTheOldestBudsAndNeverYoungerThanTheReading()
     {
-        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromSeconds(40)), Bud(60, age: TimeSpan.FromSeconds(200))), Now, Settings);
+        GaugeContent c = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TimeSpan.FromSeconds(40)), Bud(60, age: TimeSpan.FromSeconds(150))), Now, Settings);
 
-        StringAssert.EndsWith(c.Tooltip, "Last read 3 min ago");
+        StringAssert.EndsWith(c.Tooltip, "Last read 2 min ago");
         Assert.AreEqual("Read 1 min ago", WidgetCopy.GaugeReadLine(TimeSpan.FromSeconds(119)));
     }
 
