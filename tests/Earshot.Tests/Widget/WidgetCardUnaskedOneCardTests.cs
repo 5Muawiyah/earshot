@@ -151,6 +151,22 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // ---- The window's accessible name
+
+    [TestMethod]
+    public void AnUnaskedCardIsNamedForTheCaseOpeningAndTheAskedCardForTheAirPods()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var log = new CapturingLog();
+            using var unasked = new WidgetCard(log, CardOpening.Unasked);
+            using var asked = new WidgetCard(log);
+
+            Assert.AreEqual("Earshot: Case open", unasked.AccessibleName);
+            Assert.AreEqual("Earshot: AirPods", asked.AccessibleName);
+        });
+    }
+
     // ---- The log lines
 
     [TestMethod]

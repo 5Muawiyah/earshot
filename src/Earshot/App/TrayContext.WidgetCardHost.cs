@@ -156,7 +156,7 @@ internal sealed partial class TrayContext
             IReadOnlyList<DisplayInfo> displays = _tray._displaySource.Read().Displays;
             if (on && !displays.Any(d => string.Equals(d.Id, id, StringComparison.OrdinalIgnoreCase)))
             {
-                _tray._log.Info("Case-open card: the display ticked on the settings page is no longer connected, so it was not added.");
+                _tray._log.Info("Card: the display ticked on the settings page is no longer connected, so it was not added.");
                 _tray._widgetCardPresenter?.Refresh();
                 return;
             }
