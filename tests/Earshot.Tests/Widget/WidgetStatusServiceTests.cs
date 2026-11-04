@@ -161,6 +161,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.Start();
         Prime();
         _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A));
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A)); // a new case value is held once two messages say it
         Assert.AreEqual(100, service.Current.Case.Percent);
 
         _paired.Model = 0x1234;
@@ -947,6 +948,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         _clock.Advance(TimeSpan.FromMinutes(1));
         DateTimeOffset second = _clock.GetUtcNow();
         _source.Raise(Owned(batteryA: 0xFF, batteryB: 0x06)); // buds unknown this time, case updates
+        _source.Raise(Owned(batteryA: 0xFF, batteryB: 0x06)); // and a second message confirms the new case value
 
         Assert.AreEqual(60, service.Current.Case.Percent);
         Assert.AreEqual(second, service.Current.Case.ReadAt);
@@ -963,6 +965,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
         service.Start();
         Prime();
         _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A)); // case 100 now
+        _source.Raise(Owned(batteryA: 0x56, batteryB: 0x0A)); // confirmed by a second message
         DateTimeOffset caseReadAt = _clock.GetUtcNow();
         _clock.Advance(TimeSpan.FromSeconds(9));
 

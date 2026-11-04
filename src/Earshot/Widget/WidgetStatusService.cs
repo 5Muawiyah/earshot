@@ -111,12 +111,17 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     // which bud is which. Written and read only on the UI thread, under _gate.
     private bool _driftLogged;
     private bool _budOrderLogged;
+    private bool _alternationLogged;
 
     // Everything below is read and written only while holding _gate, so a call from whatever thread the owner's
     // UI runs on and a Received/Stopped callback never race each other.
-    private PartReading _left = PartReading.Unknown;
-    private PartReading _right = PartReading.Unknown;
-    private PartReading _case = PartReading.Unknown;
+    // Each part is held through PartConfirm: _left, _right and _case are the confirmed readings.
+    private PartConfirmState _leftConfirm = PartConfirmState.Empty;
+    private PartConfirmState _rightConfirm = PartConfirmState.Empty;
+    private PartConfirmState _caseConfirm = PartConfirmState.Empty;
+    private PartReading _left => _leftConfirm.Held;
+    private PartReading _right => _rightConfirm.Held;
+    private PartReading _case => _caseConfirm.Held;
     private PartReading _headset = PartReading.Unknown;
     private bool? _lastLeftInEar;
     private bool? _lastRightInEar;
@@ -1212,6 +1217,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         bool caseOpenedEdge = false;
         DateTimeOffset caseOpenedAt = at;
         DecodedReading? applied = null;
+        DecodedReading? confirmedReading = null;
         long generation = 0;
         RefreshState? heard = null;
         LastReadingBook? toSave = null;
@@ -1315,10 +1321,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             {
                 DecodedReading reading = ProximityDecoder.Decode(message, _table, at);
                 CheckBudOrderLocked(reading, tag, at);
-                ApplyDecodedReadingLocked(reading, _table, at);
+                DecodedReading confirmed = ApplyDecodedReadingLocked(reading, _table, at);
                 caseOpenedEdge = ObserveCaseLocked(tag, message, reading, at);
-                toSave = RecordLastReadingLocked(reading, message.Model, at);
+                toSave = RecordLastReadingLocked(confirmed, message.Model, at);
                 applied = reading;
+                confirmedReading = confirmed;
                 generation = _selectionGeneration;
 
                 // A message of the chosen set sent after the refresh restarted the listen is the answer it waits for.
@@ -1340,9 +1347,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         // Only a message of the linked set gets here as applied, and it is live: the history keeps nothing else.
-        if (applied is not null)
+        if (confirmedReading is not null)
         {
-            _history?.Record(applied, at);
+            _history?.Record(confirmedReading, at);
         }
 
         if (heard is not null)
@@ -1577,9 +1584,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private void ResetReadingsLocked()
     {
         _selectionGeneration++;
-        _left = PartReading.Unknown;
-        _right = PartReading.Unknown;
-        _case = PartReading.Unknown;
+        _leftConfirm = PartConfirmState.Empty;
+        _rightConfirm = PartConfirmState.Empty;
+        _caseConfirm = PartConfirmState.Empty;
         _lastLeftInEar = null;
         _lastRightInEar = null;
         _earReadAt = null;
@@ -1667,12 +1674,28 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         return false;
     }
 
-    // Must be called holding _gate. Merges one decoded reading of the linked set into what is shown.
-    private void ApplyDecodedReadingLocked(DecodedReading reading, ProximityDecodeTable table, DateTimeOffset at)
+    // Must be called holding _gate. Merges one decoded reading of the linked set into what is shown, one reading per part
+    // (PartConfirm), and returns the part of it that is a confirmed reading as of this message: a part whose held value this
+    // message set or repeated, and Unknown for a part the message said nothing sure about. That is what is saved and recorded
+    // in the history, so what is saved is what is shown.
+    private DecodedReading ApplyDecodedReadingLocked(DecodedReading reading, ProximityDecodeTable table, DateTimeOffset at)
     {
-        _left = MergePart(_left, reading.Left);
-        _right = MergePart(_right, reading.Right);
-        _case = MergePart(_case, reading.Case);
+        PartConfirmStep left = PartConfirm.Step(_leftConfirm, reading.Left);
+        PartConfirmStep right = PartConfirm.Step(_rightConfirm, reading.Right);
+        PartConfirmStep box = PartConfirm.Step(_caseConfirm, reading.Case);
+        _leftConfirm = left.State;
+        _rightConfirm = right.State;
+        _caseConfirm = box.State;
+        if (!_alternationLogged &&
+            (left.Outcome == ConfirmOutcome.Alternating || right.Outcome == ConfirmOutcome.Alternating || box.Outcome == ConfirmOutcome.Alternating))
+        {
+            _alternationLogged = true;
+            _log.Info("Battery: two senders of the linked set give different values for a part, so the last confirmed value is held.");
+        }
+
+        var confirmed = new DecodedReading(
+            Confirmed(left.State, reading.Left), Confirmed(right.State, reading.Right), Confirmed(box.State, reading.Case),
+            reading.LidOpen, reading.LidCounter);
         _lastChosenAt = at;
 
         if (reading.Left.InEar is bool li)
@@ -1697,10 +1720,13 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _lidOpenBitSeen = true;
             _lastLidOpenState = lidOpen;
         }
+
+        return confirmed;
     }
 
-    private static PartReading MergePart(PartReading previous, PartReading incoming) =>
-        incoming.Percent is not null ? incoming : previous;
+    // The held reading when this message set or repeated it (its read time is the message's own), otherwise nothing.
+    private static PartReading Confirmed(PartConfirmState state, PartReading incoming) =>
+        incoming.Percent is not null && state.Held.ReadAt is { } at && at == incoming.ReadAt ? state.Held : PartReading.Unknown;
 
     private void OnStopped(object? sender, AdvertisementSourceStopped stopped)
     {
