@@ -5,11 +5,12 @@ using Earshot.App;
 using Earshot.Contracts;
 using Earshot.Popup;
 using Earshot.Tray;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase5;
 
-// Renders the card pictures used in docs\overview.md from ConnectCard itself, one per status line.
+// Renders the card pictures used in docs\overview.md from the compact card itself, one per status line.
 // The test always renders and checks the card. It writes the files only when
 // EARSHOT_DOC_IMAGE_DIR names a folder, so an ordinary test run changes nothing on disk:
 //
@@ -32,20 +33,12 @@ public sealed class DocumentationCardImageTests
     {
         CardSta.Run(() =>
         {
-            using var card = new ConnectCard(new CapturingLog());
-            var content = new CardContent(DeviceName, status);
-            Size size = card.Prepare(content, Dpi, CardTheme.Dark, WideEnough);
-
-            using var rendered = new Bitmap(size.Width, size.Height, PixelFormat.Format24bppRgb);
-            using (Graphics g = Graphics.FromImage(rendered))
-            {
-                card.RenderContent(g);
-            }
-
-            CollectionAssert.AreEqual(
-                new[] { DeviceName, status },
-                card.LastPaintedText().ToArray(),
-                "The picture shows the name and the status line, and nothing else.");
+            using WidgetCard card = Earshot.Tests.Widget.DesignPixels.NewCard(Earshot.Tests.Widget.DesignTheme.Dark, 1.0, notice: true);
+            CompactRequest request = CompactNoticePresenter.RequestFor(new CardContent(DeviceName, status), CardAnchor.NearTray, null, DeviceName);
+            card.Render(Earshot.Tests.Widget.CardKit.MainModel() with { Form = CardForm.Compact, Compact = request.Content }, Dpi);
+            Assert.IsTrue(card.IsCompactShown);
+            Assert.AreEqual(status, request.Content.Text, "The picture shows the status line and no device name.");
+            using Bitmap rendered = Earshot.Tests.Widget.CardKit.Render(card);
 
             string? folder = Environment.GetEnvironmentVariable("EARSHOT_DOC_IMAGE_DIR");
             if (string.IsNullOrWhiteSpace(folder))

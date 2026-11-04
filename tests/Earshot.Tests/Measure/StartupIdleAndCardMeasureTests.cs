@@ -7,6 +7,7 @@ using Earshot.Infra;
 using Earshot.Popup;
 using Earshot.Tests.Phase5;
 using Earshot.Tray;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Measure;
@@ -169,37 +170,39 @@ public sealed class StartupIdleAndCardMeasureTests
         {
             TimeSpan first;
             TimeSpan second;
-            using (var card = new ConnectCard(new CapturingLog()))
+            using (WidgetCard card = NewCompactCard())
             {
                 first = OpenOnce(card);
-                card.HideCard();
+                card.Hide();
                 Application.DoEvents();
                 second = OpenOnce(card);
             }
 
             TimeSpan freshInstance;
-            using (var card = new ConnectCard(new CapturingLog()))
+            using (WidgetCard card = NewCompactCard())
             {
                 freshInstance = OpenOnce(card);
             }
 
-            // From the show request (Prepare, then ShowAt, which creates the window on first use and paints it
-            // before it returns) to the card painted. Stopwatch, ConnectCard directly on a private desktop;
-            // the tray's own placement and animation are not included.
-            Measure("card_first_open_ms=" + Ms(first) + " (new card, first Prepare + ShowAt, until painted)");
-            Measure("card_second_open_ms=" + Ms(second) + " (same card after HideCard, Prepare + ShowAt, until painted)");
-            Measure("card_new_instance_open_ms=" + Ms(freshInstance) + " (a second new card in the same process, Prepare + ShowAt, until painted)");
+            // From the request (Render, then Show, which creates the window on first use) to the card painted. Stopwatch, the compact
+            // card directly on a private desktop; the presenter's own placement and animation are not included.
+            Measure("card_first_open_ms=" + Ms(first) + " (new card, first Render + Show, until painted)");
+            Measure("card_second_open_ms=" + Ms(second) + " (same card after HideCard, Render + Show, until painted)");
+            Measure("card_new_instance_open_ms=" + Ms(freshInstance) + " (a second new card in the same process, Render + Show, until painted)");
         });
     }
 
-    private static TimeSpan OpenOnce(ConnectCard card)
+    private static WidgetCard NewCompactCard() => new(new CapturingLog(), CardOpening.Unasked);
+
+    private static TimeSpan OpenOnce(WidgetCard card)
     {
         var clock = Stopwatch.StartNew();
-        Size size = card.Prepare(new CardContent(Desktops.AirPodsName, TrayStatus.CardConnecting), 96, CardTheme.Dark, 1000);
-        card.ShowAt(new Rectangle(new Point(100, 100), size));
+        var row = new CompactContent(' ', InkRole.Primary, TrayStatus.CardConnecting, null, null);
+        card.Render(Earshot.Tests.Widget.CardKit.MainModel() with { Form = CardForm.Compact, Compact = row }, 96);
+        card.PresentAnimated(new Rectangle(new Point(100, 100), card.ClientSize), 0);
         Application.DoEvents();
         clock.Stop();
-        Assert.IsTrue(card.IsShownOnScreen(), "The card was shown.");
+        Assert.IsTrue(card.Visible, "The card was shown.");
         return clock.Elapsed;
     }
 }

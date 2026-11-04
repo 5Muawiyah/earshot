@@ -120,4 +120,15 @@ public sealed class LowBatteryLatchTests
 
         Assert.AreEqual(20, latch.ThresholdPercent);
     }
+
+    [TestMethod]
+    public void ApplyBudsTellsWhichBudsFiredInOneApply()
+    {
+        var latch = new LowBatteryLatch(20);
+
+        Assert.AreEqual((true, true), latch.ApplyBuds(20, 10));
+        Assert.AreEqual((false, false), latch.ApplyBuds(20, 10), "Both are spent.");
+        Assert.AreEqual((false, false), latch.ApplyBuds(null, null));
+        Assert.AreEqual((false, true), new LowBatteryLatch(20).ApplyBuds(50, 20));
+    }
 }

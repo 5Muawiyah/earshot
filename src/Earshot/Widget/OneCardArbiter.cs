@@ -80,7 +80,7 @@ internal static class OneCardArbiter
     // Design: 6000 ms, counted once the entrance finishes.
     public static readonly TimeSpan CompactHold = TimeSpan.FromMilliseconds(6000);
 
-    // A notice with a button stays 12 s: the rule of today's card, kept (Popup.CardPresenter.ActionDismissAfter).
+    // A notice with a button stays 12 s: the rule the notices have always had.
     public static readonly TimeSpan ActionHold = TimeSpan.FromSeconds(12);
 
     // How long a notice stays: 6 s, 12 s with a button, until closed when it stays up.

@@ -271,6 +271,11 @@ internal static class WidgetCopy
 
     public const string LeftAndRightWord = "Left and Right";
 
+    // What the headset's own figure is called on the compact row.
+    public const string AirPodsWord = "AirPods";
+
+    public static string LowBatteryBothText(int percent) => LowBatteryText("Left and Right AirPods", percent);
+
     public static string MovedTo(string otherDeviceLabel) =>
         string.IsNullOrWhiteSpace(otherDeviceLabel) ? MovedToAnotherDevice : "Moved to " + otherDeviceLabel.Trim();
 

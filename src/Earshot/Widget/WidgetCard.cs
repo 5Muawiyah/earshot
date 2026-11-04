@@ -77,19 +77,18 @@ internal sealed record WidgetCardModel(
 
 // The dedicated three-column card: Left, Right, Case battery (each greyed when its value is not fresh), where
 // the AirPods are, when the battery was last read, and a Connect/Disconnect button, plus the auto-pause switch
-// when the snapshot says it is available. Built for the gauge's left click with LeftClickConnects off (the default): ConnectCard/
-// CardPresenter, the tray's existing one-line card, has no room for three battery columns, a where-line and
-// an auto-pause switch together, so the gauge gets its own card rather than reusing that one.
+// when the snapshot says it is available. Built for the gauge's left click with LeftClickConnects off (the default); the same
+// window, created without activation, is also the one-row card that shows the tray's notices.
 //
 // Owner-painted, no child controls, one Form: OnPaintBackground is empty, RenderContent starts with
 // Graphics.Clear and draws everything else with GDI+ FillPath/DrawString, never TextRenderer: GDI text
 // writes alpha 0, invisible on a window composited through alpha the way this card's translucent backdrop
 // is (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows), the same
-// fact ConnectCard and GaugeRenderer already build on. The framework's OptimizedDoubleBuffer stays off;
+// fact GaugeRenderer builds on too. The framework's OptimizedDoubleBuffer stays off;
 // the card buffers itself (WidgetCard.Paint.cs), with the finished pixels copied to the window as they are,
 // alpha included, which is what the DWM recipe needs.
 //
-// Unlike ConnectCard this card takes focus and keyboard input (shown with Show() then Activate(), like the
+// The asked card takes focus and keyboard input (shown with Show() then Activate(), like the
 // volume flyout), so CreateParams omits WS_EX_NOACTIVATE and ControlStyles.Selectable is left at its
 // default (true) rather than turned off.
 //
@@ -307,10 +306,10 @@ internal sealed partial class WidgetCard : Form
     internal bool CornersApplied => _cornersApplied;
 
     // Sets the palette and dark-mode flag from the taskbar ink, the same reading the tray icon and
-    // ConnectCard use, so the card always agrees with them. Call before the first Render after the handle
+    // gauge use, so the card always agrees with them. Call before the first Render after the handle
     // exists so OnHandleCreated's dark-mode attribute is set from the right value on the next paint; a
     // later change is picked up by the next Render, but DWMWA_USE_IMMERSIVE_DARK_MODE itself is only
-    // re-applied when the handle is recreated, matching ConnectCard's own border-colour behaviour.
+    // re-applied when the handle is recreated, the same as the gauge window's own border colour.
     public void SetTheme(Color taskbarInk, bool highContrast)
     {
         _dark = !highContrast && taskbarInk.GetBrightness() >= 0.5f;

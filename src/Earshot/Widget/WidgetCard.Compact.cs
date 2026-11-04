@@ -421,6 +421,16 @@ internal sealed partial class WidgetCard
         StartHold();
     }
 
+    // The row on show is shown again, with the same words or others: its hold starts over, unless the card is still coming in
+    // (the hold then starts when it has).
+    internal void RestartHold()
+    {
+        if (Visible && IsCompactShown && _animator is not { Running: true })
+        {
+            StartHold();
+        }
+    }
+
     private void StopHold()
     {
         _holdArmed = false;

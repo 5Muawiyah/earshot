@@ -79,7 +79,7 @@ internal sealed partial class WidgetCardPresenter
     public void CaseOpened(Rectangle? gaugeBounds)
     {
         int generation = _generation.Next();
-        _uiPost(() => OpenUnaskedOnUiThread(UnaskedKind.CaseOpened, gaugeBounds, generation));
+        _uiPost(() => _ = OpenUnaskedOnUiThread(UnaskedKind.CaseOpened, gaugeBounds, generation));
     }
 
     // IWidgetStatus.CaseClosed: the linked pair's case closed, so every unasked card closes, whatever the close setting says.
@@ -91,7 +91,7 @@ internal sealed partial class WidgetCardPresenter
         {
             if (_generation.IsCurrent(generation))
             {
-                CloseUnasked("the case closed");
+                CloseUnasked("the case closed", promoteWaiting: true);
             }
         });
     }
@@ -113,6 +113,7 @@ internal sealed partial class WidgetCardPresenter
         }
 
         _unaskedCards.Clear();
+        _waiting.Clear();
     }
 
     private static string KindName(UnaskedKind kind) => kind switch
@@ -125,46 +126,56 @@ internal sealed partial class WidgetCardPresenter
         _ => "notice",
     };
 
-    // The gate, in this order: the setting, not closing, no asked card open, the notification state, then hand-back or session end,
-    // and last each display. Each refusal is logged.
-    private void OpenUnaskedOnUiThread(UnaskedKind kind, Rectangle? gaugeBounds, int generation)
+    // The gate, in this order: the setting (the case opening has one), not closing, no asked card open, the notification state (not for
+    // a card that follows his own click), then hand-back or session end (not for a plain notice, which is often about exactly that),
+    // and last each display. Each refusal is logged. request is the compact notice to show, or null for the case opening.
+    private bool OpenUnaskedOnUiThread(UnaskedKind kind, Rectangle? gaugeBounds, int generation, CompactRequest? request = null)
     {
         if (_disposed || _unaskedParts is not { } parts)
         {
-            return;
+            return false;
         }
 
         string name = KindName(kind);
         UnaskedGate gate = parts.Gate;
-        if (!gate.Enabled())
+        if (kind == UnaskedKind.CaseOpened && !gate.Enabled())
         {
             _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), its setting is off.");
-            return;
+            return false;
         }
 
         if (gate.Closing())
         {
             _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), Earshot is closing.");
-            return;
+            return false;
         }
 
         if (IsShown)
         {
             // A card the owner asked for is in front of him: an unasked one over it would stack one Earshot window on another.
             _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), an asked card is open.");
-            return;
+            return false;
         }
 
-        if (ReadNotificationState(parts, name) is not int state)
+        // A card after his own click is the result of what he did, so it is never held back by the notification state or by a
+        // full-screen application; every other unasked card is.
+        bool afterClick = request is { Anchor: CardAnchor.NearCursor };
+        int state = Shell.QUNS_ACCEPTS_NOTIFICATIONS;
+        if (!afterClick)
         {
-            return;
+            if (ReadNotificationState(parts, name) is not int read)
+            {
+                return false;
+            }
+
+            state = read;
         }
 
-        if (gate.HandBackInProgress() || gate.SessionEndInProgress())
+        if (kind != UnaskedKind.Notice && (gate.HandBackInProgress() || gate.SessionEndInProgress()))
         {
             _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), " +
                 (gate.SessionEndInProgress() ? "the session is ending" : "a hand-back is running") + ".");
-            return;
+            return false;
         }
 
         IUnaskedScene scene = parts.Scene ?? new SystemUnaskedScene(new SystemDisplaySource(), static () => []);
@@ -176,10 +187,15 @@ internal sealed partial class WidgetCardPresenter
             gauges.Insert(0, main);
         }
 
-        WidgetCardModel model = BuildModel(_callbacks, _time);
+        WidgetCardModel model = UnaskedModel(request?.Content);
         var shown = new List<WidgetCard>();
         var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (displays.Count == 0)
+        if (afterClick)
+        {
+            keep.Add("");
+            shown.Add(ShowUnaskedAtClick(parts, model, request!));
+        }
+        else if (displays.Count == 0)
         {
             // Windows could not list the displays: one card, above the main gauge or near the tray, as before there was a
             // choice of displays, so an opening is still shown.
@@ -187,7 +203,7 @@ internal sealed partial class WidgetCardPresenter
             {
                 // No display list means no display to leave out, so a full-screen application refuses the one card.
                 _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), a full-screen application is on and the displays could not be listed.");
-                return;
+                return false;
             }
 
             keep.Add("");
@@ -222,19 +238,39 @@ internal sealed partial class WidgetCardPresenter
 
         if (shown.Count == 0)
         {
-            StopUnaskedCloseTimer();
-            return;
+            if (kind == UnaskedKind.CaseOpened)
+            {
+                StopUnaskedCloseTimer();
+            }
+
+            return false;
         }
 
         _unaskedKind = kind;
+        _unaskedCompact = request?.Content;
+        _unaskedRequest = request;
         _unaskedShownAt = _time.GetTimestamp();
         AnnounceUnasked(shown[0], model);
-        StartUnaskedCloseTimer(options.CloseSeconds, generation);
-        _log.Write(LogLevel.Debug, "Card: shown unasked (" + name + "), on " + shown.Count.ToString(CultureInfo.InvariantCulture) +
-            (shown.Count == 1 ? " display" : " displays") + ", state " + UnaskedGate.NotificationStateName(state) + ", " +
-            (CaseOpenCardClose.After(options.CloseSeconds) is null
+        string closes;
+        if (request is null)
+        {
+            StartUnaskedCloseTimer(options.CloseSeconds, generation);
+            closes = CaseOpenCardClose.After(options.CloseSeconds) is null
                 ? "closes when the case closes."
-                : "closes after " + options.CloseSeconds.ToString(CultureInfo.InvariantCulture) + " s."));
+                : "closes after " + options.CloseSeconds.ToString(CultureInfo.InvariantCulture) + " s.";
+        }
+        else
+        {
+            // A compact row holds and folds by itself (WidgetCard), so no close time of the case card applies to it.
+            StopUnaskedCloseTimer();
+            closes = request.Content.Hold is { } hold
+                ? "holds " + ((long)hold.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms."
+                : "stays until it is closed.";
+        }
+
+        _log.Write(LogLevel.Debug, "Card: shown unasked (" + name + "), on " + shown.Count.ToString(CultureInfo.InvariantCulture) +
+            (shown.Count == 1 ? " display" : " displays") + ", state " + UnaskedGate.NotificationStateName(state) + ", " + closes);
+        return true;
     }
 
     private static string DisplayWords(DisplayInfo display, IReadOnlyList<DisplayInfo> all) =>
@@ -301,7 +337,9 @@ internal sealed partial class WidgetCardPresenter
     private void AnnounceUnasked(WidgetCard card, WidgetCardModel model)
     {
         _announcements++;
-        string text = WidgetCopy.CaseOpenAnnouncement(model.ShownParts, model.Now);
+        string text = model.Form == CardForm.Compact && model.Compact is { } row
+            ? row.Text
+            : WidgetCopy.CaseOpenAnnouncement(model.ShownParts, model.Now);
         if (!card.Announce(text))
         {
             _log.Write(LogLevel.Debug, "Card: the screen reader notification was not raised.");
@@ -407,7 +445,7 @@ internal sealed partial class WidgetCardPresenter
         IUnaskedScene scene = _unaskedParts?.Scene ?? new SystemUnaskedScene(new SystemDisplaySource(), static () => []);
         DisplayInfo? now = display is null ? null : scene.Displays().FirstOrDefault(d => string.Equals(d.Id, display.Id, StringComparison.OrdinalIgnoreCase)) ?? display;
         int dpi = now is { Dpi: > 0 } d ? d.Dpi : _fallbackDpi.Current(_callbacks.Dpi);
-        card.Render(BuildModel(_callbacks, _time), dpi);
+        card.Render(UnaskedModel(_unaskedCompact), dpi);
 
         Size size = card.LaidOutSize;
         if (size != before.Size)
@@ -419,9 +457,15 @@ internal sealed partial class WidgetCardPresenter
     }
 
     // Every unasked card closes: the case closed, the close time passed, a close button, or the presenter was told to hide.
-    private void CloseUnasked(string why)
+    private void CloseUnasked(string why, bool promoteWaiting = false)
     {
         StopUnaskedCloseTimer();
+        if (why == AskedOpenedWhy)
+        {
+            // The card he asked for is in front of him: a notice that waited for the unasked card is not shown behind it.
+            _waiting.Clear();
+        }
+
         bool any = false;
         foreach ((WidgetCard card, _) in _unaskedCards.Values)
         {
@@ -436,6 +480,13 @@ internal sealed partial class WidgetCardPresenter
         {
             long ms = (long)_time.GetElapsedTime(_unaskedShownAt).TotalMilliseconds;
             _log.Write(LogLevel.Debug, "Card: closed (" + KindName(_unaskedKind) + "), " + why + ", after " + ms.ToString(CultureInfo.InvariantCulture) + " ms.");
+            _unaskedCompact = null;
+            _unaskedRequest = null;
+        }
+
+        if (promoteWaiting)
+        {
+            ShowWaiting();
         }
     }
 
@@ -459,6 +510,8 @@ internal sealed partial class WidgetCardPresenter
         }
 
         card.CloseRequested += OnUnaskedCardClosed;
+        card.CompactActionRequested += OnCompactActionRequested;
+        card.CompactBodyClicked += OnCompactBodyClicked;
         card.ToggleRequested += OnUnaskedToggleRequested;
         card.AutoPauseChanged += OnUnaskedAutoPauseChanged;
         _unaskedCards[id] = (card, display);
@@ -468,6 +521,8 @@ internal sealed partial class WidgetCardPresenter
     private void UnhookUnasked(WidgetCard card)
     {
         card.CloseRequested -= OnUnaskedCardClosed;
+        card.CompactActionRequested -= OnCompactActionRequested;
+        card.CompactBodyClicked -= OnCompactBodyClicked;
         card.ToggleRequested -= OnUnaskedToggleRequested;
         card.AutoPauseChanged -= OnUnaskedAutoPauseChanged;
     }
@@ -480,12 +535,15 @@ internal sealed partial class WidgetCardPresenter
     // One card closed itself (its close button or a click past its buttons): the opening is over, so every display's card
     // closes with it.
     private void OnUnaskedCardClosed(object? sender, WidgetCardCloseReason reason) =>
-        CloseUnasked(reason switch
-        {
-            WidgetCardCloseReason.CloseButton => "its close button was pressed",
-            WidgetCardCloseReason.Action => "its button was pressed",
-            _ => "it was clicked",
-        });
+        CloseUnasked(
+            reason switch
+            {
+                WidgetCardCloseReason.CloseButton => "its close button was pressed",
+                WidgetCardCloseReason.Action => "its button was pressed",
+                WidgetCardCloseReason.HoldEnded => "its hold ended",
+                _ => "it was clicked",
+            },
+            promoteWaiting: true);
 
     // The timer's callback may already be queued when the card is shown again, so it carries the generation of the opening it was
     // started for and does nothing once a newer one was asked for.

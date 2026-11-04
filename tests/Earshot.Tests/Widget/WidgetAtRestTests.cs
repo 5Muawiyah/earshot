@@ -323,7 +323,7 @@ public sealed class WidgetAtRestTests
             typeof(NativeMethods), typeof(POINT), typeof(PROPERTYKEY), typeof(PROPVARIANT),
             typeof(PropVariantInterop), typeof(PropertyRead<>), typeof(RECT), typeof(SIZE), typeof(Shell),
             typeof(ShellLinkCom), typeof(TRACKMOUSEEVENT), typeof(TaskbarDpi), typeof(UiAutomation),
-            typeof(PopupNs.CardPalette), typeof(PopupNs.CardPlacement), typeof(PopupNs.CardPresenter),
+            typeof(PopupNs.CardPalette), typeof(PopupNs.CardPlacement),
             typeof(PopupNs.CardTarget), typeof(PopupNs.CardTheme), typeof(PopupNs.DisplayArea),
             typeof(PopupNs.ICardEnvironment), typeof(PopupNs.NotificationStateReading),
             typeof(PopupNs.PlacementScene), typeof(PopupNs.TaskbarEdge),

@@ -77,8 +77,8 @@ internal static partial class CompositionRoot
         ArgumentNullException.ThrowIfNull(time);
 
         INotifier notifier = r.SafeMode || Paths.Current.IsRedirected
-            ? new CardNotifier(r.Cards)
-            : new ToastNotifier(NotificationRegistration.AppUserModelId, new CardNotifier(r.Cards), r.Log);
+            ? new CompactAlertNotifier(r.Cards)
+            : new ToastNotifier(NotificationRegistration.AppUserModelId, new CompactAlertNotifier(r.Cards), r.Log);
 
         // The fully charged notice's spent parts are kept in the status service's own store, beside the last readings.
         return new LowBatteryAlertService(status, r.Settings, notifier, time, (status as WidgetStatusService)?.SpentStore);

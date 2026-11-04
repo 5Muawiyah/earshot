@@ -95,24 +95,34 @@ internal sealed class LowBatteryAlertService : IDisposable
             shown = ShownBattery.None;
         }
 
-        if (_latch.ApplyLeft(FreshPercent(shown.Left)) && alertOn && shown.Left.Percent is int left)
+        // Both buds crossing in one apply is one alert, "Left and Right" at the lower figure, not two.
+        (bool leftFired, bool rightFired) = _latch.ApplyBuds(FreshPercent(shown.Left), FreshPercent(shown.Right));
+        if (alertOn && leftFired && rightFired && shown.Left.Percent is int bothLeft && shown.Right.Percent is int bothRight)
         {
-            Notify(WidgetCopy.LowBatteryLeftText(left));
+            int lower = Math.Min(bothLeft, bothRight);
+            Notify(WidgetCopy.LowBatteryBothText(lower), CompactLine.Low(WidgetCopy.LeftAndRightWord, lower));
         }
-
-        if (_latch.ApplyRight(FreshPercent(shown.Right)) && alertOn && shown.Right.Percent is int right)
+        else
         {
-            Notify(WidgetCopy.LowBatteryRightText(right));
+            if (alertOn && leftFired && shown.Left.Percent is int left)
+            {
+                Notify(WidgetCopy.LowBatteryLeftText(left), CompactLine.Low(WidgetCopy.LeftWord, left));
+            }
+
+            if (alertOn && rightFired && shown.Right.Percent is int right)
+            {
+                Notify(WidgetCopy.LowBatteryRightText(right), CompactLine.Low(WidgetCopy.RightWord, right));
+            }
         }
 
         if (_latch.ApplyCase(FreshPercent(shown.Case)) && alertOn && shown.Case.Percent is int box)
         {
-            Notify(WidgetCopy.LowBatteryCaseText(box));
+            Notify(WidgetCopy.LowBatteryCaseText(box), CompactLine.Low(WidgetCopy.CaseLabel, box));
         }
 
         if (_latch.ApplyHeadset(shown.WindowsPercent) && alertOn && shown.WindowsPercent is int headset)
         {
-            Notify(WidgetCopy.LowBatteryHeadsetText(headset));
+            Notify(WidgetCopy.LowBatteryHeadsetText(headset), CompactLine.Low(WidgetCopy.AirPodsWord, headset));
         }
     }
 
@@ -148,7 +158,7 @@ internal sealed class LowBatteryAlertService : IDisposable
 
         if (step != FullyChargedStep.None && on)
         {
-            Notify(text());
+            Notify(text(), CompactLine.FullyCharged());
         }
     }
 
@@ -164,7 +174,7 @@ internal sealed class LowBatteryAlertService : IDisposable
     // Fire and forget, the same way every other event-driven async call in this codebase is (BlockCoordinator,
     // TrayContext): INotifier's own two implementations never throw for anything Windows did, so there is
     // nothing here for a silent catch to hide.
-    private void Notify(string text) => _ = _notifier.NotifyAsync(TrayStatus.AppName, text);
+    private void Notify(string text, CompactLine line) => _ = _notifier.NotifyAsync(TrayStatus.AppName, text, line);
 
     public void Dispose()
     {

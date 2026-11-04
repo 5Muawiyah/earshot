@@ -53,7 +53,7 @@ internal sealed record WidgetCardPresenterCallbacks(
 //
 // UI thread only from the outside; every public method posts through uiPost so a caller on any thread is
 // safe, matching CardPresenter's own contract.
-internal sealed partial class WidgetCardPresenter : IDisposable
+internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeTarget
 {
     // Short enough that a part greys within 5 s of crossing BatteryFreshness.FreshWindow.
     public static readonly TimeSpan ReadLineRefreshInterval = TimeSpan.FromSeconds(5);
@@ -224,7 +224,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
         // The owner asked for a card: one nobody asked for closes first, so the two are never on screen together, even when this
         // click is then taken as the second half of a double click.
-        CloseUnasked("an asked card was opened");
+        CloseUnasked(AskedOpenedWhy);
 
         if (_card is { IsDisposed: false, Visible: true, IsExiting: false })
         {
@@ -272,7 +272,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
             return;
         }
 
-        CloseUnasked("an asked card was opened");
+        CloseUnasked(AskedOpenedWhy);
         _updateFrom = WidgetCardView.Main;
         _view = WidgetCardView.Update;
         _spinnerFrame = 0;
@@ -290,7 +290,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
 
     private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false, int? dpi = null)
     {
-        CloseUnasked("an asked card was opened");
+        CloseUnasked(AskedOpenedWhy);
         _log.Write(LogLevel.Debug, "Card: shown asked (" + (openedByKeyboard ? "keyboard" : gaugeBounds is null ? "tray icon" : "gauge") + ").");
         _dpiLatch.FixAtShow(dpi, _callbacks.Dpi);
         Rectangle anchor = gaugeBounds ?? new Rectangle(fallbackPoint, Size.Empty);

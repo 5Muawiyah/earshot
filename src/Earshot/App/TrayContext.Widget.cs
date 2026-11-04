@@ -123,6 +123,9 @@ internal sealed partial class TrayContext
     //     back on - including from a start where the gauge began off and this stage was never wired.
     private void WireWidget()
     {
+        // The card and its gates come first and do not wait for a widget consumer: a notice needs a window with no gauge and no
+        // battery behind it (its snapshot is then the empty one).
+        EnsureCardInfrastructure();
         if (_widgetStatus is null)
         {
             _widgetStatus = CompositionRoot.BuildWidget(_registry, () => _coordinator.BlockStatus, _time, _advertisementSourceFactory);
@@ -142,6 +145,16 @@ internal sealed partial class TrayContext
             _autoPauseService = CompositionRoot.BuildAutoPauseService(_registry, _widgetStatus, () => _coordinator.BlockStatus, _time);
         }
 
+        if (_registry.Settings.Current.Widget.ShowOnTaskbar)
+        {
+            WireGauge();
+        }
+    }
+
+    // The pieces of the one card that do not depend on the data pipeline: the theme reader, the callbacks, the gates and the
+    // presenter, and the notices' target. Built once; later calls find them and do nothing.
+    private void EnsureCardInfrastructure()
+    {
         if (_widgetTheme is null)
         {
             _widgetTheme = new ThemeReader(_log);
@@ -177,11 +190,6 @@ internal sealed partial class TrayContext
                 SessionEndInProgress: () => _coordinator.SessionEndInProgress,
                 Options: () => CaseOpenCardOptions.From(_registry.Settings.Current.Widget));
             BuildWidgetCardPresenter();
-        }
-
-        if (_registry.Settings.Current.Widget.ShowOnTaskbar)
-        {
-            WireGauge();
         }
     }
 
@@ -544,6 +552,13 @@ internal sealed partial class TrayContext
                 anchor => SystemDisplaySource.WorkAreaFor(_displaySource, anchor), frameClockFor: card => NewFrameClock(() => card.IsHandleCreated ? card.Handle : 0),
                 unasked: unasked);
             WireLook();
+
+            // The notices every other part of the tray shows through registry.Cards go to this card.
+            if (_registry.Cards is CompactNoticePresenter notices)
+            {
+                notices.SetDeviceName(() => TrayStatus.DeviceName(_snapshot, _registry.Settings.Current));
+                notices.SetTarget(_widgetCardPresenter);
+            }
         }
 
         return _widgetCardPresenter;
@@ -867,6 +882,7 @@ internal sealed partial class TrayContext
         UnwireLook();
         _cardPrewarm?.Dispose();
         _cardPrewarm = null;
+        (_registry.Cards as CompactNoticePresenter)?.SetTarget(null);
         _widgetCardPresenter?.Dispose();
         _widgetCardPresenter = null;
         CloseSendTo();

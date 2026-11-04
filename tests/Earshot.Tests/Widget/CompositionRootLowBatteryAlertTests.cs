@@ -8,7 +8,7 @@ namespace Earshot.Tests.Widget;
 
 // CompositionRoot.BuildLowBatteryAlertService: proves, behaviourally rather than by decoding IL (there is
 // nothing here for an IL walk to distinguish - both branches are an ordinary if/else, not two overloads of
-// the same call), that safe mode and a redirected data root each compose a CardNotifier alone, never a real
+// the same call), that safe mode and a redirected data root each compose a CompactAlertNotifier alone, never a real
 // ToastNotifier, matching NotificationRegistration's own WritesBlocked facts. Never calls NotifyAsync on
 // whatever comes back: constructing a ToastNotifier does not itself touch WinRT (only Show does), but this
 // stays a pure composition check regardless.
@@ -30,7 +30,7 @@ public sealed class CompositionRootLowBatteryAlertTests
 
         using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status, TimeProvider.System);
 
-        Assert.IsInstanceOfType<CardNotifier>(service.NotifierForTest, "Safe mode must never construct a real ToastNotifier.");
+        Assert.IsInstanceOfType<CompactAlertNotifier>(service.NotifierForTest, "Safe mode must never construct a real ToastNotifier.");
         status.Dispose();
     }
 
@@ -47,7 +47,7 @@ public sealed class CompositionRootLowBatteryAlertTests
 
         using LowBatteryAlertService service = CompositionRoot.BuildLowBatteryAlertService(registry, status, TimeProvider.System);
 
-        Assert.IsInstanceOfType<CardNotifier>(service.NotifierForTest, "A redirected data root must never construct a real ToastNotifier.");
+        Assert.IsInstanceOfType<CompactAlertNotifier>(service.NotifierForTest, "A redirected data root must never construct a real ToastNotifier.");
         status.Dispose();
     }
 

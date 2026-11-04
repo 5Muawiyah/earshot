@@ -40,7 +40,7 @@ internal sealed class ToastNotifier : INotifier
     // How many times NotifyAsync has fallen back to the card because the toast could not be shown.
     internal long AlertsFallenBackToCard => Interlocked.Read(ref _fallenBackToCard);
 
-    public async Task<StepOutcome> NotifyAsync(string title, string text)
+    public async Task<StepOutcome> NotifyAsync(string title, string text, CompactLine? line = null)
     {
         ArgumentNullException.ThrowIfNull(title);
         ArgumentNullException.ThrowIfNull(text);
@@ -52,7 +52,7 @@ internal sealed class ToastNotifier : INotifier
         }
 
         Interlocked.Increment(ref _fallenBackToCard);
-        await _fallback.NotifyAsync(title, text).ConfigureAwait(false);
+        await _fallback.NotifyAsync(title, text, line).ConfigureAwait(false);
         return step;
     }
 

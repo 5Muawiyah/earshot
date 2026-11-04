@@ -61,7 +61,7 @@ internal sealed class GaugeWindow : Form, IGaugeSurface
     // The window handle, or 0 while none has been created: reading Handle would create it.
     public nint WindowHandle => IsHandleCreated ? Handle : 0;
 
-    // Mirrors ConnectCard.OnDpiChanged: the gauge is already sized and rendered for the display it is
+    // The gauge is already sized and rendered for the display it is
     // moving to (GaugeController re-measures the taskbar and calls Render at the new DPI on the very next
     // layout, driven by TaskbarWatcher's own poll rather than this event), so the resize
     // DefWindowProc would otherwise apply here is cancelled rather than fought afterwards.

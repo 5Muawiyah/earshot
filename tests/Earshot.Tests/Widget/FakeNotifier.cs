@@ -10,9 +10,13 @@ internal sealed class FakeNotifier : INotifier
 
     public StepOutcome Result { get; set; } = StepOutcomes.FromHResult("fake-notify", 0);
 
-    public Task<StepOutcome> NotifyAsync(string title, string text)
+    // The compact row of each call, in the same order as Calls.
+    public List<CompactLine?> Lines { get; } = new();
+
+    public Task<StepOutcome> NotifyAsync(string title, string text, CompactLine? line = null)
     {
         Calls.Add((title, text));
+        Lines.Add(line);
         return Task.FromResult(Result);
     }
 }

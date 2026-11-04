@@ -127,6 +127,57 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         CollectionAssert.Contains(_notifier.Calls, ("Earshot", "Case at 20%"));
     }
 
+    // The fallback row says which part crossed and by how much: the number is the reading, not the level that was set.
+    private static readonly string[] LeftAndCaseRows = ["Left 18%", "Case 10%"];
+
+    private static readonly string[] LeftThenRightRows = ["Left 20%", "Right 18%"];
+
+    [TestMethod]
+    public void TheCompactRowNamesThePartAndTheReading()
+    {
+        using LowBatteryAlertService service = NewService();
+
+        _status.Raise(Snapshot(left: 18, box: 10));
+
+        CompactLine?[] lines = _notifier.Lines.ToArray();
+        Assert.IsTrue(lines.All(l => l is not null));
+        CollectionAssert.AreEquivalent(LeftAndCaseRows, lines.Select(l => l!.Content.Text).ToArray());
+        Assert.IsTrue(lines.All(l => l!.Content.Glyph == FluentGlyphs.Warning && l.Content.Ink == InkRole.Caution && l.Content.Kind == UnaskedKind.LowFallback));
+    }
+
+    [TestMethod]
+    public void BothBudsCrossingTogetherAreOneAlertAtTheLowerFigure()
+    {
+        using LowBatteryAlertService service = NewService();
+
+        _status.Raise(Snapshot(left: 20, right: 15));
+
+        Assert.AreEqual(1, _notifier.Calls.Count, "One apply, one alert.");
+        Assert.AreEqual("Left and Right 15%", _notifier.Lines[0]!.Content.Text);
+        Assert.AreEqual("Left and Right AirPods at 15%", _notifier.Calls[0].Text);
+    }
+
+    [TestMethod]
+    public void ABudThatCrossesAfterTheOtherIsItsOwnAlert()
+    {
+        using LowBatteryAlertService service = NewService();
+
+        _status.Raise(Snapshot(left: 20, right: 60));
+        _status.Raise(Snapshot(left: 20, right: 18));
+
+        CollectionAssert.AreEqual(LeftThenRightRows, _notifier.Lines.Select(l => l!.Content.Text).ToArray());
+    }
+
+    [TestMethod]
+    public void TheHeadsetFigureIsNamedAirPods()
+    {
+        using LowBatteryAlertService service = NewService();
+
+        _status.Raise(Snapshot(headset: 20));
+
+        Assert.AreEqual("AirPods 20%", _notifier.Lines.Single()!.Content.Text);
+    }
+
     // The alert acts on what is shown, and a greyed value is not shown as current.
     [TestMethod]
     public void AValueThatIsNotFreshNeverAlerts()

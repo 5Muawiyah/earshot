@@ -36,6 +36,9 @@ internal sealed class LowBatteryLatch
 
     public bool ApplyRight(int? percent) => Apply(ref _right, percent);
 
+    // Both buds in one apply, so the caller can tell that they crossed together and say so once.
+    public (bool Left, bool Right) ApplyBuds(int? left, int? right) => (Apply(ref _left, left), Apply(ref _right, right));
+
     public bool ApplyCase(int? percent) => Apply(ref _case, percent);
 
     public bool ApplyHeadset(int? percent) => Apply(ref _headset, percent);
