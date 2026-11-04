@@ -9,13 +9,13 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class GaugeFigureTests
 {
-    private static readonly DateTimeOffset T0 = new(2026, 10, 2, 9, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Epoch = new(2026, 10, 2, 9, 0, 0, TimeSpan.Zero);
 
     private static PartReading Read(int percent, double atSeconds) =>
-        new(percent, false, InEar: null) { ReadAt = T0 + TimeSpan.FromSeconds(atSeconds) };
+        new(percent, false, InEar: null) { ReadAt = Epoch + TimeSpan.FromSeconds(atSeconds) };
 
     private static GaugeFigure? Gauge(PartReading left, PartReading right, double nowSeconds) =>
-        BatteryFreshness.Shown(left, right, PartReading.Unknown, PartReading.Unknown, onThisPc: true, linked: true, T0 + TimeSpan.FromSeconds(nowSeconds)).Gauge;
+        BatteryFreshness.Shown(left, right, PartReading.Unknown, PartReading.Unknown, onThisPc: true, linked: true, Epoch + TimeSpan.FromSeconds(nowSeconds)).Gauge;
 
     [TestMethod]
     public void TheNumberStaysWithTheLowerBudWhenItPassesTheLiveWindowWhileTheOtherIsStillHeard()
@@ -77,7 +77,7 @@ public sealed class GaugeFigureTests
 
         Assert.AreEqual(60, figure?.Percent);
         Assert.AreEqual(ReadingKind.Live, figure?.Kind, "Right is live and the same value, so the number is live.");
-        Assert.AreEqual(T0, figure?.ReadAt, "ReadAt is still the oldest bud's.");
+        Assert.AreEqual(Epoch, figure?.ReadAt, "ReadAt is still the oldest bud's.");
     }
 
     [TestMethod]

@@ -132,7 +132,7 @@ public sealed class AwayGaugeTests
         var last = new ShownPart(80, false, ReadingKind.Last, ReadAt);
 
         Assert.AreEqual("80%", WidgetCopy.PartLine(live, now));
-        Assert.AreEqual("80% · 2 h", WidgetCopy.PartLine(last, now));
+        Assert.AreEqual("80% · 2h", WidgetCopy.PartLine(last, now));
         Assert.AreEqual("No reading", WidgetCopy.PartLine(ShownPart.None, now));
         Assert.IsNull(WidgetCopy.PartTip(live, now));
         Assert.AreEqual("Last read 2 h ago", WidgetCopy.PartTip(last, now));

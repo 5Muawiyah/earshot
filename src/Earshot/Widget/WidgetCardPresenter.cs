@@ -27,7 +27,8 @@ internal sealed record WidgetCardPresenterCallbacks(
     Func<CancellationToken, Task<BatteryRefreshOutcome>>? RefreshBattery = null,   // reads the battery again; no refresh icon works when null
     Func<DateTimeOffset, HistoryWindow>? QueryHistory = null,   // the 24 hours of live readings ending then; the history page is empty when null
     Func<bool>? SendToRowOn = null,   // whether the card shows its Send to row (SendToAccess.CardRow); off when null
-    Action? OpenSendTo = null)        // the Send to row was pressed: the picker opens
+    Action? OpenSendTo = null,        // the Send to row was pressed: the picker opens
+    Func<int>? LowBatteryThreshold = null)   // the Low battery alerts level; a live reading at or under it is drawn in caution
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }
@@ -432,6 +433,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable
         {
             Parts = BatteryFreshness.Shown(snapshot, time.GetUtcNow()),
             ShowSendTo = callbacks.SendToRowOn?.Invoke() ?? false,
+            LowBatteryThresholdPercent = callbacks.LowBatteryThreshold?.Invoke() ?? WidgetSettings.DefaultLowBatteryThresholdPercent,
         };
     }
 

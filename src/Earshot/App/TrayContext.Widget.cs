@@ -161,7 +161,8 @@ internal sealed partial class TrayContext
                 RefreshBattery: RefreshBatteryForCard,
                 QueryHistory: end => _widgetStatus?.QueryHistory(end) ?? HistoryStore.Window([], end),
                 SendToRowOn: () => SendToAccess.CardRow(_registry.Settings.Current.Widget, noticeCard: false),
-                OpenSendTo: () => OpenSendTo(openedByKeyboard: false));
+                OpenSendTo: () => OpenSendTo(openedByKeyboard: false),
+                LowBatteryThreshold: () => _registry.Settings.Current.Widget.LowBatteryThresholdPercent);
 
             var caseOpenGate = new CaseOpenCardGate(
                 Enabled: () => _registry.Settings.Current.Widget.CaseOpenCardOn,

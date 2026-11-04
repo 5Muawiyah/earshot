@@ -37,7 +37,7 @@ public sealed class WidgetCardTests
     }
 
     [TestMethod]
-    public void ANullPercentDrawsTheGlyphAndNoReadingNeverABarOrDigits()
+    public void ANullPercentDrawsTheGlyphAndTheBarTrackOnlyNeverDigitsWordsOrADash()
     {
         Phase5.CardSta.Run(() =>
         {
@@ -48,8 +48,8 @@ public sealed class WidgetCardTests
 
             WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
             Color background = bitmap.GetPixel(0, 0);
-            Assert.IsFalse(HasInk(bitmap, layout.Left.Bar, background), "No bar for a null percent.");
-            Assert.IsTrue(HasInk(bitmap, layout.Left.Percent, background), "\"No reading\" takes the percent line's own place.");
+            Assert.IsTrue(HasInk(bitmap, layout.Left.Bar, background), "The bar's track is drawn for a null percent.");
+            Assert.IsFalse(HasInk(bitmap, layout.Left.Percent, background), "No number, no words and no dash in the percent line's place.");
             Assert.IsTrue(HasInk(bitmap, layout.Left.Glyph, background), "The glyph itself is still drawn.");
         });
     }
@@ -1012,9 +1012,9 @@ public sealed class WidgetCardTests
         return count;
     }
 
-    // The figure's own text and the charging bolt are greyed with the bar, not only the bar.
+    // The figure's own text is greyed with the bar, not only the bar, and a last reading has no bolt.
     [TestMethod]
-    public void AValueThatIsNotFreshHasItsFigureTextAndItsBoltGreyedToo()
+    public void AValueThatIsNotFreshHasItsFigureTextGreyedAndNoBolt()
     {
         Phase5.CardSta.Run(() =>
         {
@@ -1035,8 +1035,7 @@ public sealed class WidgetCardTests
             Color background = freshBitmap.GetPixel(0, 0);
 
             Assert.IsTrue(HasInk(freshBitmap, bolt, background), "The bolt is drawn when charging.");
-            Assert.IsTrue(HasInk(oldBitmap, bolt, background), "It is still drawn for an old value.");
-            Assert.IsFalse(SameRegion(freshBitmap, oldBitmap, bolt), "The bolt of an old value is greyed, not drawn as current.");
+            Assert.IsFalse(HasInk(oldBitmap, bolt, background), "A last reading draws no bolt: it was charging then, and nothing says it is now.");
             Assert.IsTrue(HasInk(oldBitmap, old.CurrentMainLayout.Left.Percent, background), "The figure is still shown.");
             Assert.IsFalse(SameRegion(freshBitmap, oldBitmap, fresh.CurrentMainLayout.Left.Percent), "The figure's text is greyed, not drawn as current.");
             Assert.IsLessThan(Strongest(freshBitmap, fresh.CurrentMainLayout.Left.Percent, background), Strongest(oldBitmap, old.CurrentMainLayout.Left.Percent, background), "Greyed ink is closer to the background than current ink.");

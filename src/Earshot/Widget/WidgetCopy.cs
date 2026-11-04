@@ -179,14 +179,16 @@ internal static class WidgetCopy
         }
 
         string text = label + " " + SpokenPercent(percent);
-        if (withCharging && part.Charging == true)
+
+        // Charging is said of a live reading only: a last reading was charging then and nothing says it is now.
+        if (withCharging && part.Fresh && part.Charging == true)
         {
             text += ", charging";
         }
 
         if (!part.Fresh && part.ReadAt is DateTimeOffset at)
         {
-            text += ", last read " + StaleAgeAmount(now - at) + " ago";
+            text += ", last read " + AgeWords(now - at) + " ago";
         }
 
         return text;
@@ -304,6 +306,37 @@ internal static class WidgetCopy
     public static string StaleAgeAmount(TimeSpan age) =>
         age < TimeSpan.FromMinutes(1) ? "under 1 min" : AgeAmount(age);
 
+    // "4m", "2h", "3d": a last reading's age in the fewest characters, rounded down, never under "1m" and never a word for now
+    // (which would read as live). The card's clock glyph does the talking; the tooltip gives AgeWords.
+    public static string ShortAge(TimeSpan age)
+    {
+        (long count, char unit) = AgeCount(age);
+        return count.ToString(CultureInfo.InvariantCulture) + unit;
+    }
+
+    // "4 minutes", "1 hour", "3 days": the same age in words, for a tooltip or a screen reader.
+    public static string AgeWords(TimeSpan age)
+    {
+        (long count, char unit) = AgeCount(age);
+        string word = unit switch { 'd' => "day", 'h' => "hour", _ => "minute" };
+        return count.ToString(CultureInfo.InvariantCulture) + " " + word + (count == 1 ? "" : "s");
+    }
+
+    private static (long Count, char Unit) AgeCount(TimeSpan age)
+    {
+        if (age.TotalDays >= 1)
+        {
+            return ((long)Math.Floor(age.TotalDays), 'd');
+        }
+
+        if (age.TotalHours >= 1)
+        {
+            return ((long)Math.Floor(age.TotalHours), 'h');
+        }
+
+        return (Math.Max(1, (long)Math.Floor(age.TotalMinutes)), 'm');
+    }
+
     // "40 s", "2 min", "3 h", "2 d": how long ago, without the "ago". Days from a day on, since a last reading may be kept
     // for as long as nothing newer is heard.
     public static string AgeAmount(TimeSpan age)
@@ -370,11 +403,11 @@ internal static class WidgetCopy
         }
 
         string value = PercentText(percent);
-        return part.Fresh || part.ReadAt is not DateTimeOffset at ? value : value + " · " + StaleAgeAmount(now - at);
+        return part.Fresh || part.ReadAt is not DateTimeOffset at ? value : value + " · " + ShortAge(now - at);
     }
 
-    // A card column's tooltip, a sentence: "Left 70%, charging, read 4 min ago". A live value gives no age. Null when the part
-    // has no value.
+    // A card column's tooltip, a sentence: "Left 70%, charging" for a live value, "Left 70%, read 4 minutes ago" for a last reading
+    // (no charging: it was charging then, and nothing says it is now). Null when the part has no value.
     public static string? ColumnTip(string label, ShownPart part, DateTimeOffset now)
     {
         if (part.Percent is not int percent)
@@ -383,14 +416,14 @@ internal static class WidgetCopy
         }
 
         string tip = label + " " + PercentText(percent);
-        if (part.Charging == true)
+        if (part.Fresh && part.Charging == true)
         {
             tip += ", charging";
         }
 
         if (!part.Fresh && part.ReadAt is DateTimeOffset at)
         {
-            tip += ", read " + StaleAgeAmount(now - at) + " ago";
+            tip += ", read " + AgeWords(now - at) + " ago";
         }
 
         return tip;

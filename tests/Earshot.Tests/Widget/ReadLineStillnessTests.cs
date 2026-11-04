@@ -66,7 +66,7 @@ public sealed class ReadLineStillnessTests
 
         string last35 = WidgetCopy.PartLine(Part(35), Now);
         Assert.AreEqual(last35, WidgetCopy.PartLine(Part(55), Now));
-        Assert.AreEqual("80% · under 1 min", last35);
+        Assert.AreEqual("80% · 1m", last35, "Never under a minute, and never a word for now.");
         Assert.AreEqual("Last read under 1 min ago", WidgetCopy.PartTip(Part(40), Now));
     }
 }

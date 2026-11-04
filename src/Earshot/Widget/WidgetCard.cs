@@ -60,6 +60,9 @@ internal sealed record WidgetCardModel(
     // The Send to row under the Connect button: on while the setting for it is on (SendToAccess.CardRow). The case-open card never
     // draws it, whatever this says.
     public bool ShowSendTo { get; init; }
+
+    // The Low battery alerts level: a live reading at or under it is drawn in caution.
+    public int LowBatteryThresholdPercent { get; init; } = WidgetSettings.DefaultLowBatteryThresholdPercent;
 }
 
 // The dedicated three-column card: Left, Right, Case battery (each greyed when its value is not fresh), where
@@ -1204,7 +1207,7 @@ internal sealed partial class WidgetCard : Form
         int side = Math.Min(column.Glyph.Width, column.Glyph.Height);
         var square = new Rectangle(column.Glyph.X + ((column.Glyph.Width - side) / 2), column.Glyph.Y, side, side);
         using GraphicsPath glyph = BudGlyphPath(square, mirror);
-        using (var brush = new SolidBrush(Colours.Text))
+        using (var brush = new SolidBrush(MarkInk(shown)))
         {
             g.FillPath(brush, glyph);
         }
@@ -1226,7 +1229,7 @@ internal sealed partial class WidgetCard : Form
         (GraphicsPath lid, GraphicsPath box) = CaseGlyphPaths(column.Glyph);
         using (lid)
         using (box)
-        using (var brush = new SolidBrush(Colours.Text))
+        using (var brush = new SolidBrush(MarkInk(shown)))
         {
             g.FillPath(brush, lid);
             g.FillPath(brush, box);
@@ -1237,30 +1240,33 @@ internal sealed partial class WidgetCard : Form
 
     // The ink a value is drawn in: primary while it is fresh, the tertiary token when it is a last reading
     // (the stale style, which replaced a 55% opacity of the primary ink).
-    internal Color ValueInk(ShownPart shown) => shown.Fresh ? Colours.Text : Colours.TextTertiary;
+    // Caution only on a live reading at or under the Low battery alerts level, never a fixed figure; a last reading is old, not low.
+    internal Color ValueInk(ShownPart shown) =>
+        !shown.Fresh ? Colours.TextTertiary
+        : shown.Percent <= _model.LowBatteryThresholdPercent ? Colours.Caution
+        : Colours.Text;
 
-    // A live value is drawn in the primary ink and the accent; a last reading in the tertiary token, its
-    // read-time line saying its age. The bar and the charging bolt are absent entirely
-    // when Percent is null: there is nothing to show a bar or a bolt for. The words "No reading" take the value's own place
-    // instead: never a number, never a dash standing in for a reading that was never taken. The read-time line is always
-    // reserved and empty while the value is fresh (no ticking seconds).
+    internal Color CautionInk => Colours.Caution;
+
+    internal Color DisabledInk => Colours.TextDisabled;
+
+    // The earbud or case mark: the primary ink for a part with a value, the disabled ink for a part with none.
+    internal Color MarkInk(ShownPart shown) => shown.HasValue ? Colours.Text : Colours.TextDisabled;
+
+    // A live value is drawn in the primary ink and the accent (caution when low); a last reading in the tertiary token with no
+    // bolt (it was charging then, and nothing says it is now), its read-time line saying its age in the fewest characters. A part
+    // with no value has its mark in the disabled ink and the bar's track only: no number, no words, no dash standing in for a
+    // reading that was never taken. The read-time line is always reserved and empty while the value is fresh (no ticking seconds).
     private void DrawBatteryPart(Graphics g, WidgetCardLayout.ColumnLayout column, ShownPart shown)
     {
         CardColours colours = Colours;
         if (shown.Percent is not { } percent)
         {
-            // Words, not a number: in the body size. Where the column is too narrow for them on one line they wrap to the two lines
-            // it has room for before the size gives way.
-            DrawText(g, column.Percent, WidgetCopy.Percent(null), colours.TextTertiary, TypeRole.Body, StringAlignment.Center, wrap: true);
+            DrawBarTrack(g, column);
             return;
         }
 
-        // A 1 px track centred on the bar's 3 px, and the fill the full 3.
-        int trackHeight = Math.Max(1, CardPlacement.Scale(1, _dpi));
-        using (var track = new SolidBrush(colours.Track))
-        {
-            g.FillRectangle(track, column.Bar.X, column.Bar.Y + ((column.Bar.Height - trackHeight) / 2), column.Bar.Width, trackHeight);
-        }
+        DrawBarTrack(g, column);
 
         int filled = (int)Math.Round(column.Bar.Width * Math.Clamp(percent, 0, 100) / 100.0);
         if (filled > 0)
@@ -1271,15 +1277,23 @@ internal sealed partial class WidgetCard : Form
 
         Color ink = ValueInk(shown);
         DrawText(g, column.Percent, WidgetCopy.PercentText(percent), ink, TypeRole.Number, StringAlignment.Center);
-        if (shown.Charging == true)
+        if (shown.Fresh && shown.Charging == true)
         {
             DrawBolt(g, column.BoltSlot, ink);
         }
 
         if (!shown.Fresh && shown.ReadAt is { } at)
         {
-            DrawReadTime(g, column.ReadTime, WidgetCopy.StaleAgeAmount(_model.Now - at), colours.TextTertiary);
+            DrawReadTime(g, column.ReadTime, WidgetCopy.ShortAge(_model.Now - at), colours.TextTertiary);
         }
+    }
+
+    // A 1 px track centred on the bar's 3 px.
+    private void DrawBarTrack(Graphics g, WidgetCardLayout.ColumnLayout column)
+    {
+        int trackHeight = Math.Max(1, CardPlacement.Scale(1, _dpi));
+        using var track = new SolidBrush(Colours.Track);
+        g.FillRectangle(track, column.Bar.X, column.Bar.Y + ((column.Bar.Height - trackHeight) / 2), column.Bar.Width, trackHeight);
     }
 
     // The clock (12, Read time E823) and the age, centred as one run, in the tertiary token.

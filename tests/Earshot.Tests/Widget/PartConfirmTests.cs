@@ -8,10 +8,10 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class PartConfirmTests
 {
-    private static readonly DateTimeOffset T0 = new(2026, 10, 2, 9, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Epoch = new(2026, 10, 2, 9, 0, 0, TimeSpan.Zero);
 
     private static PartReading Msg(int percent, double seconds, bool? charging = false, bool? inEar = null) =>
-        new(percent, charging, inEar) { ReadAt = T0 + TimeSpan.FromSeconds(seconds) };
+        new(percent, charging, inEar) { ReadAt = Epoch + TimeSpan.FromSeconds(seconds) };
 
     private static PartConfirmState Feed(PartConfirmState state, params PartReading[] messages)
     {
@@ -30,7 +30,7 @@ public sealed class PartConfirmTests
 
         Assert.AreEqual(ConfirmOutcome.First, step.Outcome);
         Assert.AreEqual(60, step.State.Held.Percent);
-        Assert.AreEqual(T0, step.State.Held.ReadAt);
+        Assert.AreEqual(Epoch, step.State.Held.ReadAt);
     }
 
     [TestMethod]
@@ -50,7 +50,7 @@ public sealed class PartConfirmTests
         PartConfirmState state = Feed(PartConfirmState.Empty, Msg(60, 0), Msg(60, 2), Msg(40, 4), Msg(60, 6), Msg(60, 8));
 
         Assert.AreEqual(60, state.Held.Percent, "The stray 40 was never held.");
-        Assert.AreEqual(T0 + TimeSpan.FromSeconds(8), state.Held.ReadAt);
+        Assert.AreEqual(Epoch + TimeSpan.FromSeconds(8), state.Held.ReadAt);
     }
 
     [TestMethod]
@@ -95,7 +95,7 @@ public sealed class PartConfirmTests
 
         Assert.AreEqual(ConfirmOutcome.Confirmed, second.Outcome);
         Assert.AreEqual(70, second.State.Held.Percent);
-        Assert.AreEqual(T0 + TimeSpan.FromSeconds(3), second.State.Held.ReadAt);
+        Assert.AreEqual(Epoch + TimeSpan.FromSeconds(3), second.State.Held.ReadAt);
     }
 
     [TestMethod]
@@ -149,7 +149,7 @@ public sealed class PartConfirmTests
         for (int s = 2; s <= 20; s += 2)
         {
             state = Feed(state, Msg(60, s));
-            Assert.AreEqual(T0 + TimeSpan.FromSeconds(s), state.Held.ReadAt);
+            Assert.AreEqual(Epoch + TimeSpan.FromSeconds(s), state.Held.ReadAt);
         }
     }
 

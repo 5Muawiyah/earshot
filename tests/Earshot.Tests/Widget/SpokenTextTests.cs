@@ -28,7 +28,7 @@ public sealed class SpokenTextTests
     [TestMethod]
     public void AnOldReadingSaysWhenItWasRead()
     {
-        Assert.AreEqual("Case 40%, last read 2 h ago", WidgetCopy.SpokenReading("Case", Last(40, TwoHours), Now));
+        Assert.AreEqual("Case 40%, last read 2 hours ago", WidgetCopy.SpokenReading("Case", Last(40, TwoHours), Now));
     }
 
     [TestMethod]
@@ -65,7 +65,7 @@ public sealed class SpokenTextTests
     {
         string value = GaugeSpeech.Value(Snapshot(AirPodsWhere.ThisPc, Bud(70, age: TwoHours), Bud(80, age: TwoHours)), Now, GaugeDisplaySettings.Default);
 
-        Assert.AreEqual("Left 70%, last read 2 h ago, Right 80%, last read 2 h ago", value);
+        Assert.AreEqual("Left 70%, last read 2 hours ago, Right 80%, last read 2 hours ago", value);
     }
 
     [TestMethod]
@@ -86,7 +86,7 @@ public sealed class SpokenTextTests
         string value = GaugeSpeech.Value(
             Snapshot(AirPodsWhere.NotInUse, box: Bud(80, age: TwoHours)), Now, GaugeDisplaySettings.Default);
 
-        Assert.AreEqual("Not on this PC. Case 80%, last read 2 h ago", value);
+        Assert.AreEqual("Not on this PC. Case 80%, last read 2 hours ago", value);
         Assert.AreEqual("Not on this PC", GaugeSpeech.Value(Snapshot(AirPodsWhere.NotInUse), Now, GaugeDisplaySettings.Default));
     }
 
