@@ -45,7 +45,13 @@ internal readonly record struct SelectionObservation(
     LinkMissReason? LinkMiss = null)
 {
     public bool IsChosenSet => Class == BroadcastClass.Chosen;
+
+    // With LinkMiss: what the burst that did not link looked like, for the log (numbers only, no address).
+    public LinkMissDetail? MissDetail { get; init; }
 }
+
+// How many case-known messages a burst held inside the link window, over how long, and the median signal level in dBm.
+internal readonly record struct LinkMissDetail(int Messages, TimeSpan Span, double MedianRssi);
 
 // Links the owner's AirPods to the broadcast, with no step from the owner beyond opening the case:
 //   - Candidates are messages of the paired AirPods' model (read from the paired device, never guessed) and, once a
@@ -102,6 +108,7 @@ internal sealed class BroadcastSelector
     private bool _burstActive;
     private DateTimeOffset _burstLastAt;
     private LinkMissReason _burstReason;
+    private LinkMissDetail _burstDetail;
     private byte? _colour;
     private DateTimeOffset _latest = DateTimeOffset.MinValue;
     private DateTimeOffset? _chosenLastAt;
@@ -221,11 +228,12 @@ internal sealed class BroadcastSelector
         }
 
         LinkMissReason? missed = FlushBurst(at);
+        LinkMissDetail detail = _burstDetail;
         bool dropped = Expire(_latest);
         SelectionObservation seen = Judge(message, tag, rssi, at);
         if (missed is not null)
         {
-            seen = seen with { LinkMiss = missed };
+            seen = seen with { LinkMiss = missed, MissDetail = detail };
         }
 
         return dropped ? seen with { Dropped = true } : seen;
@@ -412,6 +420,7 @@ internal sealed class BroadcastSelector
 
         _burstActive = true;
         _burstLastAt = at;
+        _burstDetail = new LinkMissDetail(rssi.Count, rssi.Count == 0 ? TimeSpan.Zero : last - first, rssi.Count == 0 ? 0 : Median(rssi));
         _burstReason = rssi.Count < BroadcastRules.LinkMessages
             ? LinkMissReason.TooFew
             : last - first < BroadcastRules.LinkSpan ? LinkMissReason.TooShort : LinkMissReason.TooWeak;

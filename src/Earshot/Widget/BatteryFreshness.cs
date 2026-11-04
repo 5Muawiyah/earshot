@@ -23,7 +23,8 @@ internal readonly record struct ShownPart(int? Percent, bool? Charging, ReadingK
 // The figure the gauge draws: the number, where it came from and, for the broadcast, the buds it was taken from.
 // ReadAt is the oldest read among the buds it is drawn from. Kind is the kind of the bud the number is (the lower one).
 internal sealed record GaugeFigure(
-    int Percent, BatterySource Source, int? Left, int? Right, bool Charging, DateTimeOffset ReadAt, ReadingKind Kind = ReadingKind.Live);
+    int Percent, BatterySource Source, int? Left, int? Right, bool Charging, DateTimeOffset ReadAt, ReadingKind Kind = ReadingKind.Live,
+    ChargeComponent? From = null);
 
 // What is kept of the owner's pair beyond this run's own readings: the saved last readings and the paired model they are
 // shown for.
@@ -200,13 +201,14 @@ internal static class BatteryFreshness
         left = Held(left, newest);
         right = Held(right, newest);
 
-        ShownPart lower = !right.HasValue ? left
-            : !left.HasValue ? right
-            : left.Percent < right.Percent ? left
-            : right.Percent < left.Percent ? right
-            : Rank(left.Kind) < Rank(right.Kind) ? left
-            : Rank(right.Kind) < Rank(left.Kind) ? right
-            : left.ReadAt >= right.ReadAt ? left : right;
+        bool fromLeft = !right.HasValue ? true
+            : !left.HasValue ? false
+            : left.Percent < right.Percent ? true
+            : right.Percent < left.Percent ? false
+            : Rank(left.Kind) < Rank(right.Kind) ? true
+            : Rank(right.Kind) < Rank(left.Kind) ? false
+            : left.ReadAt >= right.ReadAt;
+        ShownPart lower = fromLeft ? left : right;
 
         DateTimeOffset oldest = DateTimeOffset.MaxValue;
         foreach (ShownPart bud in new[] { left, right })
@@ -218,7 +220,7 @@ internal static class BatteryFreshness
         }
 
         bool charging = left.Charging == true || right.Charging == true;
-        return new GaugeFigure(Math.Clamp(lower.Percent!.Value, 0, 100), BatterySource.Broadcast, left.Percent, right.Percent, charging, oldest, lower.Kind);
+        return new GaugeFigure(Math.Clamp(lower.Percent!.Value, 0, 100), BatterySource.Broadcast, left.Percent, right.Percent, charging, oldest, lower.Kind, fromLeft ? ChargeComponent.Left : ChargeComponent.Right);
     }
 
     private static DateTimeOffset NewestBudRead(ShownPart left, ShownPart right)

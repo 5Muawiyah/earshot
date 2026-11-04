@@ -55,6 +55,10 @@ public sealed record WidgetCounters(
 
     public long LinkMissTooWeak { get; init; }
 
+    // Messages of the paired model and held colour with the case level unknown that were not linked: a pair worn nearby, or the
+    // owner's own pair in use. With Chosen it measures how many worn messages never reach the display.
+    public long WornUnlinked { get; init; }
+
     public long RefindRefused => RefindAmbiguous + RefindWeak + RefindInconsistent + RefindExpired;
 
     public long LinkMiss => LinkMissTooFew + LinkMissTooShort + LinkMissTooWeak;

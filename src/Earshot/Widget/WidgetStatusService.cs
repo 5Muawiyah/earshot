@@ -1,3 +1,4 @@
+using System.Globalization;
 using Earshot.App;
 using Earshot.Contracts;
 
@@ -105,6 +106,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private long _budOrderDisagree, _switches, _links, _followed, _drops;
     private long _refound, _refindAmbiguous, _refindWeak, _refindInconsistent, _refindExpired;
     private long _linkMissTooFew, _linkMissTooShort, _linkMissTooWeak;
+    private long _wornUnlinked;
+    private (int Percent, ChargeComponent? From, ReadingKind Kind, BatterySource Source)? _gaugeLogged;
     private int _setsInRange;
 
     // One line per run, not per message: a form that drifted, and two senders of the chosen set disagreeing on
@@ -1308,6 +1311,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                     Interlocked.Increment(ref _colourMismatch);
                     break;
                 case BroadcastClass.NotLinked:
+                    if (!BroadcastSenderSets.CaseKnown(message))
+                    {
+                        Interlocked.Increment(ref _wornUnlinked);
+                    }
+
                     break;
                 case BroadcastClass.OtherSet:
                     Interlocked.Increment(ref _otherSet);
@@ -1401,6 +1409,15 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             case LinkMissReason.TooWeak:
                 _linkMissTooWeak++;
                 break;
+        }
+
+        if (seen.LinkMiss is { } reason && seen.MissDetail is { } burst)
+        {
+            string why = reason switch { LinkMissReason.TooFew => "too few", LinkMissReason.TooShort => "too short", _ => "too weak" };
+            _log.Info(
+                "Widget: a case-known burst did not link (" + why + "): " + burst.Messages.ToString(CultureInfo.InvariantCulture) + " messages in " +
+                ((long)burst.Span.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms, median " +
+                Math.Round(burst.MedianRssi).ToString(CultureInfo.InvariantCulture) + " dBm.");
         }
     }
 
@@ -1684,6 +1701,9 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         PartConfirmStep left = PartConfirm.Step(_leftConfirm, reading.Left);
         PartConfirmStep right = PartConfirm.Step(_rightConfirm, reading.Right);
         PartConfirmStep box = PartConfirm.Step(_caseConfirm, reading.Case);
+        LogPartLocked("left", _leftConfirm.Held, left);
+        LogPartLocked("right", _rightConfirm.Held, right);
+        LogPartLocked("case", _caseConfirm.Held, box);
         _leftConfirm = left.State;
         _rightConfirm = right.State;
         _caseConfirm = box.State;
@@ -1723,6 +1743,39 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         }
 
         return confirmed;
+    }
+
+    // The log line for a part whose shown value changed (a first value or a confirmed new one), and a warning when a confirmed
+    // value moved more than one step of the broadcast (10 points) within a minute, which two readings that close do not do; the
+    // reading is shown all the same. Numbers only, no address. Must be called holding _gate, before the new state is stored.
+    private void LogPartLocked(string part, PartReading before, PartConfirmStep step)
+    {
+        if (step.Outcome is not (ConfirmOutcome.First or ConfirmOutcome.Confirmed) || step.State.Held is not { Percent: int now, ReadAt: DateTimeOffset readAt })
+        {
+            return;
+        }
+
+        if (before.Percent is int was && was == now)
+        {
+            return;
+        }
+
+        long ago = Math.Max(0, (long)(_timeProvider.GetUtcNow() - readAt).TotalMilliseconds);
+        _log.Info(
+            "Battery: " + part + " " + (before.Percent is int old ? old.ToString(CultureInfo.InvariantCulture) : "none") + " to " +
+            now.ToString(CultureInfo.InvariantCulture) + ", live, read " + ago.ToString(CultureInfo.InvariantCulture) + " ms ago.");
+
+        if (before is { Percent: int from, ReadAt: DateTimeOffset beforeAt })
+        {
+            TimeSpan between = readAt - beforeAt;
+            int points = Math.Abs(now - from);
+            if (points > 10 && between < TimeSpan.FromMinutes(1))
+            {
+                _log.Warn(
+                    "Battery: " + part + " moved " + points.ToString(CultureInfo.InvariantCulture) + " points in " +
+                    ((long)between.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms, more than one step inside a minute.");
+            }
+        }
     }
 
     // The held reading when this message set or repeated it (its read time is the message's own), otherwise nothing.
@@ -1963,6 +2016,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
             now = _timeProvider.GetUtcNow();
             snapshot = BuildSnapshotLocked(now);
+            LogGaugeLocked(snapshot, now);
             changed = SnapshotChangedIgnoringCounters(_lastPublished, snapshot);
             _lastPublished = snapshot;
             caseClosed = TakeCaseClosedLocked();
@@ -1977,6 +2031,29 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         {
             _uiPost(() => CaseClosed?.Invoke(this, new CaseClosedEventArgs(now)));
         }
+    }
+
+    // One line each time the number the gauge draws, the bud it is taken from or its kind changes, so a day's log shows what the
+    // gauge drew. Must be called holding _gate.
+    private void LogGaugeLocked(WidgetSnapshot snapshot, DateTimeOffset now)
+    {
+        if (BatteryFreshness.Shown(snapshot, now).Gauge is not { } figure)
+        {
+            _gaugeLogged = null;
+            return;
+        }
+
+        var key = (figure.Percent, figure.From, figure.Kind, figure.Source);
+        if (_gaugeLogged == key)
+        {
+            return;
+        }
+
+        _gaugeLogged = key;
+        string from = figure.Source == BatterySource.Windows ? "Windows" : figure.From == ChargeComponent.Left ? "left" : "right";
+        _log.Info(
+            "Battery: gauge " + figure.Percent.ToString(CultureInfo.InvariantCulture) + " from " + from + ", " +
+            (figure.Kind == ReadingKind.Live ? "live" : "last") + ".");
     }
 
     // Counters tick on almost every advertisement (a section counted, a chosen reading, ...), so comparing
@@ -2137,6 +2214,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             LinkMissTooFew = Interlocked.Read(ref _linkMissTooFew),
             LinkMissTooShort = Interlocked.Read(ref _linkMissTooShort),
             LinkMissTooWeak = Interlocked.Read(ref _linkMissTooWeak),
+            WornUnlinked = Interlocked.Read(ref _wornUnlinked),
         };
     }
 
@@ -2199,6 +2277,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         a.LinkMissTooFew == b.LinkMissTooFew &&
         a.LinkMissTooShort == b.LinkMissTooShort &&
         a.LinkMissTooWeak == b.LinkMissTooWeak &&
+        a.WornUnlinked == b.WornUnlinked &&
         a.Sets == b.Sets &&
         a.UnknownForms.SequenceEqual(b.UnknownForms);
 
@@ -2222,6 +2301,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             " colourMismatch=" + c.ColourMismatch +
             " otherSet=" + c.OtherSet +
             " chosen=" + c.Chosen +
+            " wornUnlinked=" + c.WornUnlinked +
             " noPairedModel=" + c.NoPairedModel +
             " budOrderDisagree=" + c.BudOrderDisagree +
             " switches=" + c.Switches +
