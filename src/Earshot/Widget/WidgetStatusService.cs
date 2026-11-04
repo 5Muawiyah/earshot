@@ -95,7 +95,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     private ITimer? _linkTimer;
     private bool _linkCheckArmed;
 
-    // Due when the linked pair's case counts as closed if no case-known message comes first (CaseOpenTracker.CloseDueAt).
+    // Due when the linked pair's case counts as closed if no case-known message comes first, or a burst under way lapses
+    // without opening (CaseOpenTracker.NextDueAt).
     private ITimer? _caseCloseTimer;
     private WidgetCounters? _lastLoggedCounters;
     private WidgetWatcherState? _lastLoggedWatcherState;
@@ -257,8 +258,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     public event EventHandler? Changed;
 
-    // Raised when the linked pair's case opens (CaseOpenTracker: its case-known messages starting after silence, a link
-    // made by a case open, or its lid open counter changing while it stays open), and once more for every further open.
+    // Raised when the linked pair's case opens (CaseOpenTracker: the message that makes a link, or a burst of its case-known
+    // messages while closed), and once more for every further open after a close.
     public event EventHandler<CaseOpenedEventArgs>? CaseOpened;
 
     // Raised once after a CaseOpened when the linked pair's case-known messages have stopped for CaseOpenTracker.CloseAfter,
@@ -1331,7 +1332,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                 DecodedReading reading = ProximityDecoder.Decode(message, _table, at);
                 CheckBudOrderLocked(reading, tag, at);
                 DecodedReading confirmed = ApplyDecodedReadingLocked(reading, _table, at);
-                caseOpenedEdge = ObserveCaseLocked(tag, message, reading, at);
+                caseOpenedEdge = ObserveCaseLocked(tag, message, rssi, seen.NewChoice, at);
                 toSave = RecordLastReadingLocked(confirmed, message.Model, at);
                 applied = reading;
                 confirmedReading = confirmed;
@@ -1619,22 +1620,33 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
 
     // Must be called holding _gate. Feeds the case-open tracker one message of the linked set, keeps the close timer due
     // at the tracker's close time, and returns true when this message is an open, for CaseOpened.
-    private bool ObserveCaseLocked(uint tag, ProximityMessage message, DecodedReading reading, DateTimeOffset at)
+    private bool ObserveCaseLocked(uint tag, ProximityMessage message, sbyte rssi, bool linkMade, DateTimeOffset at)
     {
-        CaseOpenStep step = _caseOpen.Observe(tag, BroadcastSenderSets.CaseKnown(message), reading.LidCounter, at);
+        CaseOpenStep step = _caseOpen.Observe(tag, BroadcastSenderSets.CaseKnown(message), message.Lid, rssi, at, linkMade);
         if (step == CaseOpenStep.Opened)
         {
             _caseOpenRaised = true;
         }
 
+        LogCaseLinesLocked();
         ScheduleCaseCloseLocked();
         return step == CaseOpenStep.Opened;
+    }
+
+    // Must be called holding _gate. Writes the lines the case-open tracker has kept since the last call: one per open, per
+    // burst that did not open and per close, never one per message and never an address.
+    private void LogCaseLinesLocked()
+    {
+        foreach (string line in _caseOpen.TakeLines())
+        {
+            _log.Info(line);
+        }
     }
 
     // Must be called holding _gate. Silence brings no message, so a timer due at the tracker's close time notices it.
     private void ScheduleCaseCloseLocked()
     {
-        if (_closed || _caseOpen.CloseDueAt is not { } due)
+        if (_closed || _caseOpen.NextDueAt is not { } due)
         {
             return;
         }
@@ -1663,9 +1675,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
                     return;
                 }
 
-                if (!_caseOpen.Expire(_timeProvider.GetUtcNow()))
+                bool closed = _caseOpen.Expire(_timeProvider.GetUtcNow());
+                LogCaseLinesLocked();
+                if (!closed)
                 {
-                    // A message came after the timer was set and moved the close time on.
+                    // A burst lapsed without an open (its line is written), or a message came after the timer was set and
+                    // moved the due time on.
                     ScheduleCaseCloseLocked();
                     return;
                 }

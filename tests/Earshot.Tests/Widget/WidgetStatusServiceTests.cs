@@ -1038,8 +1038,11 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(_clock.GetUtcNow(), _caseOpenedEvents[0].At);
     }
 
+    // Was: "the linked pair's case-known messages starting after silence are an open" (one message after the close opened it
+    // again). Overturned by the seven second shows in scratch\one-card\evidence.md: that message is the lone pair a minute after
+    // a close. One case-known message after the close opens nothing; a burst does (CaseOpenReplayTests, CaseOpenLogTests).
     [TestMethod]
-    public void TheLinkedPairsCaseKnownMessagesStartingAfterSilenceAreAnOpen()
+    public void OneCaseKnownMessageAfterTheCloseIsNotAnOpen()
     {
         using WidgetStatusService service = NewService();
         service.Start();
@@ -1049,7 +1052,7 @@ public sealed class WidgetStatusServiceTests : IDisposable
 
         _source.Raise(Owned(batteryB: 0x05));
 
-        Assert.AreEqual(2, _caseOpenedEvents.Count, "The case opened again.");
+        Assert.AreEqual(1, _caseOpenedEvents.Count, "One message is not the case opening.");
     }
 
     // A closed case sends nothing, so nothing can open from it, however long it stays shut.
@@ -1101,10 +1104,12 @@ public sealed class WidgetStatusServiceTests : IDisposable
         Assert.AreEqual(1, _caseClosedEvents.Count, "And the case counts as closed once its case-known messages stopped.");
     }
 
-    // The lid shut and opened again inside the close time: the case-known messages never stopped, but the lid open counter
-    // moved. The pair's other bud carries the change a moment later; that is the same open, not a second.
+    // Was: "the lid counter changing while the case stays open is a new open" (a move of the lid byte raised CaseOpened again,
+    // and the other bud's copy of the change was held back as the same open). Overturned by the 30 September capture, where both
+    // senders moved the byte through four values inside one unbroken run: it is logged, never read. CaseOpenReplayTests holds
+    // the capture's own run.
     [TestMethod]
-    public void TheLidCounterChangingWhileTheCaseStaysOpenIsANewOpen()
+    public void TheLidByteChangingWhileTheCaseStaysOpenIsNotAnOpen()
     {
         using WidgetStatusService service = NewService();
         service.Start();
@@ -1117,14 +1122,13 @@ public sealed class WidgetStatusServiceTests : IDisposable
             Tick(0.125);
         }
 
-        Assert.AreEqual(1, _caseOpenedEvents.Count, "The same counter is the same open.");
+        Assert.AreEqual(1, _caseOpenedEvents.Count);
 
         _source.Raise(Owned(batteryB: 0x05, lid: 0x04, tag: 1));
-        Assert.AreEqual(2, _caseOpenedEvents.Count, "A moved counter is a new open.");
-
         Tick(0.25);
         _source.Raise(Owned(batteryB: 0x05, lid: 0x04, tag: 2));
-        Assert.AreEqual(2, _caseOpenedEvents.Count, "The other bud's copy of the change is the same open.");
+
+        Assert.AreEqual(1, _caseOpenedEvents.Count, "A moved lid byte, from either bud, is not a new open.");
         Assert.AreEqual(0, _caseClosedEvents.Count, "The case never closed in between.");
     }
 
