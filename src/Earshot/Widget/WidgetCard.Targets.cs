@@ -42,7 +42,7 @@ internal sealed partial class WidgetCard
     {
         if (_notice)
         {
-            return NoticeControls();
+            return IsCompactShown ? CompactControls() : NoticeControls();
         }
 
         if (OnSettingsPage)
@@ -368,6 +368,12 @@ internal sealed partial class WidgetCard
     {
         base.OnMouseMove(e);
         ArgumentNullException.ThrowIfNull(e);
+        if (IsCompactShown)
+        {
+            CompactMouseMove(e);
+            return;
+        }
+
         if (_notice)
         {
             return;
@@ -408,6 +414,7 @@ internal sealed partial class WidgetCard
     {
         base.OnMouseLeave(e);
         HideTip();
+        NotePointer(false);
         TrackHot(null, pressed: false);
         if (!_scrollDragging)
         {

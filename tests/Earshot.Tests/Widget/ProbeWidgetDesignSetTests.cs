@@ -18,6 +18,10 @@ public sealed class ProbeWidgetDesignSetTests
         "card-fresh-text-150", "card-greyed-text-150", "card-bluetooth-off", "card-case-open",
         "settings", "settings-text-150", "settings-more-open", "settings-order-open", "settings-case-open-card-open",
         "history", "update-up-to-date", "update-available", "update-downloading",
+        "compact-moved-to", "compact-moved-to-unnamed", "compact-take-back-progress", "compact-take-back-done",
+        "compact-low-battery", "compact-fully-charged",
+        "compact-moved-to-text-150", "compact-moved-to-unnamed-text-150", "compact-take-back-progress-text-150", "compact-take-back-done-text-150",
+        "compact-low-battery-text-150", "compact-fully-charged-text-150",
     ];
 
     private static readonly string[] Themes = ["light", "dark", "high-contrast"];
@@ -96,6 +100,50 @@ public sealed class ProbeWidgetDesignSetTests
         Assert.AreNotEqual(main, update);
         Size large = SizeOf(Path.Combine(temp.Path, "card-fresh-text-150-light-100pct.png"));
         Assert.IsGreaterThan(main.Height, large.Height, "Larger Windows text makes the card taller.");
+    }
+
+    // The compact card is one row: 360 x 56 at 100% text and 360 x 66 at 150% (the row is 20t + 12, with 12 above and below), and the
+    // same at 150% display scale.
+    [TestMethod]
+    public void TheCompactPicturesAreOneRowHighAtEveryScaleAndTextSize()
+    {
+        using var temp = new TempFolder();
+
+        RenderUnderSafeMode(temp.Path);
+
+        foreach (string name in new[] { "compact-moved-to", "compact-moved-to-unnamed", "compact-take-back-progress", "compact-take-back-done", "compact-low-battery", "compact-fully-charged" })
+        {
+            foreach (string theme in Themes)
+            {
+                AssertSize(Path.Combine(temp.Path, name + "-" + theme + "-100pct.png"), 360, 56);
+                AssertSize(Path.Combine(temp.Path, name + "-" + theme + "-150pct.png"), 540, 84);
+                if (name == "compact-moved-to-unnamed")
+                {
+                    // "Moved to another device" does not fit one line at 150% text: the design wraps it to two (20t more).
+                    AssertSize(Path.Combine(temp.Path, name + "-text-150-" + theme + "-100pct.png"), 360, 96);
+                    continue;
+                }
+
+                AssertSize(Path.Combine(temp.Path, name + "-text-150-" + theme + "-100pct.png"), 360, 66);
+                AssertSize(Path.Combine(temp.Path, name + "-text-150-" + theme + "-150pct.png"), 540, 99);
+            }
+        }
+    }
+
+    [TestMethod]
+    public void TheMovedToPicturesSayWhatTheyShowInDifferentPixels()
+    {
+        using var temp = new TempFolder();
+
+        RenderUnderSafeMode(temp.Path);
+
+        byte[] named = File.ReadAllBytes(Path.Combine(temp.Path, "compact-moved-to-light-100pct.png"));
+        byte[] unnamed = File.ReadAllBytes(Path.Combine(temp.Path, "compact-moved-to-unnamed-light-100pct.png"));
+        byte[] running = File.ReadAllBytes(Path.Combine(temp.Path, "compact-take-back-progress-light-100pct.png"));
+        byte[] done = File.ReadAllBytes(Path.Combine(temp.Path, "compact-take-back-done-light-100pct.png"));
+        Assert.IsFalse(named.AsSpan().SequenceEqual(unnamed), "Another device is another glyph and other words.");
+        Assert.IsFalse(named.AsSpan().SequenceEqual(running), "A ring is not the button's glyph.");
+        Assert.IsFalse(running.AsSpan().SequenceEqual(done), "A tick is not a ring.");
     }
 
     [TestMethod]

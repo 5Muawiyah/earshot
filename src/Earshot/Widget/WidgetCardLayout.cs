@@ -216,7 +216,8 @@ internal static class WidgetCardLayout
 
     // The compact card is one row: 12 padding above and below, the row (20t + 12, as every row), 16 at the sides; a glyph 16t,
     // a gap of 12, the text in Body, and the action at the right end. A text that wraps adds 20t a line (at most three lines
-    // in all) with the bottom edge where it was, and a text action stands right-aligned on the last line. Height at 100%
+    // in all) with the bottom edge where it was; the glyph and an icon button stay in the middle of the height, and a text action stands
+    // right-aligned on the last line. Height at 100%
     // text: 56 for one line, 76 for two, 96 for three; at 150% text: 66, 96, 126.
     public const int CompactSideAt96 = 16;
     public const int CompactGlyphAt96 = 16;
@@ -264,8 +265,11 @@ internal static class WidgetCardLayout
         int row = RowHeight(dpi, textScale);
         int height = pad + row + ((n - 1) * line) + pad;
 
+        // The glyph and an icon button stand in the middle of the card's height, as the design draws them beside wrapped words; a text
+        // button stands on the last line.
         int glyphBox = Follow(CompactGlyphAt96, dpi, textScale);
-        Rectangle glyph = hasGlyph ? new Rectangle(side, pad + ((row - glyphBox) / 2), glyphBox, glyphBox) : Rectangle.Empty;
+        int inner = height - (2 * pad);
+        Rectangle glyph = hasGlyph ? new Rectangle(side, pad + ((inner - glyphBox) / 2), glyphBox, glyphBox) : Rectangle.Empty;
 
         int buttonWidth = CompactButtonWidth(dpi, textScale, button, textActionWidth);
         int lastRowTop = pad + ((n - 1) * line);
@@ -273,7 +277,7 @@ internal static class WidgetCardLayout
         if (button == CompactButton.Icon)
         {
             int size = IconButtonSize(dpi, textScale);
-            action = new Rectangle(width - side - size, lastRowTop + ((row - size) / 2), size, size);
+            action = new Rectangle(width - side - size, pad + ((inner - size) / 2), size, size);
         }
         else if (button == CompactButton.Text)
         {

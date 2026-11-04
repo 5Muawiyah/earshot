@@ -89,12 +89,13 @@ public sealed class CompactLayoutTests
     }
 
     [TestMethod]
-    public void AnIconButtonOnTheLastLineStandsAtTheEndOfAWrappedText()
+    public void TheGlyphAndAnIconButtonStayInTheMiddleOfAWrappedCard()
     {
         WidgetCardLayout.CompactLayout layout = WidgetCardLayout.ForCompact(96, 1.0, 3, true, WidgetCardLayout.CompactButton.Icon);
 
-        Assert.AreEqual(layout.Height - 12, layout.Action.Bottom, "The button's row is the last one");
-        Assert.AreEqual(12 + 40, layout.Action.Y);
+        Assert.AreEqual(96, layout.Height);
+        Assert.AreEqual(12 + ((72 - 32) / 2), layout.Action.Y, "A 32 button in the 72 between the paddings");
+        Assert.AreEqual(12 + ((72 - 16) / 2), layout.Glyph.Y, "A 16 glyph the same");
     }
 
     [TestMethod]

@@ -42,6 +42,7 @@ internal static class FluentGlyphs
     public const char TvMonitor = '\uE7F4';
     public const char Sort = '\uE8CB';
     public const char CellPhone = '\uE8EA';
+    public const char Devices = '\uE772';
     public const char Earbud = '\uF4C0';
     public const char Headphone = '\uE7F6';
     public const char Pause = '\uE769';

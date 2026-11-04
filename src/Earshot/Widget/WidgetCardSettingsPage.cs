@@ -765,6 +765,7 @@ internal sealed partial class WidgetCard
 
         // A window that was hidden or shown may not hold the pixels last copied to it.
         ForgetShownFrame();
+        NoteCompactVisibility();
         if (!Visible)
         {
             HideTip();

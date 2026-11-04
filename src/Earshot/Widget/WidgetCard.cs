@@ -25,7 +25,9 @@ internal readonly record struct SetupTarget(SetupTargetKind Kind, int Index);
 // is its only way to notice "the owner clicked past it".
 //
 // CloseButton is notice mode only too: the close button that stands where the gear is on the gauge's card.
-internal enum WidgetCardCloseReason { Deactivated, Escape, Action, ClickOutside, CloseButton }
+//
+// HoldEnded is a compact row whose hold ran out: the card folds away.
+internal enum WidgetCardCloseReason { Deactivated, Escape, Action, ClickOutside, CloseButton, HoldEnded }
 
 // Everything the card draws, handed in by WidgetCardPresenter on every show and every refresh. Immutable,
 // so a paint never races a concurrent update.
@@ -63,6 +65,14 @@ internal sealed record WidgetCardModel(
 
     // The Low battery alerts level: a live reading at or under it is drawn in caution.
     public int LowBatteryThresholdPercent { get; init; } = WidgetSettings.DefaultLowBatteryThresholdPercent;
+
+    // The form the card is drawn in. Compact is one row (CompactContent) and only an unasked card ever shows it.
+    public CardForm Form { get; init; } = CardForm.Full;
+
+    public CompactContent? Compact { get; init; }
+
+    // How far the compact row's button has got: its glyph, a ring while the work runs, a tick when it is done.
+    public CompactActionState CompactState { get; init; } = CompactActionState.Idle;
 }
 
 // The dedicated three-column card: Left, Right, Case battery (each greyed when its value is not fresh), where
@@ -140,6 +150,7 @@ internal sealed partial class WidgetCard : Form
         // tray icon or any other Earshot window. GaugeWindow already sets its own explicit name for the
         // same reason; this card gets one that also tells the ordinary card and the case-open notice apart.
         AccessibleName = TrayStatus.AppName + ": " + (notice ? WidgetCopy.CaseOpen : "AirPods");
+        _baseAccessibleName = AccessibleName;
         AccessibleRole = AccessibleRole.Window;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
@@ -266,6 +277,10 @@ internal sealed partial class WidgetCard : Form
             StopMotion();
             DisposeTips();
             DisposeFrames();
+            StopHold();
+            _holdTimer?.Dispose();
+            _fadeOld?.Dispose();
+            _fadeOld = null;
         }
 
         base.Dispose(disposing);
@@ -312,8 +327,17 @@ internal sealed partial class WidgetCard : Form
     public void Render(WidgetCardModel model, int dpi)
     {
         WidgetCardView before = _shownView;
+        FormChange formChange = BeginFormChange(model);
+
+        // A row on show that says something else starts its hold again, with or without a crossfade.
+        bool restartHold = Visible && IsCompactShown && WantsCompact(model) && !SameWords(_model.Compact, model.Compact);
         RenderView(model, dpi);
         NotePageChange(before, _shownView);
+        EndFormChange(formChange);
+        if (restartHold)
+        {
+            StartHold();
+        }
     }
 
     private void RenderView(WidgetCardModel model, int dpi)
@@ -322,6 +346,23 @@ internal sealed partial class WidgetCard : Form
         _model = model;
         _dpi = dpi > 0 ? dpi : CardPlacement.BaseDpi;
         ReadLook();
+
+        if (WantsCompact(model) && model.Compact is { } compact)
+        {
+            RenderCompact(model, compact);
+            return;
+        }
+
+        if (_shownForm == CardForm.Compact)
+        {
+            // Back to the full card: no hold, no ring, and the window's own name again.
+            _shownForm = CardForm.Full;
+            StopHold();
+            StopSpin();
+            _actionShown = CompactActionState.Idle;
+            _actionFadeP = 1;
+            AccessibleName = _baseAccessibleName;
+        }
 
         if (EffectiveView == WidgetCardView.Settings && model.Settings is { } settingsValues)
         {
@@ -646,6 +687,12 @@ internal sealed partial class WidgetCard : Form
             TrackHot(e.Location, pressed: true);
         }
 
+        if (IsCompactShown)
+        {
+            CompactMouseDown(e);
+            return;
+        }
+
         if (OnSettingsPage)
         {
             SettingsMouseDown(e);
@@ -679,6 +726,12 @@ internal sealed partial class WidgetCard : Form
         }
 
         TrackHot(e.Location, pressed: false);
+        if (IsCompactShown)
+        {
+            CompactMouseUp(e);
+            return;
+        }
+
         if (OnSettingsPage)
         {
             SettingsMouseUp(e);
@@ -799,13 +852,19 @@ internal sealed partial class WidgetCard : Form
         // (transparency effects off, or high contrast, where it is the window colour).
         g.Clear(OverrideBackgroundForCaptureOnly ?? (PaintsOpaqueBackground ? Colours.Tokens.SolidSurface : Colours.Tokens.AcrylicTint));
         DrawSurfaceStroke(g);
-        RenderPageMoving(g, RenderPage);
+        RenderPageMoving(g, RenderPageFaded);
     }
 
     // What is inside the surface: the page on show, with any hover fill under its icons.
     private void RenderPage(Graphics g)
     {
         DrawFills(g);
+        if (IsCompactShown)
+        {
+            DrawCompact(g);
+            return;
+        }
+
         if (OnSettingsPage && _model.Settings is { } settingsValues && _settingsLayout is { } settingsLayout)
         {
             DrawSettings(g, settingsValues, settingsLayout);

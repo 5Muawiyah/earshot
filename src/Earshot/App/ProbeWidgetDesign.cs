@@ -150,6 +150,13 @@ internal static partial class Program
             ("update-downloading", DesignUpdateModel(now, UpdateStage.Downloading, 40), 1.0, false, false, false, false),
         };
 
+        // The compact card (a notice-mode card, one row), at 100% and 150% text.
+        foreach ((string name, WidgetCardModel model) in ProbeWidgetCompactModels(now))
+        {
+            cardPictures.Add((name, model, 1.0, true, false, false, false));
+            cardPictures.Add((name + "-text-150", model, ProbeWidgetDesignLargeText, true, false, false, false));
+        }
+
         foreach ((string name, WidgetCardModel model, double textScale, bool notice, bool more, bool order, bool caseCard) in cardPictures)
         {
             foreach ((string theme, Color ink, bool highContrast) in ProbeWidgetDesignThemes)
@@ -163,6 +170,30 @@ internal static partial class Program
         }
 
         return files;
+    }
+
+    // The compact card's states, from made-up readings: moved to with the other device named and unnamed, the take back button turning
+    // and done, and the low battery and fully charged fallbacks.
+    internal static IReadOnlyList<(string Name, WidgetCardModel Model)> ProbeWidgetCompactModels(DateTimeOffset now)
+    {
+        WidgetSnapshot snapshot = ProbeWidgetDesignGaugeStates(now)[0].Snapshot;
+        WidgetCardModel Compact(CompactContent content, CompactActionState state = CompactActionState.Idle) =>
+            new WidgetCardModel(snapshot, AutoPauseOn: false, ShowSwitch: false, ConnectIntent: true, ButtonEnabled: true, OtherDeviceLabel: "iPhone", Now: now)
+            {
+                Form = CardForm.Compact,
+                Compact = content,
+                CompactState = state,
+            };
+
+        return
+        [
+            ("compact-moved-to", Compact(CompactContents.MovedTo("iPhone"))),
+            ("compact-moved-to-unnamed", Compact(CompactContents.MovedTo(string.Empty))),
+            ("compact-take-back-progress", Compact(CompactContents.MovedTo("iPhone"), CompactActionState.Progress)),
+            ("compact-take-back-done", Compact(CompactContents.MovedTo("iPhone"), CompactActionState.Done)),
+            ("compact-low-battery", Compact(CompactContents.LowBattery(WidgetCopy.LeftWord, 20))),
+            ("compact-fully-charged", Compact(CompactContents.FullyCharged())),
+        ];
     }
 
     // The settings page as it stands with the gauge showing a charging reading, so the order pictures are all the

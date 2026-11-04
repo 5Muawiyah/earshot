@@ -260,6 +260,24 @@ internal static class WidgetCopy
 
     private static string FullyChargedText(string partLabel) => partLabel + " at 100%, fully charged";
 
+    // The compact card (design round 5). Moved to names the other device by the owner's label; with none it says "another device".
+    public const string TakeBack = "Take back";
+
+    public const string TakingBack = "Taking back";
+
+    public const string MovedToAnotherDevice = "Moved to another device";
+
+    public const string FullyChargedCompact = "Fully charged";
+
+    public const string LeftAndRightWord = "Left and Right";
+
+    public static string MovedTo(string otherDeviceLabel) =>
+        string.IsNullOrWhiteSpace(otherDeviceLabel) ? MovedToAnotherDevice : "Moved to " + otherDeviceLabel.Trim();
+
+    // "Left 20%", "Right 20%", "Case 10%", "Left and Right 20%" (the lower of the two).
+    public static string LowBatteryCompact(string partsLabel, int percent) =>
+        partsLabel + " " + percent.ToString(CultureInfo.InvariantCulture) + "%";
+
     private static string LowBatteryText(string partLabel, int percent) =>
         partLabel + " at " + percent.ToString(CultureInfo.InvariantCulture) + "%";
 

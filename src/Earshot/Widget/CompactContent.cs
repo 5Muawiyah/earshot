@@ -24,8 +24,9 @@ internal enum UnaskedKind
 }
 
 // The button a compact row can carry: an icon button (a glyph, 32 x 32 at 100% text, named and given a tooltip by Label) when
-// Glyph is set, else a text button showing Label, right-aligned on the last line.
-internal sealed record CompactAction(string Label, char Glyph = '\0')
+// Glyph is set, else a text button showing Label, right-aligned on the last line. RunningLabel is what a screen reader calls the
+// button while its work runs ("Taking back").
+internal sealed record CompactAction(string Label, char Glyph = '\0', string? RunningLabel = null)
 {
     public bool IsIcon => Glyph != '\0';
 }
@@ -39,4 +40,34 @@ internal enum CompactActionState { Idle, Progress, Done }
 internal sealed record CompactContent(char Glyph, InkRole Ink, string Text, CompactAction? Action, TimeSpan? Hold)
 {
     public UnaskedKind Kind { get; init; } = UnaskedKind.Notice;
+}
+
+// The compact rows the design has, from the owner's label for the other device and from the reading that crossed. Each holds six
+// seconds once its entrance has finished (OneCardArbiter.CompactHold); only moved to carries a button.
+internal static class CompactContents
+{
+    // E8EA and "Moved to iPhone"; with the label empty, E772 and "Moved to another device". The button is E977, "Take back".
+    public static CompactContent MovedTo(string otherDeviceLabel) => new(
+        string.IsNullOrWhiteSpace(otherDeviceLabel) ? FluentGlyphs.Devices : FluentGlyphs.CellPhone,
+        InkRole.Primary,
+        WidgetCopy.MovedTo(otherDeviceLabel),
+        new CompactAction(WidgetCopy.TakeBack, FluentGlyphs.OnThisPc, WidgetCopy.TakingBack),
+        OneCardArbiter.CompactHold)
+    {
+        Kind = UnaskedKind.MovedTo,
+    };
+
+    // E7BA in caution and the part that crossed with its number.
+    public static CompactContent LowBattery(string partsLabel, int percent) => new(
+        FluentGlyphs.Warning, InkRole.Caution, WidgetCopy.LowBatteryCompact(partsLabel, percent), null, OneCardArbiter.CompactHold)
+    {
+        Kind = UnaskedKind.LowFallback,
+    };
+
+    // E73E in the accent and "Fully charged".
+    public static CompactContent FullyCharged() => new(
+        FluentGlyphs.CheckMark, InkRole.Accent, WidgetCopy.FullyChargedCompact, null, OneCardArbiter.CompactHold)
+    {
+        Kind = UnaskedKind.ChargedFallback,
+    };
 }

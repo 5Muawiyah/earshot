@@ -79,7 +79,7 @@ internal sealed partial class WidgetCard
         _rest = target;
         Record(CardWindowCallKind.Place, target, "place at rest, moving there");
         _resizeProgress.Jump(0);
-        _resizeProgress.AnimateTo(1, _driver, FluentMotion.HeightDuration, FluentMotion.PointToPoint, ApplyResize);
+        _resizeProgress.AnimateTo(1, _driver, _nextHeightDuration ?? FluentMotion.HeightDuration, FluentMotion.PointToPoint, ApplyResize);
         return true;
     }
 
@@ -126,6 +126,12 @@ internal sealed partial class WidgetCard
 
     private void OnMotionFrame()
     {
+        if (_holdArmed && !(_animator?.Running ?? false))
+        {
+            // The entrance is over: a compact row's hold starts now.
+            StartHold();
+        }
+
         if (_dirty.IsEmpty || IsDisposed || !IsHandleCreated || !Visible)
         {
             _dirty = Rectangle.Empty;
@@ -278,7 +284,7 @@ internal sealed partial class WidgetCard
     // The pointer moved, went down or up, or left: the fill under it fades to hover or pressed and the one it left fades out.
     private void TrackHot(Point? point, bool pressed)
     {
-        Rectangle? hot = point is { } p && !_notice && !_exiting ? IconButtonAt(p) : null;
+        Rectangle? hot = point is { } p && (!_notice || IsCompactShown) && !_exiting ? IconButtonAt(p) : null;
         if (hot == _hot && pressed == _hotPressed)
         {
             return;
