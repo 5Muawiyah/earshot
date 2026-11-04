@@ -93,9 +93,9 @@ public sealed class AwayGaugeTests
         Assert.AreEqual("AirPods 60%\r\nL 70%   R 60%\r\nLast read 3 h ago", c.Tooltip);
     }
 
-    // A bud that was charging when last read is shown as it was read, however long ago.
+    // A bud that was charging when last read is shown as it was read, however long ago, with no bolt: nothing says it charges now.
     [TestMethod]
-    public void OnThisPcAChargingBudsLastReadingIsShownAsItWasRead()
+    public void OnThisPcAChargingBudsLastReadingIsShownAsItWasReadWithNoBolt()
     {
         WidgetSnapshot snapshot = Snapshot(AirPodsWhere.ThisPc, Book(Saved(40, true), Saved(90, false), null));
 
@@ -103,7 +103,8 @@ public sealed class AwayGaugeTests
 
         Assert.AreEqual(40, c.Percent);
         Assert.IsTrue(c.Tertiary);
-        Assert.AreEqual("AirPods 40%, charging\r\nL 40%   R 90%\r\nLast read 1 h ago", c.Tooltip);
+        Assert.IsFalse(c.Charging);
+        Assert.AreEqual("AirPods 40%\r\nL 40%   R 90%\r\nLast read 1 h ago", c.Tooltip);
     }
 
     [TestMethod]

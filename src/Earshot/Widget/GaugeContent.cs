@@ -45,7 +45,7 @@ internal sealed record GaugeContent(
     GaugeMode Mode,
     int? Percent,          // the number, in Reading and CaseAway only
     bool Low,              // Percent is at or below the low battery level
-    bool Charging,         // the part the number is drawn from says it is (or was, when read) charging
+    bool Charging,         // the part the number is drawn from is charging: said of a live reading only
     string Tooltip)
 {
     // The case mark is drawn in place of the earbud mark.
@@ -70,7 +70,7 @@ internal sealed record GaugeContent(
             if (shown.Case is { Percent: int casePercent } box)
             {
                 return new GaugeContent(
-                    GaugeMode.CaseAway, casePercent, false, box.Charging == true, WidgetCopy.GaugeNotOnThisPc + CaseLines(box, now))
+                    GaugeMode.CaseAway, casePercent, false, box.Fresh && box.Charging == true, WidgetCopy.GaugeNotOnThisPc + CaseLines(box, now))
                 {
                     CaseMark = true,
                     Tertiary = box.Kind != ReadingKind.Live,
@@ -85,12 +85,14 @@ internal sealed record GaugeContent(
             // Low is a claim about now: only a live figure gives it. A last reading that is at or under the level is drawn as
             // it is, in tertiary ink with its age, and never as "Low battery".
             bool low = figure.Kind == ReadingKind.Live && figure.Percent <= settings.LowBatteryThresholdPercent;
-            string head = WidgetCopy.GaugeHead(low, figure.Percent, figure.Charging);
+            // A last reading was charging when read and nothing says it is now, so it shows no bolt and says nothing of charging.
+            bool charging = figure.Kind == ReadingKind.Live && figure.Charging;
+            string head = WidgetCopy.GaugeHead(low, figure.Percent, charging);
             string detail = figure.Source == BatterySource.Windows
                 ? WidgetCopy.WindowsReads(figure.Percent)
                 : WidgetCopy.GaugeBudsLine(figure.Left, figure.Right);
             string tooltip = head + "\r\n" + detail + "\r\n" + WidgetCopy.GaugeAgeLine(figure.Kind, now - figure.ReadAt);
-            return new GaugeContent(GaugeMode.Reading, figure.Percent, low, figure.Charging, tooltip)
+            return new GaugeContent(GaugeMode.Reading, figure.Percent, low, charging, tooltip)
             {
                 Tertiary = figure.Kind != ReadingKind.Live,
             };

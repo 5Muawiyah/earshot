@@ -272,4 +272,56 @@ public sealed class BatteryLookTests
         Assert.AreEqual(40, WidgetCardPresenter.BuildModel(Callbacks(() => 40), TimeProvider.System).LowBatteryThresholdPercent);
         Assert.AreEqual(WidgetSettings.DefaultLowBatteryThresholdPercent, WidgetCardPresenter.BuildModel(Callbacks(null), TimeProvider.System).LowBatteryThresholdPercent);
     }
+
+    // ---- The gauge
+
+    [TestMethod]
+    public void TheGaugeDrawsNoBoltAndSaysNothingOfChargingForALastReading()
+    {
+        GaugeContent last = GaugeContent.From(
+            Snapshot(left: Reading(70, true, Min(4)), right: Reading(80, true, Min(4))), Now, GaugeDisplaySettings.Default);
+        GaugeContent live = GaugeContent.From(
+            Snapshot(left: Reading(70, true, TimeSpan.FromSeconds(2)), right: Reading(80, true, TimeSpan.FromSeconds(2))), Now, GaugeDisplaySettings.Default);
+
+        Assert.IsTrue(last.Tertiary);
+        Assert.IsFalse(last.Charging, "It was charging when read, and nothing says it is now.");
+        StringAssert.DoesNotMatch(last.Tooltip, new System.Text.RegularExpressions.Regex("charging"));
+        Assert.IsTrue(live.Charging);
+        StringAssert.Contains(live.Tooltip, "charging", StringComparison.Ordinal);
+    }
+
+    [TestMethod]
+    public void TheGaugeAwayDrawsNoBoltForTheCaseAsItWasRead()
+    {
+        WidgetSnapshot away = Snapshot(box: Reading(50, true, Min(4))) with { Where = AirPodsWhere.NotInUse };
+
+        GaugeContent content = GaugeContent.From(away, Now, GaugeDisplaySettings.Default);
+
+        Assert.AreEqual(GaugeMode.CaseAway, content.Mode);
+        Assert.IsFalse(content.Charging);
+    }
+
+    [TestMethod]
+    public void TheGaugeKeepsALastReadingAtAnyAgeInTertiaryWithItsAge()
+    {
+        foreach (TimeSpan age in new[] { Min(4), TimeSpan.FromHours(2), TimeSpan.FromDays(3) })
+        {
+            GaugeContent content = GaugeContent.From(Snapshot(left: Reading(70, false, age), right: Reading(80, false, age)), Now, GaugeDisplaySettings.Default);
+
+            Assert.AreEqual(GaugeMode.Reading, content.Mode, age.ToString());
+            Assert.AreEqual(70, content.Percent);
+            Assert.IsTrue(content.Tertiary);
+            StringAssert.Contains(content.Tooltip, "Last read", StringComparison.Ordinal);
+        }
+    }
+
+    [TestMethod]
+    public void TheGaugeIsLowOnlyForALiveReadingAtOrUnderTheAlertLevel()
+    {
+        var settings = new GaugeDisplaySettings(30, "iPhone");
+
+        Assert.IsTrue(GaugeContent.From(Snapshot(left: Reading(30, false, TimeSpan.FromSeconds(2))), Now, settings).Low);
+        Assert.IsFalse(GaugeContent.From(Snapshot(left: Reading(40, false, TimeSpan.FromSeconds(2))), Now, settings).Low);
+        Assert.IsFalse(GaugeContent.From(Snapshot(left: Reading(10, false, Min(4))), Now, settings).Low, "Old, not low.");
+    }
 }

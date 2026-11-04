@@ -218,9 +218,9 @@ public sealed class GaugeContentTests
     [TestMethod]
     public void AChargingFlagThatIsNotTrueIsNotABolt()
     {
-        GaugeContent unknown = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, charging: null), Bud(60, charging: null)), Now, Settings);
-        GaugeContent notCharging = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, charging: false), Bud(60, charging: false)), Now, Settings);
-        GaugeContent charging = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, Bud(70, charging: true), Bud(60, charging: false)), Now, Settings);
+        GaugeContent unknown = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(70, charging: null), LiveBud(60, charging: null)), Now, Settings);
+        GaugeContent notCharging = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(70, charging: false), LiveBud(60, charging: false)), Now, Settings);
+        GaugeContent charging = GaugeContent.From(Snapshot(AirPodsWhere.ThisPc, LiveBud(70, charging: true), LiveBud(60, charging: false)), Now, Settings);
 
         Assert.IsFalse(unknown.Charging);
         Assert.IsFalse(notCharging.Charging);
