@@ -17,8 +17,8 @@ internal enum CaseOpenStep { None, Opened }
 //
 // Why not any case-known message after silence: the saved records (scratch\one-card\evidence.md) show seven links, each
 // followed about a minute after the first close by one or two case-known messages of the linked set's own address, then
-// nothing; the card showed again for eight seconds each time. A shut case does send a lone pair about a minute after it shuts,
-// so "a shut case sends nothing" was wrong. Why not the lid byte: in the 30 September capture both senders moved it through
+// nothing; the card showed again for eight seconds each time. So a shut case is not silent: it sends a lone pair about a
+// minute after it shuts. Why not the lid byte: in the 30 September capture both senders moved it through
 // four values (0x51, 0x59, 0x52, 0x5A) inside one unbroken run of messages, so a change of it is not a reopen. The byte is
 // logged, never read.
 //
