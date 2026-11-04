@@ -212,6 +212,81 @@ internal static class WidgetCardLayout
             title, gear, showUpdateLine, updateLine, updateCaption, updateButton, refresh, sendTo);
     }
 
+    // ---- The compact form
+
+    // The compact card is one row: 12 padding above and below, the row (20t + 12, as every row), 16 at the sides; a glyph 16t,
+    // a gap of 12, the text in Body, and the action at the right end. A text that wraps adds 20t a line (at most three lines
+    // in all) with the bottom edge where it was, and a text action stands right-aligned on the last line. Height at 100%
+    // text: 56 for one line, 76 for two, 96 for three; at 150% text: 66, 96, 126.
+    public const int CompactSideAt96 = 16;
+    public const int CompactGlyphAt96 = 16;
+    public const int CompactGapAt96 = 12;
+    public const int CompactPaddingAt96 = 12;
+    public const int CompactLineAt96 = 20;
+    public const int CompactMaxLines = 3;
+
+    // Which button a compact row carries: none, an icon button, or a text button.
+    internal enum CompactButton { None, Icon, Text }
+
+    // The compact card, in client pixels. Glyph is empty for a row with no glyph, Action for a row with no button. Text is the
+    // block the words wrap in: Lines lines of 20t.
+    internal sealed record CompactLayout(int Width, int Height, int Lines, Rectangle Glyph, Rectangle Text, Rectangle Action);
+
+    // The width the words wrap in: the card's width less the sides, the glyph and its gap when there is a glyph, and the button
+    // and its gap when there is one. textActionWidth is the text button's own width (its words and padding).
+    public static int CompactTextWidth(int dpi, double textScale, bool hasGlyph, CompactButton button, int textActionWidth = 0)
+    {
+        int width = WidthFor(dpi);
+        int side = CardPlacement.Scale(CompactSideAt96, dpi);
+        int gap = CardPlacement.Scale(CompactGapAt96, dpi);
+        int left = side + (hasGlyph ? Follow(CompactGlyphAt96, dpi, textScale) + gap : 0);
+        int right = side + CompactButtonWidth(dpi, textScale, button, textActionWidth) + (button == CompactButton.None ? 0 : gap);
+        return Math.Max(1, width - left - right);
+    }
+
+    private static int CompactButtonWidth(int dpi, double textScale, CompactButton button, int textActionWidth) => button switch
+    {
+        CompactButton.Icon => IconButtonSize(dpi, textScale),
+        CompactButton.Text => Math.Max(1, textActionWidth),
+        _ => 0,
+    };
+
+    // lines is how many lines the words wrap to at CompactTextWidth, as the caller measured them; it is held to 1 to 3.
+    public static CompactLayout ForCompact(
+        int dpi, double textScale, int lines, bool hasGlyph = true, CompactButton button = CompactButton.None, int textActionWidth = 0)
+    {
+        int n = Math.Clamp(lines, 1, CompactMaxLines);
+        int width = WidthFor(dpi);
+        int side = CardPlacement.Scale(CompactSideAt96, dpi);
+        int gap = CardPlacement.Scale(CompactGapAt96, dpi);
+        int pad = CardPlacement.Scale(CompactPaddingAt96, dpi);
+        int line = Follow(CompactLineAt96, dpi, textScale);
+        int row = RowHeight(dpi, textScale);
+        int height = pad + row + ((n - 1) * line) + pad;
+
+        int glyphBox = Follow(CompactGlyphAt96, dpi, textScale);
+        Rectangle glyph = hasGlyph ? new Rectangle(side, pad + ((row - glyphBox) / 2), glyphBox, glyphBox) : Rectangle.Empty;
+
+        int buttonWidth = CompactButtonWidth(dpi, textScale, button, textActionWidth);
+        int lastRowTop = pad + ((n - 1) * line);
+        Rectangle action = Rectangle.Empty;
+        if (button == CompactButton.Icon)
+        {
+            int size = IconButtonSize(dpi, textScale);
+            action = new Rectangle(width - side - size, lastRowTop + ((row - size) / 2), size, size);
+        }
+        else if (button == CompactButton.Text)
+        {
+            int actionHeight = row;
+            action = new Rectangle(width - side - buttonWidth, lastRowTop, buttonWidth, actionHeight);
+        }
+
+        int textLeft = side + (hasGlyph ? glyphBox + gap : 0);
+        int textWidth = CompactTextWidth(dpi, textScale, hasGlyph, button, textActionWidth);
+        var text = new Rectangle(textLeft, pad + ((row - line) / 2), textWidth, n * line);
+        return new CompactLayout(width, height, n, glyph, text, action);
+    }
+
     private static ColumnLayout Column(
         int x, int y, int colWidth, int labelHeight, int gap, int markWidth, int markHeight, int valueHeight, int barWidth, int barHeight, int readHeight, int boltSlot)
     {
