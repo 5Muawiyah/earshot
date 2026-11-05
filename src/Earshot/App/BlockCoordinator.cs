@@ -2391,7 +2391,7 @@ internal sealed partial class BlockCoordinator : IDisposable
             return Finish(request, OpStatus.Failed, CoordinatorRules.DisconnectFailureMessage(result), steps);
         }
 
-        if (block.Issued && !block.Took)
+        if ((block.Issued && !block.Took) || block.NotApplied)
         {
             return Finish(request, OpStatus.Partial, block.Message, steps);
         }
@@ -2406,9 +2406,10 @@ internal sealed partial class BlockCoordinator : IDisposable
             BootBlockStatus? status = await ReadBlockStatusAsync(CancellationToken.None);
             if (status is null)
             {
+                // Unreadable is not blocked: nothing is sent (no new device action), but the disconnect must not say Success.
                 _log.Warn("disconnect: the nodes are not blocked, because the boot block status could not be read.");
                 request.Timeline?.MarkNotAtRest(SwitchTimelineText.ReasonStatusUnreadable);
-                return BlockAttempt.NotIssued;
+                return BlockAttempt.Unverified;
             }
 
             if (!status.BlockAtBoot || status.State == BlockState.Blocked)
@@ -2421,6 +2422,16 @@ internal sealed partial class BlockCoordinator : IDisposable
             {
                 _log.Info("disconnect: the nodes read " + status.State + ", so nothing is blocked.");
                 NoteAtRestFromRead(request, status);
+
+                // Unknown (the nodes are not present or cannot be read) with Block at boot on is not Blocked either: the disconnect says
+                // the block was not applied, as it does for a status that could not be read. NotSetUp and NotFound are states the
+                // person is told about elsewhere and stay as they were.
+                if (status.State == BlockState.Unknown)
+                {
+                    _log.Warn("disconnect: the nodes read Unknown with Block at boot on, so they were not blocked and the AirPods may still be paged.");
+                    return BlockAttempt.Unverified;
+                }
+
                 return BlockAttempt.NotIssued;
             }
 
@@ -3987,9 +3998,13 @@ internal sealed partial class BlockCoordinator : IDisposable
         NodesLeftEnabled,  // Block at boot off, a block that did not take, or a block held back
     }
 
-    private readonly record struct BlockAttempt(bool Issued, bool Took, string Message)
+    // NotApplied: no block was sent and the nodes are not known to be blocked, though Block at boot is on (its status could not be read, or
+    // the nodes read Unknown). The disconnect then ends Partial, the same as a block that was sent and did not take, and sends nothing more.
+    private readonly record struct BlockAttempt(bool Issued, bool Took, string Message, bool NotApplied = false)
     {
         public static BlockAttempt NotIssued => new(Issued: false, Took: false, "");
+
+        public static BlockAttempt Unverified => new(Issued: false, Took: false, CouldNotBlockMessage, NotApplied: true);
     }
 
     // Why a Block sequence runs and which device its render check watches.

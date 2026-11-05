@@ -170,9 +170,37 @@ public sealed class DisconnectSequenceTests
 
         ToggleReport report = h.Toggle(connect: false);
 
-        Assert.IsEmpty(h.Block.Calls);
-        Assert.AreEqual(OpStatus.Success, report.Status);
+        Assert.IsEmpty(h.Block.Calls, "Nothing new is sent to the device: only what is said changes.");
+        Assert.AreEqual(OpStatus.Partial, report.Status, "The nodes were not blocked, so it is not a Success.");
+        Assert.AreEqual(BlockCoordinator.CouldNotBlockMessage, report.UserMessage);
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "the boot block status could not be read"));
+        Assert.AreEqual(Earshot.Widget.ToggleOutcome.Failed, TrayContext.OutcomeOf(report, cancelled: false), "and the tray tells it as the failure it is.");
+    }
+
+    [TestMethod]
+    public void ADisconnectWhoseNodesReadUnknownWithBlockAtBootOnIsPartialAndSendsNothing()
+    {
+        using CoordinatorHarness h = Connected();
+        h.Block.Status = Statuses.Unknown(blockAtBoot: true);
+
+        ToggleReport report = h.Toggle(connect: false);
+
+        Assert.IsEmpty(h.Block.Calls);
+        Assert.AreEqual(OpStatus.Partial, report.Status, "Unknown is not Blocked: the AirPods may still be paged.");
+        Assert.AreEqual(BlockCoordinator.CouldNotBlockMessage, report.UserMessage);
+        Assert.IsTrue(h.Log.Has(LogLevel.Warn, "read Unknown"), string.Join(" | ", h.Log.Entries.Select(e => e.Message)));
+    }
+
+    [TestMethod]
+    public void ADisconnectWhoseNodesReadUnknownWithBlockAtBootOffIsStillASuccess()
+    {
+        using CoordinatorHarness h = Connected(blockAtBoot: false);
+        h.Block.Status = Statuses.Unknown(blockAtBoot: false);
+
+        ToggleReport report = h.Toggle(connect: false);
+
+        Assert.AreEqual(OpStatus.Success, report.Status, "Block at boot is off: nothing was meant to be blocked.");
+        Assert.IsEmpty(h.Block.Calls);
     }
 
     [TestMethod]

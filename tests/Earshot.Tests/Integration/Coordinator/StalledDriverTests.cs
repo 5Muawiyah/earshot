@@ -144,7 +144,7 @@ public sealed class StalledDriverTests
         h.Advance(BlockCoordinator.StatusReadBudget);
 
         Assert.IsTrue(toggle.IsCompleted, "The disconnect never ended while the status read did not return.");
-        Assert.AreEqual(OpStatus.Success, toggle.GetAwaiter().GetResult().Status);
+        Assert.AreEqual(OpStatus.Partial, toggle.GetAwaiter().GetResult().Status, "Nothing blocked the nodes, so the disconnect must not say Success.");
         Assert.IsEmpty(h.Block.Calls, "A status that was never read led to a block.");
         Assert.IsFalse(h.Coordinator.IsBusy);
         Assert.IsTrue(h.Log.Has(LogLevel.Warn, "The boot block status was not read within"));
