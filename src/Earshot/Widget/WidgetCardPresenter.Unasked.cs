@@ -156,6 +156,14 @@ internal sealed partial class WidgetCardPresenter
             return false;
         }
 
+        if (kind == UnaskedKind.CaseOpened && _unaskedKind == UnaskedKind.ConnectFailed && _failure is { Displayed: true })
+        {
+            // The failure wins: the card that says it stays until it is dealt with or closes itself. Opening the case over it would make
+            // it the case's card, and the case closing would then close the failure unread.
+            _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), a connect failure is on the card and stays until it is dealt with.");
+            return false;
+        }
+
         if (IsShown)
         {
             // A card the owner asked for is in front of him: an unasked one over it would stack one Earshot window on another.

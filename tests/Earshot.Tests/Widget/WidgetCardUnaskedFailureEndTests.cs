@@ -133,6 +133,34 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // The failure wins over the case opening: the case closing is not what ends it.
+    [TestMethod]
+    public void ACaseOpeningOverAFailedCardLeavesTheFailureToItsOwnEndAndTheCaseClosingDoesNotCloseIt()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig(asked: false);
+            rig.Fail(AReason, "Connect in Windows");
+            rig.PassTheCross();
+            Application.DoEvents();
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown, "Sanity: the failed card opened.");
+
+            rig.Presenter.CaseOpened(AGauge);
+            Application.DoEvents();
+            rig.Presenter.CaseClosed();
+            Application.DoEvents();
+
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown, "The case closing did not close the failure.");
+            Assert.IsTrue(rig.Presenter.FailureActiveForTest);
+            Assert.AreEqual(AReason, rig.Unasked.StatusRow.Text);
+
+            Rectangle close = rig.Unasked.CurrentMainLayout.Gear;
+            ClickAt(rig.Unasked.Handle, new Point(close.X + (close.Width / 2), close.Y + (close.Height / 2)));
+            Application.DoEvents();
+            Assert.IsFalse(rig.Presenter.IsUnaskedShown, "Its own close button ends it.");
+        });
+    }
+
     [TestMethod]
     public void TheLogClaimsTheGaugesCrossOnlyForAToggleThatEndedFailed()
     {
