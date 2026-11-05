@@ -154,7 +154,11 @@ public sealed class ToggleOutcomeTrayTests
             tray.PumpUntilIdle();
 
             CollectionAssert.AreEqual(new[] { GaugeStoryKind.Spinning, GaugeStoryKind.None }, kinds, "No tick and no cross.");
-            CollectionAssert.AreEqual(new[] { (true, ToggleOutcome.Partial) }, tray.Toggle.Ended);
+            CollectionAssert.AreEqual(new[] { (true, ToggleOutcome.Partial) }, tray.Toggle.Ended, "The card is told it ended part-way.");
+            FailureSaid said = tray.Toggle.Failures.Single();
+            Assert.AreEqual(BlockCoordinator.ConnectedNotProtectedMessage, said.Reason, "and is handed what did not take, to say on the card.");
+            Assert.IsNull(said.NextLabel);
+            Assert.IsFalse(said.MustBeSaid);
             Assert.IsTrue(tray.Voice.SpeakCompleted.Wait(TimeSpan.FromSeconds(5)), "Something was spoken.");
             Assert.AreEqual(SaidForNotProtected, string.Join("|", tray.Voice.Utterances), "It does not say Connect failed while connected.");
         });

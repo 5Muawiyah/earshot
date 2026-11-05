@@ -961,7 +961,7 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         // Partial is a connect that took with the audio quality protection after it not taken (connected, not protected): not a failure,
-        // so no cross and no failed card. A disconnect whose block did not take is a failure: the nodes stay enabled and the PC can page
+        // so no cross; the card is still handed what did not take, to say. A disconnect whose block did not take is a failure: the nodes stay enabled and the PC can page
         // the AirPods, so it is told as a cross that waits for a gauge to draw it, held for the next card he asks for and spoken, none of
         // which depends on a notice being shown.
         return report.IsSuccess ? ToggleOutcome.Succeeded : report.Status == OpStatus.Partial && report.Connect ? ToggleOutcome.Partial : ToggleOutcome.Failed;
