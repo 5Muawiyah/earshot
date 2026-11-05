@@ -41,13 +41,15 @@ public sealed partial class WidgetCardUnaskedTests
             Application.DoEvents();
             Assert.IsTrue(rig.Presenter.IsUnaskedShown, "Sanity: the case card opened during the cross.");
 
-            CardControl? button = rig.Unasked.CurrentControls().SingleOrDefault(c => c.Name == "Connect in Windows");
-            if (button is not null)
-            {
-                button.Activate();
-                Application.DoEvents();
-                Assert.AreEqual(1, pressed, "A button the card draws must work.");
-            }
+            Assert.IsNull(rig.Unasked.CurrentControls().SingleOrDefault(c => c.Name == "Connect in Windows"), "No button while the cross has its time.");
+
+            rig.PassTheCross();
+            Application.DoEvents();
+
+            Assert.AreEqual(AReason, rig.Unasked.StatusRow.Text, "Once the cross ends the open card says the failure.");
+            rig.Unasked.CurrentControls().Single(c => c.Name == "Connect in Windows").Activate();
+            Application.DoEvents();
+            Assert.AreEqual(1, pressed, "and its button works.");
         });
     }
 
