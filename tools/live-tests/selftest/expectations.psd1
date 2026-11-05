@@ -1009,10 +1009,16 @@
     '25-one-card|first' = @{
         none = @{ Overall = 'fail'; Criteria = @{
                 'shortcut-connect-card-closed' = 'fail'; 'shortcut-disconnect-card-closed' = 'fail'; 'failed-connect-cross-then-reason' = 'fail'
+                'case-opens-the-card' = 'fail'; 'case-shut-closes-the-card' = 'fail'; 'shut-case-no-card' = 'inconclusive'
+                'moved-to-shows-and-is-true' = 'fail'; 'take-back-returns-the-airpods' = 'fail'; 'own-disconnect-shows-nothing' = 'inconclusive'
+                'out-of-range-shows-nothing' = 'inconclusive'; 'sides-and-steps' = 'pass'; 'battery-in-steps-of-ten' = 'inconclusive' }
+            FindingsInclude = @{ 'connectShortcutMs' = $null; 'gaugeFigureLines' = 0; 'movedToTrue' = 'yes' } }
+        'quiet-with-controls' = @{ Overall = 'fail'; Criteria = @{
+                'shortcut-connect-card-closed' = 'fail'; 'shortcut-disconnect-card-closed' = 'fail'; 'failed-connect-cross-then-reason' = 'fail'
                 'case-opens-the-card' = 'fail'; 'case-shut-closes-the-card' = 'fail'; 'shut-case-no-card' = 'pass'
                 'moved-to-shows-and-is-true' = 'fail'; 'take-back-returns-the-airpods' = 'fail'; 'own-disconnect-shows-nothing' = 'pass'
                 'out-of-range-shows-nothing' = 'pass'; 'sides-and-steps' = 'pass'; 'battery-in-steps-of-ten' = 'inconclusive' }
-            FindingsInclude = @{ 'connectShortcutMs' = $null; 'gaugeFigureLines' = 0; 'movedToTrue' = 'yes' } }
+            FindingsInclude = @{ 'gaugeFigureLines' = 0 } }
         one  = @{ Overall = 'fail'; Criteria = @{
                 'shortcut-connect-card-closed' = 'pass'; 'shortcut-disconnect-card-closed' = 'pass'; 'failed-connect-cross-then-reason' = 'pass'
                 'case-opens-the-card' = 'pass'; 'case-shut-closes-the-card' = 'pass'; 'shut-case-no-card' = 'fail'

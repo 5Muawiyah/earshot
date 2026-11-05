@@ -72,7 +72,7 @@ param(
         'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
         'exit-cut-short', 'pause-declined', 'chosen-rising',
         'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-        'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card')][string]$Case = '',
+        'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card', 'quiet-with-controls')][string]$Case = '',
     [string]$Test = '',
     [switch]$Keep,
     [switch]$Observed
@@ -201,8 +201,10 @@ $tests = @(
     # no-moved-card: the iPhone took the AirPods and no Moved to card opened, and the owner does not offer the sides and steps, so
     # Moved to fails and the two steps after it are not reached. The other cases hold 0, 1 and 2 of every Card, Case, Move and
     # Battery line; the log cannot say when a line was written, so a case that holds a line for a step holds it for every step.
+    # quiet-with-controls: the log holds only the three lines that show the quiet steps happened, and no card or verdict, so those three
+    # pass; in none, with no such line, the same answers are inconclusive.
     [ordered]@{ Number = '25'; Id = '25-one-card'; Script = '25-OneCard.ps1'; Halves = @('first'); Extra = @()
-        Cases = @('none', 'one', 'two', 'no-moved-card') }
+        Cases = @('none', 'one', 'two', 'no-moved-card', 'quiet-with-controls') }
 )
 
 $defaultCases = @('none', 'one', 'two')

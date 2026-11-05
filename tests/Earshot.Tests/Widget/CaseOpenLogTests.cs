@@ -151,6 +151,7 @@ public sealed class CaseOpenLogTests
         Assert.AreEqual(3, lines.Length, string.Join(" | ", lines));
         Assert.AreEqual("Case: open by link: lid 0x52.", lines[0]);
         Assert.AreEqual("Case: closed after 8 s of silence: open for 1000 ms, 3 messages, lid 0x52 to 0x52.", lines[1]);
+        LiveTests.LiveTest25Lines.AssertMatches(lines[1], LiveTests.LiveTest25Lines.CaseClosed);
         Assert.AreEqual(
             "Case: not an open: 2 messages in 1300 ms from 1 sender, median -60 dBm, lid 0x52, 60000 ms since the last close.",
             lines[2]);

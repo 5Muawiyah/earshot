@@ -142,6 +142,8 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'Case: open by'; Raw = $true; Text = 'Case: open by burst: 9 messages in 2000 ms from 2 senders, median -58 dBm, lid 0x52, no close before it.' }
     [ordered]@{ Pattern = 'Case: closed after'; Raw = $true; Text = 'Case: closed after 8 s of silence: open for 3000 ms, 13 messages, lid 0x51 to 0x5A.' }
     [ordered]@{ Pattern = 'Move: '; Raw = $true; Text = 'Move: 3 messages by +3800 ms, first +900 ms, median -62 dBm, case-known 0: moved.' }
+    [ordered]@{ Pattern = 'Move: own leave'; Raw = $true; Text = 'Move: own leave (Disconnect), nothing shown.' }
+    [ordered]@{ Pattern = 'Move: leave seen'; Raw = $true; Text = 'Move: leave seen, not started by Earshot, playing=Playing.' }
     [ordered]@{ Pattern = 'Battery: gauge'; Raw = $true; Text = 'Battery: gauge 70 from left, live.' }
 )
 
@@ -356,6 +358,8 @@ $script:CaseItemCounts = @{
     'pair-failed' = 0
     # test 25: no Moved to card opened when the iPhone took the AirPods, and the sides and steps were not offered.
     'no-moved-card' = 1
+    # test 25: only the lines that show the quiet steps happened, written below.
+    'quiet-with-controls' = 0
 
     # test 17 and test 22: the hand-back service's own cases. Each looks like the shared "one" for every log line and
     # list, and differs only in the status file the service wrote (Write-FakeStatusFiles below).
@@ -392,7 +396,7 @@ function Initialize-FakeMachine
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card', 'quiet-with-controls')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -456,7 +460,7 @@ function New-FakeSandbox
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card', 'quiet-with-controls')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -628,6 +632,21 @@ function New-FakeSandbox
             $index = $index + 1
             $mangledStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
             $lines = $lines + @([string]$mangledStamp + ' INFO  ' + $mangled)
+        }
+    }
+
+    # test 25, quiet-with-controls: the case was seen open and shut, Earshot's own leave and a leave it did not start were seen, and no
+    # card or moved verdict followed any of them.
+    if ($Case -eq 'quiet-with-controls')
+    {
+        foreach ($controlLine in @(
+                'Case: closed after 8 s of silence: open for 3000 ms, 13 messages, lid 0x51 to 0x5A.',
+                'Move: own leave (Disconnect), nothing shown.',
+                'Move: leave seen, not started by Earshot, playing=Playing.'))
+        {
+            $index = $index + 1
+            $controlStamp = $ahead.AddSeconds($index).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+            $lines = $lines + @([string]$controlStamp + ' INFO  ' + $controlLine)
         }
     }
 

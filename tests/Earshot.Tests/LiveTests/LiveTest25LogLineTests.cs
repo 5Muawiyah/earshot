@@ -19,11 +19,14 @@ internal static class LiveTest25Lines
     public const string ConnectShortcut = @"Switch to-pc: active after ([0-9]+|-) ms \(trigger shortcut-to-pc,";
     public const string DisconnectShortcut = @"Switch to-phone: released after ([0-9]+|-) ms, at rest after [0-9-]+ ms \(trigger shortcut-to-phone,";
     public const string NotActiveShortcut = @"Switch to-pc: not active \(outcome [A-Za-z]+, trigger shortcut-to-pc,";
+    public const string CaseClosed = @"Case: closed after [0-9]+ s of silence: ";
+    public const string OwnLeave = @"Move: own leave \(";
+    public const string LeaveSeen = @"Move: leave seen, not started by Earshot, ";
 
     public static readonly string[] All =
     [
         CaseOpened, CaseCardShown, CaseCardClosed, MovedCardShown, MovedVerdict, TakeBackPressed, FailedCard, GaugeFigure,
-        ConnectShortcut, DisconnectShortcut, NotActiveShortcut,
+        ConnectShortcut, DisconnectShortcut, NotActiveShortcut, CaseClosed, OwnLeave, LeaveSeen,
     ];
 
     public static void AssertMatches(string line, string pattern)
@@ -69,6 +72,9 @@ public sealed class LiveTest25LogLineTests
             ("Case: open by burst: 9 messages in 2000 ms from 2 senders, median -58 dBm, lid 0x52, no close before it.", LiveTest25Lines.CaseOpened),
             ("Move: 3 messages by +3800 ms, first +900 ms, median -62 dBm, case-known 0: moved.", LiveTest25Lines.MovedVerdict),
             ("Battery: gauge 70 from left, live.", LiveTest25Lines.GaugeFigure),
+            ("Case: closed after 8 s of silence: open for 3000 ms, 13 messages, lid 0x51 to 0x5A.", LiveTest25Lines.CaseClosed),
+            ("Move: own leave (Disconnect), nothing shown.", LiveTest25Lines.OwnLeave),
+            ("Move: leave seen, not started by Earshot, playing=Playing.", LiveTest25Lines.LeaveSeen),
         ];
 
         foreach ((string line, string pattern) in samples)

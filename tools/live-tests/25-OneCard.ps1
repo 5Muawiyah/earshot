@@ -144,18 +144,22 @@ function Get-SeenVerdict
     return [ordered]@{ Outcome = 'pass'; Why = 'you saw it and the log shows it' }
 }
 
-# A picture that should not have happened: what you saw, and how many log lines say it did.
+# A picture that should not have happened: what you saw, how many log lines say it did, and how many show the step itself happened. With
+# no such line nothing shows the step was run at all, so an empty log and a "no" do not pass.
 function Get-QuietVerdict
 {
     param(
         [Parameter(Mandatory = $true)][string]$Seen,
-        [Parameter(Mandatory = $true)][int]$LogLines
+        [Parameter(Mandatory = $true)][int]$LogLines,
+        [Parameter(Mandatory = $true)][int]$ControlLines,
+        [Parameter(Mandatory = $true)][string]$ControlWords
     )
 
     if ($LogLines -gt 0) { return [ordered]@{ Outcome = 'fail'; Why = ([string]$LogLines + ' log line(s) say it showed') } }
     if ($Seen -eq 'yes') { return [ordered]@{ Outcome = 'fail'; Why = 'you saw it, though the log shows nothing' } }
     if ($Seen -eq 'unsure') { return [ordered]@{ Outcome = 'inconclusive'; Why = 'the log shows nothing; you were not sure what you saw' } }
-    return [ordered]@{ Outcome = 'pass'; Why = 'you saw nothing and the log shows nothing' }
+    if ($ControlLines -eq 0) { return [ordered]@{ Outcome = 'inconclusive'; Why = 'you saw nothing, but ' + $ControlWords } }
+    return [ordered]@{ Outcome = 'pass'; Why = 'you saw nothing, the log shows nothing and it shows the step happened' }
 }
 
 # The one switch line a shortcut left since the moment, as test 16 reads it. $true when exactly one line is a good reading, $false when
@@ -192,7 +196,7 @@ try
         'Connect and disconnect the AirPods with the shortcuts while the card is closed.',
         'Put the AirPods in the shut case and try to connect them, then open and shut the case lid.',
         'Leave the case shut for five minutes without touching it.',
-        'Play something on your iPhone so it takes the AirPods, then take them back from the card.'
+        'Play something on this PC and then on your iPhone so it takes the AirPods, then take them back from the card.'
     )
 
     if ($ready)
@@ -257,14 +261,17 @@ try
 
         # ---- 4. The shut case shows nothing ----
         Write-Section -Run $run -Title 'The shut case'
+        $shutStepStart = (Get-Date).ToUniversalTime()
         Wait-Owner -Run $run -Text 'Open the case lid next to this computer, then shut it. Leave it shut, and do not touch the case, the AirPods or Earshot for the next five minutes. Come back here once the lid is shut.'
         $quietStart = (Get-Date).ToUniversalTime()
         Wait-Seconds -Run $run -Seconds $ShutCaseSeconds -Reason 'leaving the shut case alone for five minutes'
         $quietSeen = Read-Answer -Run $run -Question 'While the case stayed shut, did any card open by itself?' -Options @('yes', 'no', 'unsure')
         $quietCards = Get-LogMatches -Pattern 'Card: shown unasked' -Regex 'Card: shown unasked \(case\), ' -Since $quietStart
         $quietOpens = Get-LogMatches -Pattern 'Case: open by' -Regex 'Case: open by (link|burst): ' -Since $quietStart
+        # A closed line says how long the case was open, so one line shows both the open and the shut this step asks for.
+        $quietControl = Get-LogMatches -Pattern 'Case: closed after' -Regex 'Case: closed after [0-9]+ s of silence: ' -Since $shutStepStart
         Add-StepFinding -Name 'shutCaseLines' -Since $quietStart
-        $v = Get-QuietVerdict -Seen $quietSeen -LogLines (@($quietCards).Count + @($quietOpens).Count)
+        $v = Get-QuietVerdict -Seen $quietSeen -LogLines (@($quietCards).Count + @($quietOpens).Count) -ControlLines @($quietControl).Count -ControlWords 'no line shows the case was seen open and then shut'
         Add-Criterion -Run $run -Id 'shut-case-no-card' -Criterion 'A case that was opened and shut once, then left shut for five minutes, shows no card and logs no open.' `
             -Outcome $v.Outcome -Detail ([string]$v.Why + '; ' + @($quietCards).Count + ' shown card line(s), ' + @($quietOpens).Count + ' open case line(s) in ' + $ShutCaseSeconds + ' seconds.')
 
@@ -272,7 +279,7 @@ try
         Write-Section -Run $run -Title 'Moved to'
         $movedStart = (Get-Date).ToUniversalTime()
         Wait-Owner -Run $run -Text 'Put both AirPods in your ears and press Ctrl+Alt+Shift+A to connect them. Wait for the tick.'
-        Wait-Owner -Run $run -Text 'Play something on your iPhone so that it takes the AirPods from this PC. Do not touch Earshot. Wait ten seconds.'
+        Wait-Owner -Run $run -Text 'Play something on this PC, such as a video, until you can hear it in the AirPods. Then play something on your iPhone so that it takes the AirPods from this PC. Do not touch Earshot. Wait ten seconds.'
         $movedSeen = Read-Answer -Run $run -Question 'Within ten seconds, did a small card open by itself saying Moved to and the name of your iPhone, with a Take back icon?' -Options @('yes', 'no', 'unsure')
         $movedTrue = 'not asked'
         if ($movedSeen -eq 'yes')
@@ -313,18 +320,20 @@ try
         $ownSeen = Read-Answer -Run $run -Question 'After you chose Disconnect in Earshot, did a Moved to card open?' -Options @('yes', 'no', 'unsure')
         $ownCards = Get-LogMatches -Pattern 'Card: shown unasked' -Regex 'Card: shown unasked \(moved to\), ' -Since $ownStart
         $ownVerdicts = Get-LogMatches -Pattern 'Move: ' -Regex 'Move: [0-9]+ messages? by \+[0-9]+ ms.*: moved\.' -Since $ownStart
+        $ownControl = Get-LogMatches -Pattern 'Move: own leave' -Regex 'Move: own leave \(' -Since $ownStart
         Add-StepFinding -Name 'ownDisconnectLines' -Since $ownStart
-        $v = Get-QuietVerdict -Seen $ownSeen -LogLines (@($ownCards).Count + @($ownVerdicts).Count)
+        $v = Get-QuietVerdict -Seen $ownSeen -LogLines (@($ownCards).Count + @($ownVerdicts).Count) -ControlLines @($ownControl).Count -ControlWords 'no line shows the Disconnect in Earshot happened'
         Add-Criterion -Run $run -Id 'own-disconnect-shows-nothing' -Criterion 'Disconnect in Earshot never shows Moved to.' `
             -Outcome $v.Outcome -Detail ([string]$v.Why + '; ' + @($ownCards).Count + ' shown card line(s), ' + @($ownVerdicts).Count + ' moved verdict line(s).')
 
         $rangeStart = (Get-Date).ToUniversalTime()
-        Wait-Owner -Run $run -Text 'Press Ctrl+Alt+Shift+A to connect the AirPods again and wait for the tick. Then, with the AirPods in your ears, walk out of range of this PC, for example into another room, and stay away for one minute. Then come back here.'
+        Wait-Owner -Run $run -Text 'Press Ctrl+Alt+Shift+A to connect the AirPods again and wait for the tick. Play something on this PC until you can hear it in the AirPods. Then, with the AirPods in your ears, walk out of range of this PC, for example into another room, and stay away for one minute. Then come back here.'
         $rangeSeen = Read-Answer -Run $run -Question 'When you came back, had a Moved to card opened on this PC while you were away?' -Options @('yes', 'no', 'unsure')
         $rangeCards = Get-LogMatches -Pattern 'Card: shown unasked' -Regex 'Card: shown unasked \(moved to\), ' -Since $rangeStart
         $rangeVerdicts = Get-LogMatches -Pattern 'Move: ' -Regex 'Move: [0-9]+ messages? by \+[0-9]+ ms.*: moved\.' -Since $rangeStart
+        $rangeControl = Get-LogMatches -Pattern 'Move: leave seen' -Regex 'Move: leave seen, not started by Earshot, ' -Since $rangeStart
         Add-StepFinding -Name 'outOfRangeLines' -Since $rangeStart
-        $v = Get-QuietVerdict -Seen $rangeSeen -LogLines (@($rangeCards).Count + @($rangeVerdicts).Count)
+        $v = Get-QuietVerdict -Seen $rangeSeen -LogLines (@($rangeCards).Count + @($rangeVerdicts).Count) -ControlLines @($rangeControl).Count -ControlWords 'no line shows the AirPods left this PC'
         Add-Criterion -Run $run -Id 'out-of-range-shows-nothing' -Criterion 'Walking out of range with the AirPods never shows Moved to.' `
             -Outcome $v.Outcome -Detail ([string]$v.Why + '; ' + @($rangeCards).Count + ' shown card line(s), ' + @($rangeVerdicts).Count + ' moved verdict line(s).')
 

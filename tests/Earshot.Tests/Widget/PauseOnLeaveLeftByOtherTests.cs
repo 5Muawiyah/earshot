@@ -243,6 +243,7 @@ public sealed class PauseOnLeaveLeftByOtherTests
         await rig.Left();
 
         Assert.IsTrue(rig.Log.Has(LogLevel.Info, "Move: leave seen, not started by Earshot, playing=Silent."));
+        LiveTests.LiveTest25Lines.AssertLogged(rig.Log, LiveTests.LiveTest25Lines.LeaveSeen);
     }
 
     [TestMethod]
@@ -269,6 +270,7 @@ public sealed class PauseOnLeaveLeftByOtherTests
         await rig.Left();
 
         Assert.IsTrue(rig.Log.Has(LogLevel.Info, "Move: own leave (Disconnect), nothing shown."));
+        LiveTests.LiveTest25Lines.AssertLogged(rig.Log, LiveTests.LiveTest25Lines.OwnLeave);
         Assert.IsFalse(rig.Log.Has(LogLevel.Info, "Move: leave seen"));
     }
 }

@@ -66,13 +66,13 @@ public sealed class LiveTestSelfTestTests
     // 22-ServiceHandBack's declined-start, service-not-run, service-partial, service-over-budget,
     // tray-not-ended, service-block-sent, service-already-blocked and tray-unreadable on both of its
     // halves (16). 23-ConnectEveryState's not-reached, on both of its halves (2). 24-PairAirPods's not-reached and
-    // pair-failed, on its one half (2). 25-OneCard's no-moved-card, on its one half (1).
-    // 2+2+9+2+6+3+1+1+1+4+2+16+2+2+1 = 54, printed by
-    // Invoke-SelfTest.ps1 itself (runs 159, halves 35, cases-per-half 3: 159 - 35*3 = 54)
+    // pair-failed, on its one half (2). 25-OneCard's no-moved-card and quiet-with-controls, on its one half (2).
+    // 2+2+9+2+6+3+1+1+1+4+2+16+2+2+2 = 55, printed by
+    // Invoke-SelfTest.ps1 itself (runs 160, halves 35, cases-per-half 3: 160 - 35*3 = 55)
     // rather than re-derived here, because this arithmetic has been wrong before: a hand count
     // made before tests 17 and 18 existed on this tree did not match what the runner actually
     // printed once they did, and the count for the service test made before it was built was short.
-    private const int ExpectedExtraCases = 54;
+    private const int ExpectedExtraCases = 55;
 
     [TestMethod]
     public void EveryShippedLiveTestRunsToItsEndAgainstFakeInputs()
