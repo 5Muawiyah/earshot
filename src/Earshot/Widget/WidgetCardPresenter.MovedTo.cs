@@ -159,6 +159,7 @@ internal sealed partial class WidgetCardPresenter
                 _takeBack = TakeBackState.None;
                 _unaskedCompact = null;
                 _unaskedRequest = null;
+                _unaskedAfterClick = false;
                 _unaskedKind = UnaskedKind.ConnectFailed;
                 _log.Write(LogLevel.Debug, "Card: take back failed, grown to the full card.");
                 return false;

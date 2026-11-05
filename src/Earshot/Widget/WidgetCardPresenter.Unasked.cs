@@ -255,6 +255,7 @@ internal sealed partial class WidgetCardPresenter
         _unaskedKind = kind;
         _unaskedCompact = request?.Content;
         _unaskedRequest = request;
+        _unaskedAfterClick = afterClick;
         _unaskedShownAt = _time.GetTimestamp();
         AnnounceUnasked(shown[0], model);
         string closes;
@@ -388,13 +389,6 @@ internal sealed partial class WidgetCardPresenter
         }
 
         NotificationStateReading reading = parts.Environment.QueryNotificationState();
-        if (reading.HResult < 0)
-        {
-            // Not knowing closes the card, as the show refuses on a failed read: fail closed.
-            _log.Warn("Card: closed (" + KindName(_unaskedKind) + "), the notification state could not be read. " +
-                TrayReport.DescribeStep(StepOutcomes.FromHResult("sh-query-user-notification-state:unasked-card-recheck", reading.HResult)));
-        }
-
         IUnaskedScene scene = parts.Scene ?? new SystemUnaskedScene(new SystemDisplaySource(), static () => []);
         IReadOnlyList<DisplayInfo> displays = scene.Displays();
         ForegroundWindowReading? foreground = reading.HResult >= 0 && displays.Count > 1 && reading.State is Shell.QUNS_BUSY or Shell.QUNS_RUNNING_D3D_FULL_SCREEN
@@ -403,9 +397,15 @@ internal sealed partial class WidgetCardPresenter
         foreach ((_, WidgetCard card, DisplayInfo? display) in open)
         {
             if (UnaskedGate.ClosesOnRecheck(
-                reading.HResult, reading.State, displays.Count, foreground, display, afterClick: _unaskedRequest is { Anchor: CardAnchor.NearCursor }))
+                reading.HResult, reading.State, displays.Count, foreground, display, afterClick: _unaskedAfterClick))
             {
-                if (reading.HResult >= 0)
+                if (reading.HResult < 0)
+                {
+                    // Not knowing closes the card, as the show refuses on a failed read: fail closed. Said only for a card that closes.
+                    _log.Warn("Card: closed (" + KindName(_unaskedKind) + "), the notification state could not be read. " +
+                        TrayReport.DescribeStep(StepOutcomes.FromHResult("sh-query-user-notification-state:unasked-card-recheck", reading.HResult)));
+                }
+                else
                 {
                     _log.Write(LogLevel.Debug, "Card: closed (" + KindName(_unaskedKind) + "), a full-screen application is on " +
                         (display is null ? "this display" : DisplayWords(display, displays.Count > 0 ? displays : new[] { display })) + " now.");
@@ -513,6 +513,7 @@ internal sealed partial class WidgetCardPresenter
             _log.Write(LogLevel.Debug, "Card: closed (" + KindName(_unaskedKind) + "), " + why + ", after " + ms.ToString(CultureInfo.InvariantCulture) + " ms.");
             _unaskedCompact = null;
             _unaskedRequest = null;
+            _unaskedAfterClick = false;
         }
 
         if (promoteWaiting)

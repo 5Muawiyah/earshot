@@ -24,6 +24,10 @@ internal sealed partial class WidgetCardPresenter
 
     private CompactContent? _unaskedCompact;
     private CompactRequest? _unaskedRequest;
+
+    // The card on show is the result of his own click, so a recheck of the full-screen state never closes it. Kept when a click on the
+    // body grows the row to the full card, which clears the request but is still that result.
+    private bool _unaskedAfterClick;
     private (CompactRequest Request, int Token)? _askedNotice;
     private int _askedNoticeToken;
     private ITimer? _askedNoticeTimer;
