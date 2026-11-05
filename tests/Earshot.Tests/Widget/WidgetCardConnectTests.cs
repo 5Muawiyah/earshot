@@ -556,6 +556,7 @@ public sealed partial class WidgetCardUnaskedTests
 
             Assert.IsFalse(rig.Log.Has(LogLevel.Debug, "Card: connect failed"), string.Join("\n", rig.Log.Entries.Select(e => e.Message)));
             Assert.IsFalse(rig.Log.Has(LogLevel.Debug, "so the gauge's cross says it"));
+            Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: failure not said on a card, no card is open and there is no next step, and no cross is drawn for it."));
         });
     }
 

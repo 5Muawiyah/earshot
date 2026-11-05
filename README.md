@@ -21,8 +21,8 @@ click on the tray icon's card. It blocks the Hands-Free profile so a browser
 tab or a game cannot drop them to call quality. Since v1.3.0 it also shows
 their battery, in v1.4.0 it keeps their last reading when they are away, and
 v1.5.0 adds Fix connection, a Setup.exe, an Installed apps entry and a Send to
-picker. The next release after 1.6.0, 1.7.0, which is not published, makes the
-card the only popup (see [The one card](#the-one-card)).
+picker. v1.6.0 adds Pair AirPods, and v1.7.0 makes the card the only popup
+(see [The one card](#the-one-card)).
 
 | Document | What it covers |
 |---|---|
