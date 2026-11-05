@@ -80,9 +80,9 @@ internal static class CardDesktop
 
     private static long _guardClock;
 
-    // A clock that is a second later at every read: a click in a test is never inside the double-click guard of a card that has only
-    // just appeared unless the test gave the card its own clock to say so.
-    private static long PastTheGuard() => Interlocked.Add(ref _guardClock, 1000);
+    // A clock that is past the system's double-click time at every read: a click in a test is never inside the double-click guard of a
+    // card that has only just appeared unless the test gave the card its own clock to say so.
+    private static long PastTheGuard() => Interlocked.Add(ref _guardClock, SystemInformation.DoubleClickTime + 1);
 
     public static void Run(Action work) => Run(_ => work());
 
@@ -128,8 +128,17 @@ internal static class CardDesktop
                     }
 
                     Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
+                    Func<long> before = Earshot.Widget.WidgetCard.DefaultPressClock;
                     Earshot.Widget.WidgetCard.DefaultPressClock = PastTheGuard;
-                    work(desktop);
+                    try
+                    {
+                        work(desktop);
+                    }
+                    finally
+                    {
+                        // Restored, so a test outside a card desktop sees the real clock whatever ran before it.
+                        Earshot.Widget.WidgetCard.DefaultPressClock = before;
+                    }
                 }
                 catch (Exception ex)
                 {
