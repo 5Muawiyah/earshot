@@ -11,5 +11,6 @@ public enum VoiceLine
     BlockedAtBoot,
     AllowedAtBoot,
     ConnectFailed,
+    ConnectedNotProtected,
     BlockFailed,
 }

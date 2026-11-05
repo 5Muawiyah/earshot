@@ -2015,8 +2015,11 @@ internal sealed class FakeAudioProtectionController : IAudioProtectionController
     public Func<bool, CancellationToken, Task<ControllerResult>> OnApply { get; set; } =
         (protect, _) => Task.FromResult(ControllerResult.Ok(protect ? "Protected" : "Not protected"));
 
+    // What the services read as, or null for unknown with nothing installed.
+    public AudioProtectionSnapshot? Status { get; set; }
+
     public Task<AudioProtectionSnapshot> GetStatusAsync(CancellationToken ct = default) =>
-        Task.FromResult(new AudioProtectionSnapshot(AudioProtectionState.Unknown, HandsfreeInstalled: false, HeadsetInstalled: false));
+        Task.FromResult(Status ?? new AudioProtectionSnapshot(AudioProtectionState.Unknown, HandsfreeInstalled: false, HeadsetInstalled: false));
 
     public Task<ControllerResult> ApplyAsync(bool protect, CancellationToken ct = default)
     {

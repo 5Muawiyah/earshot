@@ -218,7 +218,8 @@ Neither has had a live run, and both are off by default.
 
 **Speak status.** Off until turned on from the menu. Earshot speaks only from
 a fixed, short list of phrases: Connected, Disconnected, Blocked at boot,
-Allowed at boot, Connect failed, Block failed. No device name, address or
+Allowed at boot, Connect failed, Connected but audio quality protection did not apply,
+Block failed. No device name, address or
 number ever reaches the speech engine, and it says nothing for a state it only
 assumed, such as connecting or unknown; the tooltip is shown instead. It uses
 the speech voices already installed on Windows.

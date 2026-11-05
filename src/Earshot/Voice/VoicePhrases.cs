@@ -12,6 +12,8 @@ public static class VoicePhrases
         VoiceLine.BlockedAtBoot => "Blocked at boot",
         VoiceLine.AllowedAtBoot => "Allowed at boot",
         VoiceLine.ConnectFailed => "Connect failed",
+        // The words of the notice for a connect that took with the protection not applied (BlockCoordinator.ConnectedNotProtectedMessage), without its comma.
+        VoiceLine.ConnectedNotProtected => "Connected but audio quality protection did not apply",
         VoiceLine.BlockFailed => "Block failed",
         _ => throw new ArgumentOutOfRangeException(nameof(line), line, "Unknown voice line."),
     };

@@ -1142,7 +1142,7 @@ internal sealed partial class TrayContext : ApplicationContext
 
             // VoiceOver: announce on the transition itself, never on a poll and never a state the app
             // only assumed, so a cancelled toggle says nothing. There is no VoiceLine for a failed
-            // disconnect (the closed six-phrase set has no "disconnect failed" line), so that case is
+            // disconnect (the closed set of phrases has no "disconnect failed" line), so that case is
             // left unspoken rather than widening the set past what the design's own acceptance tests
             // audited.
             if (!cancelled)
@@ -1153,7 +1153,8 @@ internal sealed partial class TrayContext : ApplicationContext
                 }
                 else if (wanted)
                 {
-                    AnnounceIfEnabled(VoiceLine.ConnectFailed);
+                    // A connect that took with the protection not applied is connected: it says so, not that it failed.
+                    AnnounceIfEnabled(report.Status == OpStatus.Partial ? VoiceLine.ConnectedNotProtected : VoiceLine.ConnectFailed);
                 }
             }
         }
@@ -1498,8 +1499,8 @@ internal sealed partial class TrayContext : ApplicationContext
     //
     // Speaks Connected or Disconnected only when the snapshot says exactly that: Connecting,
     // Disconnecting and Unknown are states the app only assumed (a read in flight, or no read at all),
-    // and those are never announced. The closed six-phrase
-    // set has no line for any of them, so widening it is not an option either. What the owner asked to
+    // and those are never announced. The closed set of phrases
+    // has no line for any of them, so widening it is not an option either. What the owner asked to
     // hear about is shown instead, as the same short line the tray's own tooltip would show, and the log
     // records why nothing was spoken.
     private void SpeakCurrentStatus()

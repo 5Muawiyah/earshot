@@ -15,6 +15,7 @@ namespace Earshot.Tests.App;
 public sealed class ToggleOutcomeTrayTests
 {
     private const string CouldNotBlock = "Could not block the AirPods. Try again.";
+    private const string SaidForNotProtected = "Connected but audio quality protection did not apply";
 
     private static void LeftClick(TrayHarness tray) =>
         tray.Context.OnIconMouseClick(null, new System.Windows.Forms.MouseEventArgs(System.Windows.Forms.MouseButtons.Left, 1, 0, 0, 0));
@@ -50,6 +51,34 @@ public sealed class ToggleOutcomeTrayTests
             Assert.IsFalse(tray.Context.GaugeStoryForTest.Current.Connect, "It is a disconnect's cross.");
             CollectionAssert.AreEqual(new[] { (false, ToggleOutcome.Failed) }, tray.Toggle.Ended);
             Assert.AreEqual(CouldNotBlock, tray.Toggle.Failures.Single().Reason, "and the card says why.");
+        });
+    }
+
+    [TestMethod]
+    public void AConnectedButNotProtectedConnectIsPartialOnTheGaugeAndTheCardAndSpeaksWhatIsTrue()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Disconnected),
+                time: new TestTimeProvider(),
+                settings: s =>
+                {
+                    s.ProtectAudioQuality = true;
+                    s.VoiceOver = s.VoiceOver with { Enabled = true };
+                });
+            tray.Protection.Status = Protection(AudioProtectionState.NotProtected);
+            tray.Protection.OnApply = (_, _) => Task.FromResult(ControllerResult.Fail("Could not protect audio quality. Try again.",
+                [StepOutcomes.FromWin32("bluetooth-set-service-state:111E", 5)]));
+            List<GaugeStoryKind> kinds = WatchKinds(tray);
+
+            LeftClick(tray);
+            tray.PumpUntilIdle();
+
+            CollectionAssert.AreEqual(new[] { GaugeStoryKind.Spinning, GaugeStoryKind.None }, kinds, "No tick and no cross.");
+            CollectionAssert.AreEqual(new[] { (true, ToggleOutcome.Partial) }, tray.Toggle.Ended);
+            Assert.IsTrue(tray.Voice.SpeakCompleted.Wait(TimeSpan.FromSeconds(5)), "Something was spoken.");
+            Assert.AreEqual(SaidForNotProtected, string.Join("|", tray.Voice.Utterances), "It does not say Connect failed while connected.");
         });
     }
 }
