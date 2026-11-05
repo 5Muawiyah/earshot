@@ -566,7 +566,7 @@ internal sealed partial class WidgetCard
         {
             // A card nobody asked for appears where his pointer may be (the card he clicked has just gone): a press within the double-click
             // time of it is the second half of that click, not a choice on this card, as for a change of form. With animation effects off
-            // it is there at once. The card he asks for appears away from his pointer, at the gauge, so it takes a press at once.
+            // it is there at once. The card he asks for appears away from his pointer, at the gauge or the tray icon, so it takes a press at once.
             if (_unasked)
             {
                 _shownChangedAt = PressClock();

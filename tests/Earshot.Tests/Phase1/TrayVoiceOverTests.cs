@@ -163,7 +163,7 @@ public sealed class TrayVoiceOverTests
     }
 
     // Connecting, Disconnecting and Unknown are states the app only assumed (a read in flight, or no
-    // read at all): the voiceover design says never to announce one of those, and the closed six-phrase
+    // read at all): the voiceover design says never to announce one of those, and the closed phrase
     // set has no line for any of them either way.
     [TestMethod]
     [DataRow(ConnectionState.Connecting)]
