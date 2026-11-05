@@ -233,18 +233,23 @@ public sealed class GaugeStoryTrayTests
     }
 
     // A connect that took but whose protection did not (BlockCoordinator.ConnectedNotProtectedMessage) is told as Partial, not as a
-    // failure: the gauge shows no cross and the card does not grow to the failed card.
+    // failure: the gauge shows no cross and the card does not grow to the failed card. A disconnect whose block did not take is not
+    // that: the nodes stay enabled and the PC can page the AirPods, so it is told as a failure, whatever becomes of its notice.
     [TestMethod]
-    [DataRow(OpStatus.Success, false, "Succeeded")]
-    [DataRow(OpStatus.AlreadyInState, false, "Succeeded")]
-    [DataRow(OpStatus.Partial, false, "Partial")]
-    [DataRow(OpStatus.Failed, false, "Failed")]
-    [DataRow(OpStatus.NotAttempted, false, "Failed")]
-    [DataRow(OpStatus.Partial, true, "Cancelled")]
-    [DataRow(OpStatus.Success, true, "Cancelled")]
-    public void AFinishedToggleIsToldAsItsStatusSaysAndPartialIsItsOwnOutcome(OpStatus status, bool cancelled, string expected)
+    [DataRow(true, OpStatus.Success, false, "Succeeded")]
+    [DataRow(true, OpStatus.AlreadyInState, false, "Succeeded")]
+    [DataRow(true, OpStatus.Partial, false, "Partial")]
+    [DataRow(true, OpStatus.Failed, false, "Failed")]
+    [DataRow(true, OpStatus.NotAttempted, false, "Failed")]
+    [DataRow(true, OpStatus.Partial, true, "Cancelled")]
+    [DataRow(true, OpStatus.Success, true, "Cancelled")]
+    [DataRow(false, OpStatus.Success, false, "Succeeded")]
+    [DataRow(false, OpStatus.Partial, false, "Failed")]
+    [DataRow(false, OpStatus.Failed, false, "Failed")]
+    [DataRow(false, OpStatus.Partial, true, "Cancelled")]
+    public void AFinishedToggleIsToldAsItsStatusSaysAndOnlyAConnectCanBePartial(bool connect, OpStatus status, bool cancelled, string expected)
     {
-        var report = new ToggleReport(true, status, "Connected, but audio quality protection did not apply.", [], cancelled);
+        var report = new ToggleReport(connect, status, "Part of it did not take.", [], cancelled);
 
         Assert.AreEqual(expected, TrayContext.OutcomeOf(report, cancelled).ToString());
     }
