@@ -373,6 +373,7 @@ internal sealed partial class TrayContext : ApplicationContext
     // latest shortcut press: the last press wins, so it is what runs once the wait is over.
     private bool _supersedeNext;
     private SwitchTrigger _supersedeTrigger;
+    private ToggleOrigin _supersedeOrigin;
     private string? _toggleCancelReason;
     private TaskCompletionSource? _toggleDone;
     private int _operationsInFlight;
@@ -838,7 +839,9 @@ internal sealed partial class TrayContext : ApplicationContext
 
     // Toggles the connection of the pinned (or resolved) device through the coordinator, which owns the
     // block, allow and protection order around it and shows its cards.
-    private async Task ToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, bool? wanted = null)
+    private async Task ToggleAsync(
+        CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, bool? wanted = null,
+        ToggleOrigin origin = ToggleOrigin.Elsewhere)
     {
         // The switch itself has ended and only the looks after its failure are left (the radio, the pinned pair): a new click is a
         // new request, not the opposite of a switch in flight. Those looks are ended and the request runs as one of its own.
@@ -870,7 +873,7 @@ internal sealed partial class TrayContext : ApplicationContext
                 return;
             }
 
-            await RunToggleAsync(place, clickedAt, connect: wanted, viaHotkey, trigger);
+            await RunToggleAsync(place, clickedAt, connect: wanted, viaHotkey, trigger, origin);
             return;
         }
 
@@ -884,6 +887,7 @@ internal sealed partial class TrayContext : ApplicationContext
                     // wins, so it replaces the direction that is waiting, and the card says what will happen.
                     _supersedeNext = latest;
                     _supersedeTrigger = trigger;
+                    _supersedeOrigin = origin;
                     _log.Info("Shortcut: the switch to " + (latest ? "this PC" : "the phone") + " replaces the one waiting.");
                     ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), FinishingFirstMessage, place);
                     return;
@@ -893,18 +897,19 @@ internal sealed partial class TrayContext : ApplicationContext
                 return;
             }
 
-            await SupersedeToggleAsync(place, clickedAt, viaHotkey, trigger);
+            await SupersedeToggleAsync(place, clickedAt, viaHotkey, trigger, origin);
             return;
         }
 
-        await RunToggleAsync(place, clickedAt, connect: wanted, viaHotkey, trigger);
+        await RunToggleAsync(place, clickedAt, connect: wanted, viaHotkey, trigger, origin);
     }
 
     // A click while a connect or disconnect is in flight asks for the opposite. The one in flight is cancelled and
     // the new one runs only once it has ended, clean-up included, so a re-block after a cancelled allow always
     // comes first. That can take minutes (a gate change already sent is waited for, a protect verb included), so the
     // click is answered with a card at once.
-    private async Task SupersedeToggleAsync(CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click)
+    private async Task SupersedeToggleAsync(
+        CardPlace place, long clickedAt, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, ToggleOrigin origin = ToggleOrigin.Elsewhere)
     {
         bool connect = !_toggleConnect;
         string next = connect ? "connect" : "disconnect";
@@ -919,6 +924,7 @@ internal sealed partial class TrayContext : ApplicationContext
         _toggleSuperseded = true;
         _supersedeNext = connect;
         _supersedeTrigger = trigger;
+        _supersedeOrigin = origin;
         _toggleCancelReason = "a newer click asked to " + next;
         _log.Info("Click: the " + (connect ? "disconnect" : "connect") + " in flight is cancelled, and a " + next + " follows once it has finished.");
         ShowCard(TrayStatus.DeviceName(_snapshot, _registry.Settings.Current), FinishingFirstMessage, place);
@@ -942,11 +948,12 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         // What runs is the latest press, which may have replaced the one that started the wait.
-        await RunToggleAsync(place, clickedAt, _supersedeNext, viaHotkey, _supersedeTrigger);
+        await RunToggleAsync(place, clickedAt, _supersedeNext, viaHotkey, _supersedeTrigger, _supersedeOrigin);
     }
 
     // connect: the intent a newer click asked for, or null to take it from the device state.
-    private async Task RunToggleAsync(CardPlace place, long clickedAt, bool? connect, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click)
+    private async Task RunToggleAsync(
+        CardPlace place, long clickedAt, bool? connect, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, ToggleOrigin origin = ToggleOrigin.Elsewhere)
     {
         if (_toggleInFlight)
         {
@@ -1036,6 +1043,21 @@ internal sealed partial class TrayContext : ApplicationContext
         _toggleDone = done;
         UpdatePresentation(forceIcon: false);
         string action = wanted ? "connect" : "disconnect";
+
+        // The gauge tells the toggle from here: a sweep while it runs, then a tick, a cross or nothing. Its end is told once, as the
+        // report arrives (the radio and pair looks after a failure do not keep the sweep turning), and the finally tells it if
+        // nothing else did, so a toggle can never leave the gauge turning.
+        bool gaugeTold = false;
+        void EndGauge(ToggleOutcome outcome)
+        {
+            if (!gaugeTold)
+            {
+                gaugeTold = true;
+                TellGaugeToggleEnded(outcome);
+            }
+        }
+
+        TellGaugeToggleStarted(wanted, origin);
         try
         {
             ToggleReport report = await _coordinator.ToggleAsync(
@@ -1044,6 +1066,7 @@ internal sealed partial class TrayContext : ApplicationContext
             // A controller that reports a cancellation rather than throwing one is still a cancelled click. The
             // coordinator names the reason when it cancelled the operation itself (a session end, say).
             bool cancelled = report.Cancelled || cts.IsCancellationRequested;
+            EndGauge(cancelled ? ToggleOutcome.Cancelled : report.IsSuccess ? ToggleOutcome.Succeeded : ToggleOutcome.Failed);
             string text = TrayReport.Describe(
                 cancelled ? action + " (cancelled because " + (report.CancelledBecause ?? CancelReason()) + ")" : action,
                 report.Status,
@@ -1107,14 +1130,17 @@ internal sealed partial class TrayContext : ApplicationContext
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
+            EndGauge(ToggleOutcome.Cancelled);
             _log.Info(action + ": cancelled because " + CancelReason() + ".");
         }
         catch (Exception ex)
         {
+            EndGauge(ToggleOutcome.Failed);
             ReportUnexpected(action, ex, place);
         }
         finally
         {
+            EndGauge(ToggleOutcome.Cancelled);
             _toggle = null;
             _toggleInFlight = false;
             _toggleReported = false;

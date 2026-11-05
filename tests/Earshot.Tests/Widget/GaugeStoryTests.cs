@@ -10,7 +10,7 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class GaugeStoryTests
 {
-    private static readonly DateTimeOffset T0 = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Begin = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
 
     private static TimeSpan Ms(double milliseconds) => TimeSpan.FromMilliseconds(milliseconds);
 
@@ -19,7 +19,7 @@ public sealed class GaugeStoryTests
     {
         var story = new GaugeStory();
 
-        Assert.AreEqual(GaugeStoryKind.None, story.View(T0).Kind);
+        Assert.AreEqual(GaugeStoryKind.None, story.View(Begin).Kind);
         Assert.IsNull(story.NextChange);
     }
 
@@ -30,9 +30,9 @@ public sealed class GaugeStoryTests
     {
         var story = new GaugeStory();
 
-        story.Started(connect, ToggleOrigin.Elsewhere, T0);
+        story.Started(connect, ToggleOrigin.Elsewhere, Begin);
 
-        GaugeStoryView view = story.View(T0);
+        GaugeStoryView view = story.View(Begin);
         Assert.AreEqual(GaugeStoryKind.Spinning, view.Kind);
         Assert.AreEqual(connect, view.Connect);
     }
@@ -41,21 +41,21 @@ public sealed class GaugeStoryTests
     public void ASpinHasNoEndOfItsOwnAndOnlyEndedStopsIt()
     {
         var story = new GaugeStory();
-        story.Started(true, ToggleOrigin.Elsewhere, T0);
+        story.Started(true, ToggleOrigin.Elsewhere, Begin);
 
         Assert.IsNull(story.NextChange, "Nothing is due while it spins: the toggle's own end is the only end.");
-        Assert.AreEqual(GaugeStoryKind.Spinning, story.View(T0 + TimeSpan.FromHours(3)).Kind, "No cap of the story's own, however long.");
+        Assert.AreEqual(GaugeStoryKind.Spinning, story.View(Begin + TimeSpan.FromHours(3)).Kind, "No cap of the story's own, however long.");
 
-        story.Ended(ToggleOutcome.Cancelled, T0 + Ms(21000));
-        Assert.AreEqual(GaugeStoryKind.None, story.View(T0 + Ms(21000)).Kind);
+        story.Ended(ToggleOutcome.Cancelled, Begin + Ms(21000));
+        Assert.AreEqual(GaugeStoryKind.None, story.View(Begin + Ms(21000)).Kind);
     }
 
     [TestMethod]
     public void AConnectThatSucceedsShowsATickFor800MillisecondsThenIdle()
     {
         var story = new GaugeStory();
-        story.Started(true, ToggleOrigin.Elsewhere, T0);
-        DateTimeOffset end = T0 + Ms(3200);
+        story.Started(true, ToggleOrigin.Elsewhere, Begin);
+        DateTimeOffset end = Begin + Ms(3200);
 
         story.Ended(ToggleOutcome.Succeeded, end);
 
@@ -71,8 +71,8 @@ public sealed class GaugeStoryTests
     public void AToggleThatFailsShowsACrossFor1500MillisecondsThenIdle(bool connect)
     {
         var story = new GaugeStory();
-        story.Started(connect, ToggleOrigin.Elsewhere, T0);
-        DateTimeOffset end = T0 + Ms(900);
+        story.Started(connect, ToggleOrigin.Elsewhere, Begin);
+        DateTimeOffset end = Begin + Ms(900);
 
         story.Ended(ToggleOutcome.Failed, end);
 
@@ -88,11 +88,11 @@ public sealed class GaugeStoryTests
     public void ADisconnectThatSucceedsGoesStraightToIdleWithNoTick()
     {
         var story = new GaugeStory();
-        story.Started(false, ToggleOrigin.Elsewhere, T0);
+        story.Started(false, ToggleOrigin.Elsewhere, Begin);
 
-        story.Ended(ToggleOutcome.Succeeded, T0 + Ms(700));
+        story.Ended(ToggleOutcome.Succeeded, Begin + Ms(700));
 
-        Assert.AreEqual(GaugeStoryKind.None, story.View(T0 + Ms(700)).Kind);
+        Assert.AreEqual(GaugeStoryKind.None, story.View(Begin + Ms(700)).Kind);
         Assert.IsNull(story.NextChange);
     }
 
@@ -102,11 +102,11 @@ public sealed class GaugeStoryTests
     public void ACancelledToggleGoesStraightToIdleWithNoMark(bool connect)
     {
         var story = new GaugeStory();
-        story.Started(connect, ToggleOrigin.Elsewhere, T0);
+        story.Started(connect, ToggleOrigin.Elsewhere, Begin);
 
-        story.Ended(ToggleOutcome.Cancelled, T0 + Ms(400));
+        story.Ended(ToggleOutcome.Cancelled, Begin + Ms(400));
 
-        Assert.AreEqual(GaugeStoryKind.None, story.View(T0 + Ms(400)).Kind);
+        Assert.AreEqual(GaugeStoryKind.None, story.View(Begin + Ms(400)).Kind);
         Assert.IsNull(story.NextChange);
     }
 
@@ -115,9 +115,9 @@ public sealed class GaugeStoryTests
     {
         var story = new GaugeStory();
 
-        story.Ended(ToggleOutcome.Failed, T0);
+        story.Ended(ToggleOutcome.Failed, Begin);
 
-        Assert.AreEqual(GaugeStoryKind.None, story.View(T0).Kind, "A cross is never shown for a toggle that was not shown starting.");
+        Assert.AreEqual(GaugeStoryKind.None, story.View(Begin).Kind, "A cross is never shown for a toggle that was not shown starting.");
         Assert.IsNull(story.NextChange);
     }
 
@@ -125,12 +125,12 @@ public sealed class GaugeStoryTests
     public void ANewToggleDuringAHoldTakesTheGaugeOverAtOnce()
     {
         var story = new GaugeStory();
-        story.Started(true, ToggleOrigin.Elsewhere, T0);
-        story.Ended(ToggleOutcome.Succeeded, T0 + Ms(1000));
+        story.Started(true, ToggleOrigin.Elsewhere, Begin);
+        story.Ended(ToggleOutcome.Succeeded, Begin + Ms(1000));
 
-        story.Started(false, ToggleOrigin.Elsewhere, T0 + Ms(1300));
+        story.Started(false, ToggleOrigin.Elsewhere, Begin + Ms(1300));
 
-        GaugeStoryView view = story.View(T0 + Ms(1300));
+        GaugeStoryView view = story.View(Begin + Ms(1300));
         Assert.AreEqual(GaugeStoryKind.Spinning, view.Kind);
         Assert.IsFalse(view.Connect);
         Assert.IsNull(story.NextChange, "The hold that was running is over.");
@@ -141,7 +141,7 @@ public sealed class GaugeStoryTests
     {
         var story = new GaugeStory();
 
-        story.Started(true, ToggleOrigin.Card, T0);
+        story.Started(true, ToggleOrigin.Card, Begin);
 
         Assert.AreEqual(ToggleOrigin.Card, story.Origin);
     }
@@ -150,10 +150,10 @@ public sealed class GaugeStoryTests
     public void IdleIsTheSameValueWhateverCameBefore()
     {
         var story = new GaugeStory();
-        story.Started(true, ToggleOrigin.Elsewhere, T0);
-        story.Ended(ToggleOutcome.Failed, T0 + Ms(100));
+        story.Started(true, ToggleOrigin.Elsewhere, Begin);
+        story.Ended(ToggleOutcome.Failed, Begin + Ms(100));
 
-        Assert.AreEqual(default(GaugeStoryView), story.View(T0 + Ms(5000)), "Idle never carries a direction, so a key built from it is stable.");
+        Assert.AreEqual(default(GaugeStoryView), story.View(Begin + Ms(5000)), "Idle never carries a direction, so a key built from it is stable.");
     }
 }
 

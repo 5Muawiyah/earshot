@@ -38,6 +38,10 @@ internal sealed partial class TrayContext
     private IGaugeSurface? _gaugeSurface;
     private WidgetCardPresenter? _widgetCardPresenter;
     private WidgetCardPresenterCallbacks? _widgetCardCallbacks;
+
+    // What the gauge tells of a connect or disconnect that runs (GaugeStoryHost). Made when first wanted, whether or not a gauge
+    // is on the taskbar: the story is kept while the gauge is hidden or off, and a gauge shown later draws what is true then.
+    private GaugeStoryHost? _gaugeStory;
     private UnaskedGate? _unaskedGate;
 
     // Whether the card the owner asks for is wired: the gauge's pipeline built it, or an update page was asked for. The presenter
@@ -484,8 +488,48 @@ internal sealed partial class TrayContext
     internal void StartToggleFromWidget(CardPlace place)
     {
         long clickedAt = _tickCount();
-        Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey: false), place);
+        Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey: false, origin: ToggleOrigin.Card), place);
     }
+
+    private GaugeStoryHost GaugeStory => _gaugeStory ??= CreateGaugeStory();
+
+    // For tests: the story the gauges draw.
+    internal GaugeStoryHost GaugeStoryForTest => GaugeStory;
+
+    private GaugeStoryHost CreateGaugeStory()
+    {
+        var host = new GaugeStoryHost(_time, _registry.UiPost);
+        host.SetCardOnScreen(CardIsOnScreen());
+        host.Changed += RenderGaugeIfShown;
+        return host;
+    }
+
+    // Every connect or disconnect goes through RunToggleAsync, which tells the story here and nowhere else.
+    private void TellGaugeToggleStarted(bool wanted, ToggleOrigin origin)
+    {
+        if (!_closing)
+        {
+            GaugeStory.ToggleStarted(wanted, origin);
+        }
+    }
+
+    private void TellGaugeToggleEnded(ToggleOutcome outcome)
+    {
+        if (!_closing)
+        {
+            GaugeStory.ToggleEnded(outcome);
+        }
+    }
+
+    // A card came on screen or left it: while one is, the card tells a toggle and the gauge does not; the moment none is, the gauge
+    // takes the story over.
+    private void OnCardOnScreenChanged() => _gaugeStory?.SetCardOnScreen(CardIsOnScreen());
+
+    private bool CardIsOnScreen() => _widgetCardPresenter is { } presenter && (presenter.IsShown || presenter.IsUnaskedShown);
+
+    // What every gauge draws besides the reading: the numbers the owner set, and the story.
+    private GaugeDisplaySettings GaugeSettings() =>
+        new(_registry.Settings.Current.Widget.LowBatteryThresholdPercent, _registry.Settings.Current.Widget.OtherDeviceLabel, GaugeStory.Current);
 
     // The switch writes through TryUpdateSettings, the same settings-write path every menu item already
     // uses, so a save failure is reported on a card exactly as it is for them.
@@ -512,6 +556,7 @@ internal sealed partial class TrayContext
     private WidgetCard CreateWidgetCard(CardOpening opening)
     {
         WidgetCard card = CreateWidgetCard(_log, opening, AccentColourService.Shared(_log), LookService());
+        card.OnScreenChanged += (_, _) => OnCardOnScreenChanged();
 
         // The card's window calls go into the frame and UI stall log, when the tray has one (UiStallMonitor).
         if (_frameLog is UiStallMonitor stallLog)
@@ -695,9 +740,8 @@ internal sealed partial class TrayContext
         RenderSecondaryGauges();
         if (_gaugeController?.State is GaugeState.Shown shown && _gaugeSurface is { IsDisposed: false } surface && _widgetTheme is not null)
         {
-            WidgetSettings widget = _registry.Settings.Current.Widget;
             surface.Render(
-                _widgetSnapshotCache, _time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel),
+                _widgetSnapshotCache, _time.GetUtcNow(), GaugeSettings(),
                 _widgetLayoutDpi, shown.Bounds, _widgetTheme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
         }
     }
@@ -874,6 +918,8 @@ internal sealed partial class TrayContext
     // TrayContext.Close, on the UI thread.
     private void CloseWidget()
     {
+        _gaugeStory?.Dispose();
+        _gaugeStory = null;
         _autoPauseService?.Dispose();
         _autoPauseService = null;
         _lowBatteryAlertService?.Dispose();

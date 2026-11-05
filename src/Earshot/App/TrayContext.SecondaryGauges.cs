@@ -114,10 +114,7 @@ internal sealed partial class TrayContext
             return;
         }
 
-        WidgetSettings widget = _registry.Settings.Current.Widget;
-        gauge.Render(
-            _widgetSnapshotCache, _time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel),
-            theme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
+        gauge.Render(_widgetSnapshotCache, _time.GetUtcNow(), GaugeSettings(), theme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
     }
 
     private void RenderSecondaryGauges()
@@ -127,10 +124,7 @@ internal sealed partial class TrayContext
             return;
         }
 
-        WidgetSettings widget = _registry.Settings.Current.Widget;
-        set.Render(
-            _widgetSnapshotCache, _time.GetUtcNow(), new GaugeDisplaySettings(widget.LowBatteryThresholdPercent, widget.OtherDeviceLabel),
-            theme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
+        set.Render(_widgetSnapshotCache, _time.GetUtcNow(), GaugeSettings(), theme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
     }
 
     private void PokeSecondaryGauges(bool resetBackoff) => _secondaryGauges?.Poke(resetBackoff);

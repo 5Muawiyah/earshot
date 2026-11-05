@@ -772,6 +772,8 @@ internal sealed partial class WidgetCard
             EndScrollDrag();
             _scrollHot = false;
         }
+
+        RaiseOnScreenChanged();
     }
 
     // ---- Painting

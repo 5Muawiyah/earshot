@@ -285,6 +285,11 @@ internal sealed partial class WidgetCard : Form
         }
 
         base.Dispose(disposing);
+        if (disposing)
+        {
+            // A card that was on screen is gone: whoever follows it hears so, with IsDisposed now true.
+            RaiseOnScreenChanged();
+        }
     }
 
     // The location line OnPaint is about to draw: the live Where reading, or always "Case open" for an

@@ -89,6 +89,12 @@ internal sealed partial class WidgetCard
     // True from the moment the card starts to leave until it is hidden.
     internal bool IsExiting => _exiting;
 
+    // The card came on screen or left it: shown, hidden, begun to leave, brought back from leaving, or disposed. The gauge tells
+    // its story only while no card is on screen, so it follows this.
+    internal event EventHandler? OnScreenChanged;
+
+    private void RaiseOnScreenChanged() => OnScreenChanged?.Invoke(this, EventArgs.Empty);
+
     // Whether the card was given motion, for tests.
     internal bool HasMotion => _animator is not null;
 
@@ -132,6 +138,7 @@ internal sealed partial class WidgetCard
             Bounds = rest;
             RestoreOpacity();
             Show();
+            RaiseOnScreenChanged();
             return;
         }
 
@@ -139,6 +146,7 @@ internal sealed partial class WidgetCard
         _ = Handle;
         _animator.Enter(rest, travel);
         Show();
+        RaiseOnScreenChanged();
     }
 
     // Hides the card, sliding it away and fading it out first when it has motion and animation effects are on.
@@ -171,6 +179,7 @@ internal sealed partial class WidgetCard
         // OnMouseDown and OnMouseUp ask IsExiting): the card has been closed, so it must not connect or toggle anything.
         _exiting = true;
         ClearPressedFlags();
+        RaiseOnScreenChanged();
         _animator.Exit(_rest, _travel, FinishExit);
     }
 

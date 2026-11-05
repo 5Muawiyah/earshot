@@ -513,6 +513,7 @@ internal sealed partial class WidgetCard
         }
 
         _exiting = false;
+        RaiseOnScreenChanged();
         _animator.Enter(_rest, _travel);
         return true;
     }

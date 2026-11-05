@@ -238,7 +238,7 @@ internal static class GaugeRenderer
         using var pen = new Pen(colour, Math.Max(1f, size / 8f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
         if (tick)
         {
-            g.DrawLines(pen, [At(0.12f, 0.54f), At(0.38f, 0.78f), At(0.88f, 0.24f)]);
+            g.DrawLines(pen, new PointF[] { At(0.12f, 0.54f), At(0.38f, 0.78f), At(0.88f, 0.24f) });
         }
         else
         {
