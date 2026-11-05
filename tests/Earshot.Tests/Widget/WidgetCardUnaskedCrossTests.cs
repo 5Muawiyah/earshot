@@ -29,6 +29,29 @@ public sealed partial class WidgetCardUnaskedTests
     }
 
     [TestMethod]
+    public void ACaseCardOpenedDuringTheCrossNeverDrawsANextStepButtonThatDoesNothing()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig(asked: false);
+            int pressed = 0;
+            Assert.AreEqual(FailureShown.Pending, rig.Fail(AReason, "Connect in Windows", () => pressed++));
+
+            rig.Presenter.CaseOpened(AGauge);
+            Application.DoEvents();
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown, "Sanity: the case card opened during the cross.");
+
+            CardControl? button = rig.Unasked.CurrentControls().SingleOrDefault(c => c.Name == "Connect in Windows");
+            if (button is not null)
+            {
+                button.Activate();
+                Application.DoEvents();
+                Assert.AreEqual(1, pressed, "A button the card draws must work.");
+            }
+        });
+    }
+
+    [TestMethod]
     public void ACardClosedAfterSayingTheFailureDuringTheCrossDoesNotSayItAgainOnReopenOrOpenACardWhenTheCrossEnds()
     {
         Phase5.CardDesktop.Run(() =>

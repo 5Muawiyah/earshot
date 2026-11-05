@@ -144,10 +144,11 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
             return;
         }
 
-        _failure = failure with { Hold = OneCardArbiter.ActionHold };
+        // Displayed before the card is built, since a card draws the failure only once it is displayed (see FailureContent); a refusal
+        // below puts it back to held.
+        _failure = failure with { Hold = OneCardArbiter.ActionHold, Displayed = true };
         if (OpenUnaskedOnUiThread(UnaskedKind.ConnectFailed, gaugeBounds: null, _generation.Current))
         {
-            _failure = _failure! with { Displayed = true };
             return;
         }
 
@@ -155,8 +156,9 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         _log.Write(LogLevel.Debug, "Card: held (connect failed), it is shown when he next asks for the card.");
     }
 
-    // The status row's content for the failure on show, or null: a held failure is not on any card yet.
-    private CompactContent? FailureContent() => _failure is { Held: false } failure
+    // The status row's content for the failure on show, or null. A held failure is on no card yet, and one still waiting for the
+    // gauge's cross is drawn by none: a button on a card that did not mark the failure displayed would press into nothing.
+    private CompactContent? FailureContent() => _failure is { Held: false, Displayed: true } failure
         ? new CompactContent(
             FluentGlyphs.Error, InkRole.Caution, failure.Reason, failure.Next is null ? null : new CompactAction(failure.Next.Label), failure.Hold)
         {
