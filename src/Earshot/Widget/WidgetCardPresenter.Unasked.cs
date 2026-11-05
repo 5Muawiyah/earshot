@@ -44,12 +44,12 @@ internal sealed partial class WidgetCardPresenter
     private int _announcements;
     private int _unaskedLookReapplies;
 
-    // True while an unasked card is on screen on any display. For tests and for the asked card's own gate; the UI thread only.
     // Whether a full card is on screen, the asked one or an unasked one that is not the compact row. A full card tells a toggle itself;
     // a compact row has no place for it, so the gauge keeps the story under a row. Read from the cards themselves, so it is true at
     // the moment a card is shown or changes form.
     internal bool IsFullCardShown => IsShown || UnaskedOpenCards().Any(c => !c.Card.IsCompactShown);
 
+    // True while an unasked card is on screen on any display. For tests and for the asked card's own gate; the UI thread only.
     internal bool IsUnaskedShown => _unaskedCards.Values.Any(c => c.Card is { IsDisposed: false, Visible: true, IsExiting: false });
 
     // The displays an unasked card is on screen on now, by Id, for tests.

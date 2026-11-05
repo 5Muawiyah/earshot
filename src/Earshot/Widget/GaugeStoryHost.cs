@@ -1,6 +1,6 @@
 namespace Earshot.Widget;
 
-// Keeps the gauge's story (GaugeStory) for the tray: toggles start and end here, a card says when it is on screen, and the
+// Keeps the gauge's story (GaugeStory) for the tray: toggles start and end here, the tray says when a full card is on screen, and the
 // gauge asks what to show. It owns the one timer there is, the end of a tick's or a cross's hold, and none for a spin.
 //
 // The gauge shows the story only while no card is on screen: a card tells a toggle itself. Closing the card with a toggle still
@@ -76,7 +76,8 @@ internal sealed class GaugeStoryHost : IDisposable
         RaiseIfChanged(before);
     }
 
-    // A card (asked, unasked or compact) came on screen or left it. Recalculated at once, so closing a card hands over at once.
+    // A full card (the asked one, or an unasked one that is not the compact row) came on screen or left it; a compact row does not count,
+    // since it says nothing of a toggle. Recalculated at once, so closing a card hands over at once.
     public void SetCardOnScreen(bool onScreen)
     {
         if (_disposed || _cardOnScreen == onScreen)

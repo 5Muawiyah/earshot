@@ -951,7 +951,6 @@ internal sealed partial class TrayContext : ApplicationContext
         await RunToggleAsync(place, clickedAt, _supersedeNext, viaHotkey, _supersedeTrigger, _supersedeOrigin);
     }
 
-    // connect: the intent a newer click asked for, or null to take it from the device state.
     // How a finished toggle is told to the gauge and the card.
     internal static ToggleOutcome OutcomeOf(ToggleReport report, bool cancelled)
     {
@@ -967,6 +966,7 @@ internal sealed partial class TrayContext : ApplicationContext
         return report.IsSuccess ? ToggleOutcome.Succeeded : report.Status == OpStatus.Partial && report.Connect ? ToggleOutcome.Partial : ToggleOutcome.Failed;
     }
 
+    // connect: the intent a newer click asked for, or null to take it from the device state.
     private async Task RunToggleAsync(
         CardPlace place, long clickedAt, bool? connect, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, ToggleOrigin origin = ToggleOrigin.Elsewhere)
     {
