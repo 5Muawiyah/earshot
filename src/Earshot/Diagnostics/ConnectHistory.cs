@@ -23,6 +23,9 @@ internal static class ConnectHistoryActions
 internal static class ConnectHistoryOutcomes
 {
     public const string Connected = "connected";
+
+    // The connect took, and the audio quality protection after it did not apply (told as Partial): connected, not a failure.
+    public const string ConnectedNotProtected = "connected-not-protected";
     public const string Disconnected = "disconnected";
     public const string Failed = "failed";
     public const string Cancelled = "cancelled";

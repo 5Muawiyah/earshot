@@ -125,7 +125,10 @@ internal sealed partial class BlockCoordinator
             FixOfferDue = offer,
         };
 
-        string outcome = report.Cancelled ? ConnectHistoryOutcomes.Cancelled : report.IsSuccess ? ConnectHistoryOutcomes.Connected : ConnectHistoryOutcomes.Failed;
+        string outcome = report.Cancelled ? ConnectHistoryOutcomes.Cancelled
+            : report.IsSuccess ? ConnectHistoryOutcomes.Connected
+            : report.Status == OpStatus.Partial ? ConnectHistoryOutcomes.ConnectedNotProtected
+            : ConnectHistoryOutcomes.Failed;
         WriteHistory(new ConnectHistoryEntry(
             attempt.Started, ConnectHistoryActions.Connect, attempt.StartState, attempt.Path, ConnectHistory.FromSteps(report.Steps),
             attempt.Retried, outcome, failure.Class.ToString(), (long)(_time.GetUtcNow() - attempt.Started).TotalMilliseconds));

@@ -2,6 +2,7 @@ using Earshot.App;
 using Earshot.Audio.Connect;
 using Earshot.AudioProtection;
 using Earshot.Contracts;
+using Earshot.Diagnostics;
 using Earshot.Tray;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -279,6 +280,30 @@ public sealed class ProtectionSequenceTests
         Assert.AreEqual(BlockCoordinator.ConnectedNotProtectedMessage, report.UserMessage);
         Assert.AreEqual(true, h.Coordinator.PendingProtect);
         Assert.AreEqual(BlockCoordinator.ConnectedNotProtectedMessage, h.Cards.Statuses[^1]);
+    }
+
+    [TestMethod]
+    public void AConnectThatTookWithoutProtectionIsWrittenToTheConnectHistoryAsWhatHappenedNotAsAFailure()
+    {
+        using CoordinatorHarness h = Protecting(AudioProtectionState.Protected, settingOn: true);
+        h.Block.Status = Statuses.Allowed(blockAtBoot: false);
+        h.Monitor.Set(Devices.Idle(1));
+        h.Start();
+        h.Connection.Connects.Enqueue(_ =>
+        {
+            h.Protection.State = AudioProtectionState.NotProtected;
+            h.Monitor.Publish(Devices.Active(5));
+            return Task.FromResult(Results.Connected());
+        });
+        h.Protection.OnApply = (_, _) => Task.FromResult(ControllerResult.Fail("Could not protect audio quality. Try again.",
+            [StepOutcomes.FromWin32("bluetooth-set-service-state:111E", 5)]));
+
+        ToggleReport report = h.Toggle(connect: true);
+
+        Assert.AreEqual(OpStatus.Partial, report.Status, "Sanity: the connect took and the protection did not.");
+        ConnectHistoryEntry entry = h.History.Read().Single();
+        Assert.AreEqual(ConnectHistoryOutcomes.ConnectedNotProtected, entry.Outcome);
+        Assert.AreEqual("None", entry.FailureClass, "Whose side failed is not the question: the connect did not fail.");
     }
 
     [TestMethod]
