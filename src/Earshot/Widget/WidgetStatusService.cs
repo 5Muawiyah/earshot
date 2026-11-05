@@ -744,6 +744,7 @@ internal sealed partial class WidgetStatusService : IWidgetStatus, IDisposable
         _watchedContainer = watched;
         bool wasThisPc = _thisPcActive;
         _thisPcActive = CoordinatorRules.RenderOf(snapshot, watched) == RenderState.Active;
+        _snapshotSinceLeave = true;
         if (_thisPcActive && !wasThisPc)
         {
             NoteThisPcBackLocked();

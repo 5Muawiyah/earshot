@@ -98,13 +98,19 @@ public sealed class MovedToServiceTests
 
     // ---- This PC has them: a message or the bound gives back on this PC, not moved
 
+    // The device snapshot that says this PC has them again arrives after the leave: only then is a message "back on this PC".
     [TestMethod]
     public void AMessageWhileThisPcHasThemAgainIsNotMoved()
     {
         using var rig = new MovedToRig();
         rig.ThisPc(active: true);
+        rig.LeaveByOther();
+        rig.ThisPc(active: true);
 
-        rig.LeaveAndBeHeardNear();
+        double t = rig.Now;
+        rig.Hear(t + 0.9);
+        rig.Hear(t + 2.4);
+        rig.Hear(t + 3.8);
 
         Assert.AreNotEqual(AirPodsWhere.Elsewhere, rig.Where);
         Assert.IsEmpty(rig.Moved);
@@ -117,11 +123,31 @@ public sealed class MovedToServiceTests
         using var rig = new MovedToRig();
         rig.ThisPc(active: true);
         rig.LeaveByOther();
+        rig.ThisPc(active: true);
 
         rig.AdvanceTo(rig.Now + MovedToRule.MovedBound.TotalSeconds + 1);
 
         Assert.IsTrue(rig.LogHas(": back on this PC."));
         Assert.IsFalse(rig.LogHas(": not heard."));
+    }
+
+    // The leave is told before the device snapshot has caught up: this PC still reads as having them, which says nothing about now.
+    // A real move, heard in that gap, must still be judged moved and not used up as "back on this PC".
+    [TestMethod]
+    public void AMessageAfterTheLeaveAndBeforeAnySnapshotDoesNotUseUpTheVerdictAsBackOnThisPc()
+    {
+        using var rig = new MovedToRig();
+        rig.ThisPc(active: true);
+
+        rig.LeaveAndBeHeardNear();
+
+        Assert.HasCount(1, rig.Moved, "No snapshot has come since the leave, so this PC having them is old news.");
+        Assert.IsFalse(rig.LogHas(": back on this PC."));
+        Assert.IsTrue(rig.LogHas("moved."));
+
+        rig.ThisPc(active: false);
+
+        Assert.AreEqual(AirPodsWhere.Elsewhere, rig.Where, "The snapshot that catches up shows it.");
     }
 
     // ---- The other verdicts show nothing

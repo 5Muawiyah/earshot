@@ -27,6 +27,10 @@ internal sealed partial class WidgetStatusService
     private readonly MovedToRule _moved = new();
     private bool _movedElsewhere;
     private bool _leavePlaying;
+
+    // A device snapshot has arrived since the leave. Until one has, "this PC has them" is what was true before the leave, which says
+    // nothing about the pair that is sending now, so it must not use up a verdict as "back on this PC".
+    private bool _snapshotSinceLeave;
     private DateTimeOffset _lastPairedMessageAt;
     private ITimer? _movedTimer;
     private DateTimeOffset? _movedTimerDue;
@@ -46,6 +50,7 @@ internal sealed partial class WidgetStatusService
 
             _moved.Left(at);
             _leavePlaying = playing;
+            _snapshotSinceLeave = false;
             raise = ApplyMovedVerdictLocked(_moved.Check(at, backOnThisPc: false));
             RescheduleMovedTimerLocked();
         }
@@ -76,7 +81,7 @@ internal sealed partial class WidgetStatusService
             ClearMovedLocked("a case-known message of the pair came");
         }
 
-        MovedVerdict? verdict = _moved.Check(at, _thisPcActive);
+        MovedVerdict? verdict = _moved.Check(at, BackOnThisPcLocked);
         if (verdict is null)
         {
             return null;
@@ -86,6 +91,9 @@ internal sealed partial class WidgetStatusService
         RescheduleMovedTimerLocked();
         return raise;
     }
+
+    // Must be called holding _gate. This PC has the AirPods now, as a snapshot taken after the leave says.
+    private bool BackOnThisPcLocked => _snapshotSinceLeave && _thisPcActive;
 
     // Must be called holding _gate. Writes the verdict's line, and latches on moved when this PC was playing at the leave.
     private MovedVerdict? ApplyMovedVerdictLocked(MovedVerdict? verdict)
@@ -202,7 +210,7 @@ internal sealed partial class WidgetStatusService
 
                 now = _timeProvider.GetUtcNow();
                 _movedTimerDue = null;
-                raise = ApplyMovedVerdictLocked(_moved.Check(now, _thisPcActive));
+                raise = ApplyMovedVerdictLocked(_moved.Check(now, BackOnThisPcLocked));
                 if (_moved.TakeLongSummary(now) is { } held)
                 {
                     _log.Info(MovedVerdict.LongLine(held));
