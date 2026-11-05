@@ -451,6 +451,10 @@ internal sealed partial class TrayContext
     // The open card's own last-rendered ButtonEnabled, for tests: null when no card is open.
     internal bool? WidgetCardButtonEnabledForTest => _widgetCardPresenter?.CurrentModelForTest?.ButtonEnabled;
 
+    // Drives the same path a real moved-to verdict does, without messages from a real pair.
+    internal void RaiseMovedToForTest() => OnMovedTo(
+        this, new MovedToEventArgs(new MovedVerdict(MovedVerdictKind.Moved, new MovedSummary(0, TimeSpan.Zero, TimeSpan.Zero, 0, 0), TimeSpan.Zero), _time.GetUtcNow()));
+
     // Drives the same path a real IWidgetStatus.CaseOpened event does, without a real case-open advert.
     internal void RaiseCaseOpenedForTest() => OnCaseOpened(this, new CaseOpenedEventArgs(_time.GetUtcNow()));
 
