@@ -86,14 +86,15 @@ internal sealed partial class WidgetCardPresenter
         _uiPost(() => _ = OpenUnaskedOnUiThread(UnaskedKind.CaseOpened, gaugeBounds, generation));
     }
 
-    // IWidgetStatus.CaseClosed: the linked pair's case closed, so every unasked card closes, whatever the close setting says.
-    // Ignored when a newer opening was asked for after this was called: that opening is a case that is open now.
+    // IWidgetStatus.CaseClosed: the linked pair's case closed, so the card the case opened closes, whatever the close setting says.
+    // Any other unasked card (a notice that stays up, the card a failure opened, Moved to) is not the case's and stays until it is
+    // closed. Ignored when a newer opening was asked for after this was called: that opening is a case that is open now.
     public void CaseClosed()
     {
         int generation = _generation.Current;
         _uiPost(() =>
         {
-            if (_generation.IsCurrent(generation))
+            if (_generation.IsCurrent(generation) && _unaskedKind == UnaskedKind.CaseOpened)
             {
                 CloseUnasked("the case closed", promoteWaiting: true);
             }
@@ -586,7 +587,7 @@ internal sealed partial class WidgetCardPresenter
             {
                 if (_generation.IsCurrent(generation))
                 {
-                    CloseUnasked("its close time of " + closeSeconds.ToString(CultureInfo.InvariantCulture) + " s passed");
+                    CloseUnasked("its close time of " + closeSeconds.ToString(CultureInfo.InvariantCulture) + " s passed", promoteWaiting: true);
                 }
             }),
             null, after, Timeout.InfiniteTimeSpan);
