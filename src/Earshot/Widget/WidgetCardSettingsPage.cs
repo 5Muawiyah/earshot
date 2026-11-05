@@ -365,7 +365,7 @@ internal sealed partial class WidgetCard
 
     internal void ActivateSettingsTarget(SettingsTarget target)
     {
-        if (_model.Settings is not { } values)
+        if (_exiting || _model.Settings is not { } values)
         {
             return;
         }

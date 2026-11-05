@@ -1,7 +1,7 @@
 namespace Earshot.Widget;
 
 // What is on screen, as the arbiter sees it. A card on its way out is not on screen: it answers no press (WidgetCard ignores a
-// mouse or key press, and the compact button's screen reader press, while it fades), so nothing can happen to it, and a new card opens
+// mouse or key press, and a screen reader's press on any control of the compact or the full card, while it fades), so nothing can happen to it, and a new card opens
 // as if none were showing.
 internal enum CardShowing
 {

@@ -1895,7 +1895,7 @@ internal sealed partial class WidgetCard : Form
 
     private void ActivateSetupTarget(SetupTarget target)
     {
-        if (_model.Setup is not { } setup)
+        if (_exiting || _model.Setup is not { } setup)
         {
             return;
         }

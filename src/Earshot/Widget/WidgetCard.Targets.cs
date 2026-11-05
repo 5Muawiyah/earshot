@@ -203,8 +203,14 @@ internal sealed partial class WidgetCard
         return list;
     }
 
+    // A screen reader's press on a control. A card that is fading out answers none, as it answers no mouse or key press.
     private void Press(WidgetCardFocus target)
     {
+        if (_exiting)
+        {
+            return;
+        }
+
         _focus = target;
         ActivateFocused();
     }

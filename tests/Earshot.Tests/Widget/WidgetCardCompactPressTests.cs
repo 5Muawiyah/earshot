@@ -346,4 +346,41 @@ public sealed class WidgetCardCompactPressTests
             }
         });
     }
+
+    // The arbiter says a card on its way out answers no press: that covers a screen reader's press on the full card too.
+    [TestMethod]
+    public void AFullCardFadingOutAnswersNoScreenReaderPressOnAnyControl()
+    {
+        CardDesktop.Run(() =>
+        {
+            var clock = new FakeVBlankClock(60);
+            WidgetCard card = DesignPixels.NewCard(DesignTheme.Light, 1.0, notice: false);
+            using (card)
+            {
+                var toggles = new Counts();
+                var closes = new List<WidgetCardCloseReason>();
+                card.ToggleRequested += (_, _) => toggles.Action++;
+                card.CloseRequested += (_, reason) => closes.Add(reason);
+                card.AttachMotion(clock, () => true);
+                card.Render(CardKit.MainModel(), 96);
+                Size size = card.ClientSize;
+                card.PresentAnimated(new Rectangle(200, 900 - size.Height, size.Width, size.Height), 40);
+                Application.DoEvents();
+                clock.RunUntil(clock.Now + TimeSpan.FromMilliseconds(300));
+
+                card.HideAnimated();
+                clock.RunUntil(clock.Now + TimeSpan.FromMilliseconds(40));
+                Assert.IsTrue(card.IsExiting, "Sanity: the card is fading out.");
+                closes.Clear();
+
+                foreach (CardControl control in card.CurrentControls().Where(c => c.Role == CardControlRole.PushButton))
+                {
+                    control.Activate();
+                }
+
+                Assert.AreEqual(0, toggles.Action, "Connect is not pressed on a card that is leaving.");
+                Assert.IsEmpty(closes, "Nor is anything else.");
+            }
+        });
+    }
 }
