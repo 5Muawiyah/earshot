@@ -24,7 +24,7 @@ internal readonly record struct GaugeStoryFrame(
     // 12 o'clock.
     public const double TwelveOClock = -90;
 
-    // The sweep that turns while it connects: a quarter of the ring (the design's 90 degrees).
+    // The sweep that turns while it connects: a quarter of the ring, 90 degrees (a design choice).
     public const double SweepDegrees = 90;
 
     // The arc that is the live level: the reading's share of the circle, or none when there is no live reading to sweep to

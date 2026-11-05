@@ -18,7 +18,7 @@ namespace Earshot.Widget;
 // Frames are asked of the display only while something moves: a turning sweep and the short moves between looks. The holds, the
 // gauge at rest and a gauge nobody can see ask for none. With animation effects off, or no driver, the sweep is a still quarter
 // at 12 o'clock, and the tick and the cross appear and leave with no fade. The durations are FluentMotion's; the 1000 ms turn,
-// the 90 degree sweep and the 250/167/83 ms moves are the design's.
+// the 90 degree sweep and the 250, 167 and 83 ms moves are design choices.
 internal sealed class GaugeMotion
 {
     // The sweep's turn.
