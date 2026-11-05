@@ -259,6 +259,13 @@ internal sealed partial class WidgetCard
 
     private static bool SameWords(CompactContent? a, CompactContent? b) => (a is null && b is null) || (a is not null && b is not null && a with { Hold = null } == b with { Hold = null });
 
+    // Whether the model changes the form on show (compact to full or back) or says another thing in the compact row on show.
+    private bool FormOrRowChanges(WidgetCardModel model)
+    {
+        CardForm to = WantsCompact(model) ? CardForm.Compact : CardForm.Full;
+        return _shownForm != to || (to == CardForm.Compact && !SameWords(_model.Compact, model.Compact));
+    }
+
     // Called before a new model is laid out: when the card is on screen and its form is about to change, or its compact row is
     // about to say something else, the old content is kept as a picture.
     private FormChange BeginFormChange(WidgetCardModel model)
@@ -537,6 +544,9 @@ internal sealed partial class WidgetCard
             StopWorkSpin();
             FinishFormFade();
             _pointerOver = false;
+
+            // A press left over from the showing that ended is not answered by an up on the next one.
+            ClearPressedFlags();
         }
         else
         {

@@ -347,6 +347,11 @@ internal sealed partial class WidgetCard : Form
     {
         WidgetCardView before = _shownView;
         FormChange formChange = BeginFormChange(model);
+        if (FormOrRowChanges(model))
+        {
+            // What was pressed belonged to the form or row that is going: its up is no click on the one that replaces it.
+            ClearPressedFlags();
+        }
 
         // A row on show that says something else starts its hold again, with or without a crossfade.
         bool restartHold = Visible && IsCompactShown && WantsCompact(model) && !SameWords(_model.Compact, model.Compact);
@@ -623,6 +628,8 @@ internal sealed partial class WidgetCard : Form
         _leftButtonDownOnStatus = false;
         _leftButtonDownOnStrip = false;
         _leftButtonDownOnSendTo = false;
+        _leftButtonDownOnCompactAction = false;
+        _leftButtonDownOnCompactBody = false;
         _leftButtonDownOnSetupTarget = null;
         _leftButtonDownOnSettingsTarget = null;
         EndScrollDrag();
