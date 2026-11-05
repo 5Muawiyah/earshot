@@ -85,8 +85,9 @@ automated unit tests that run on every build. See
 [verification.md](verification.md).
 
 **Moved to.** A small card, "Moved to iPhone", with a take-back button, shown when
-another device seems to have taken the AirPods. It rests on the broadcast saying
-only that the pair is out of the case and near the PC, so it can be wrong. See
+another device seems to have taken the AirPods while this PC was playing to them.
+It rests on the broadcast saying only that the pair is out of the case and near
+the PC, so it can be wrong. See
 [overview.md](overview.md#moved-to).
 
 **Microphone off mode.** An opt-in setting, off by default, that turns audio

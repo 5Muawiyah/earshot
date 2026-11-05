@@ -457,7 +457,7 @@ gauge has five looks, and its tooltip says why:
 | On this PC, with no bud reading | The earbud mark alone | `No recent reading` |
 | Not on this PC, with a case reading | A case mark, the ring and the case's number, all in grey, and a bolt if the case was charging | `Not on this PC`, then `Case 80%`, then `Last read` or `Estimated` with the age |
 | Not on this PC, with no case reading | The earbud mark, faded | `Not on this PC` |
-| Not on this PC, and your AirPods are near and in use on another device | The earbud mark and a phone | `On your iPhone`, or the label you set, then the case when there is a reading of it |
+| Not on this PC, and they left while this PC was playing to them, and are still near | The earbud mark and a phone | `On your iPhone`, or the label you set, then the case when there is a reading of it |
 
 A reading stays on the gauge, greyed, however old it is, until a newer one is
 heard. A bud with no reading is left out of the tooltip, never shown as a
@@ -621,11 +621,16 @@ real case, and it shows about two seconds later than before.
 
 **Moved to.** When another device takes the AirPods, the card opens small with
 "Moved to iPhone" (or "Moved to another device" when you have not set a name) and
-a take-back button, and folds away after a few seconds. The take-back button is a
-Connect. The broadcast cannot say that the iPhone took them. It says only that the
-pair is out of the case and near the PC, so the card may show when the AirPods
-simply left for another reason. It has not been tested live. It is on by default,
-under More, and `moved-to` on the command line turns it off.
+a take-back button, and folds away after a few seconds, or at once when it stops
+being true. The take-back button is a Connect, so it cannot disconnect AirPods
+that came back another way. It shows only if this PC was playing to them when they
+left. A move from a silent PC shows nothing and does not read "On your iPhone":
+AirPods out of the case and idle look just the same. That is a choice made without
+a live trial, and the log still records what it would have said. The broadcast
+cannot say that the iPhone took them. It says only that the pair is out of the
+case and near the PC, so the card may show when the AirPods simply left for another
+reason. It has not been tested live. It is on by default, under More, and
+`moved-to` on the command line turns it off.
 
 **The low battery alert.** A Windows notification, or the card if a
 notification cannot be shown, the moment a live value first reads at or below
@@ -715,8 +720,9 @@ address, so it does not depend on the mode.
   source gives either, so ear detection stays off and the card that
   opens with the case closes when the case stops sending rather than on a lid bit.
 - **Windows' own figure is usually empty.** Earshot reads the Hands-Free
-  battery property from the AirPods' device nodes only. With Hands-Free off, the
-  default, it was seen empty on this PC.
+  battery property from the AirPods' device nodes only. It is shown as Windows
+  gives it, so it may not be in steps of 10%. With Hands-Free off, the default, it
+  was seen empty on this PC.
 - **The widget hears everyone's AirPods nearby, not only yours.** A room full
   of the same model broadcasts the same way yours do. See below.
 

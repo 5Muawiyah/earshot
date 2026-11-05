@@ -96,6 +96,9 @@ public sealed class ReadmeBatteryTextTests
 
         StringAssert.Contains(text, "it may show when the AirPods simply left for another reason");
         StringAssert.Contains(text, "It has not been tested live");
+        StringAssert.Contains(text, "It shows only if this PC was playing to them when they left");
+        StringAssert.Contains(text, "A move from a silent PC shows nothing");
+        StringAssert.Contains(text, "may not be in steps of 10%");
         StringAssert.Contains(text, "`moved-to` on the command line");
         StringAssert.Contains(text, "The card is Earshot's only popup");
     }

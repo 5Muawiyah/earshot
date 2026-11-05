@@ -204,9 +204,9 @@ Startup on is not covered.
   and does not prove.
 - **Opens the card when your case opens near the PC**, with the three levels and
   Connect, and closes it when the case closes. It never takes focus.
-- **Shows "Moved to" when another device takes the AirPods**, a small card with a
-  take-back button. It cannot know it was another device: see
-  [The one card](#the-one-card).
+- **Shows "Moved to" when another device takes the AirPods while this PC is
+  playing to them**, a small card with a take-back button. It cannot know it was
+  another device: see [The one card](#the-one-card).
 - **Hands the AirPods back at shut down, sleep and Exit**, on for a new
   install. Earshot lets them go, confirms it, and blocks the device nodes again
   before this PC can grab them back. A stuck disconnect still gets the block.
@@ -311,8 +311,9 @@ What to know before you trust a number:
   description. Both are unproved, and so is whether a step is rounded or
   floored.
 - **Windows' own figure.** When Windows has a Hands-Free battery reading for the
-  AirPods, Earshot reads it too, from the AirPods' device nodes only. With
-  Hands-Free off, the default, it was seen empty on this PC.
+  AirPods, Earshot reads it too, from the AirPods' device nodes only. It is shown
+  as Windows gives it, so it may not be in steps of 10%. With Hands-Free off, the
+  default, it was seen empty on this PC.
 - **Ear detection is built but inactive.** Pausing when a bud comes out, and
   resuming when it goes back, needs a documented in-ear value, and there is none.
   It does nothing today.
@@ -343,10 +344,14 @@ of those logs, not on a real case.
 
 **Moved to.** When another device takes the AirPods, a small card says "Moved
 to iPhone" (or "Moved to another device") with a take-back button, which is
-Connect, and folds away. What it cannot tell: the broadcast says only that the
-pair is out of the case and near the PC, so it may show when the AirPods simply
-left for another reason. It has not been tested live. It is on by default, under
-More, and `moved-to` on the command line.
+Connect, and folds away. It shows only if this PC was playing to them when they
+left. A move from a silent PC shows nothing and does not read "On your iPhone":
+AirPods out of the case and idle look just the same, and in my saved logs seven
+of eight such leaves had nothing playing. That is a choice made without a live
+trial, and the log still records what it would have said. What it cannot tell:
+the broadcast says only that the pair is out of the case and near the PC, so it
+may show when the AirPods simply left for another reason. It has not been tested
+live. It is on by default, under More, and `moved-to` on the command line.
 
 **From 1.4.0.** A fully charged notice, one per charge per part, on by
 default. Low battery alerts now cover the case. **Battery history** is a 24 hour

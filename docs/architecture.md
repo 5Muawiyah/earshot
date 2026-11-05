@@ -773,13 +773,15 @@ Case open" or "Earshot: AirPods", and a compact card "Earshot: " plus its text.
 The Connect or Disconnect button only ever fires on a genuine click on that
 button; nothing else in the code path can press it.
 
-**Moved to.** When another device takes the AirPods, the card opens compact
-with "Moved to iPhone" (or "Moved to another device" when the other device has
-no name set) and a take-back icon, holds 6 seconds and folds. The broadcast has
-no documented in-ear bit, so `AirPodsWhere.Elsewhere` could not occur before:
-`MovedToRule` reads the pair's messages itself. `PauseOnLeave` raises
+**Moved to.** When another device takes the AirPods while this PC is playing to
+them, the card opens compact with "Moved to iPhone" (or "Moved to another device"
+when the other device has no name set) and a take-back icon, holds 6 seconds and
+folds, or folds at the next refresh once `Where` is no longer elsewhere. The
+broadcast has no documented in-ear bit, so `AirPodsWhere.Elsewhere` could not occur
+before: `MovedToRule` reads the pair's messages itself. `PauseOnLeave` raises
 `LeftByOther` for a leave Earshot did not start, whether or not pause on leave is
-on. Earshot's own leaves (Disconnect, Send to, the shortcut, the hand-back at
+on, with whether its last reading still fresh enough to say was playing; it keeps
+taking those readings with the pause off, because this rests on them. Earshot's own leaves (Disconnect, Send to, the shortcut, the hand-back at
 shut down, sleep or Exit, and any change in flight) start no watch. A leave then
 gives one of four verdicts within ten seconds: Moved (at least three messages of
 the paired model with the case level unknown, the first and last at least two
@@ -788,12 +790,16 @@ ten seconds before the leave on), Into the case (any case-known message in that
 span), Not heard (too few or too weak), or Back here. The ten seconds, the
 three messages and the -80 dBm are design choices. The first two reuse the
 re-find rule's figures; -80 dBm adds 4 dB to the strongest worn-nearby reading
-saved, and the signal at the edge of range is unmeasured. A Moved verdict
-latches `Where` as elsewhere until this PC is active again, a case-known message
+saved, and the signal at the edge of range is unmeasured. A Moved verdict on a
+leave with this PC playing latches `Where` as elsewhere until this PC is active again, a case-known message
 is heard, or 120 seconds pass with no message of the pair. That latch runs
 whatever the setting says; only the compact card obeys it, and **Moved to** is
-on by default, under More, `moved-to` on the command line. The take-back button
-is a Connect, from a genuine click only: the icon turns to a ring, then a tick
+on by default, under More, `moved-to` on the command line. A leave with nothing
+playing latches nothing and shows nothing, and still writes its `Move:` lines with
+the verdict it would have given, so a move from a silent PC is not shown; that is a
+choice made without a live trial, and those lines are what could widen it. The
+take-back button is a Connect and never a toggle, so it cannot disconnect AirPods
+that came back another way, from a genuine click only: the icon turns to a ring, then a tick
 and the card folds, or the card grows to the full one in its failed state.
 Thirty seconds after each leave a `Move:` line records how many messages arrived
 and at what median strength, so a longer bound can be judged from the log.
@@ -803,8 +809,8 @@ near. It does not say the iPhone took it. AirPods out of the case and idle, afte
 Windows dropped the link for its own reasons, read the same, so the card may show
 when the AirPods simply left for another reason. In the saved logs, six of eight
 leaves Earshot did not start were followed by minutes of messages, none while
-anyone was watching, and each would show "Moved to iPhone" under this rule. A
-same-model pair near the PC at a real out-of-range leave would also read as
+anyone was watching, and seven of the eight had nothing playing, which is why the
+rule asks that this PC was playing. A same-model pair near the PC at a real out-of-range leave would also read as
 moved, which is part of the accepted risk, and no figure is shown. Moved to has
 not been tested live.
 

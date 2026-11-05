@@ -49,7 +49,7 @@ stays pending until a run on the device has written the evidence for it.
 | The AirPods widget: the taskbar gauge, its card, the broadcast battery with greying, and Refresh (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet. Test 19 is worded for the one card, with no estimates |
 | The card opening with the case: open the case near the PC and the main card appears on the gauge's display without taking focus; shut the case and it closes; its close button closes it; a case left shut shows nothing (`tools\live-tests\25-OneCard.ps1`, test 25) | Pending: no live run yet. See 1.7.0, below |
 | The gauge's Connect story with the card closed (ring spins, then a tick or a cross), and the card's ring when it is open (`tools\live-tests\25-OneCard.ps1`) | Pending: no live run yet. The hold times and the sweep are design choices |
-| Moved to: the small card with Take back when another device takes the AirPods, and nothing for Earshot's own Disconnect or a walk out of range (`tools\live-tests\25-OneCard.ps1`) | Pending: no live run yet. See 1.7.0, below |
+| Moved to: the small card with Take back when another device takes the AirPods while this PC plays to them, and nothing for Earshot's own Disconnect or a walk out of range (`tools\live-tests\25-OneCard.ps1`) | Pending: no live run yet. See 1.7.0, below |
 | Last readings away from this PC: the case mark with its last reading and age, kept until a newer one is heard (`tools\live-tests\25-OneCard.ps1`) | Pending: no live run yet. There are no estimates to verify |
 | The card shortcut, Ctrl+Alt+Shift+E, the fully charged notice, the low battery alert for the case, and the battery history page | Pending: no live run yet, and no live test script covers them |
 | Copy diagnostics pasted somewhere public with no address, id, name or user path left in it | Pending: no live run yet |
@@ -91,10 +91,12 @@ Still unproved at release:
 - The signature of a real walk out of range.
 - The Moved to bound (10 seconds), message count (3) and signal level (-80 dBm).
   All three are design choices, and no trial was run.
-- Whether Moved to is true when nothing was playing. In the saved logs, six of
-  eight leaves Earshot did not start were followed by minutes of messages, and
-  each would show Moved to under this rule.
-- Whether Windows' figure ever exists, and in what steps.
+- Whether a move from a silent PC could be shown truly. Moved to shows only when
+  this PC was playing at the leave, a choice made without a live trial. In the saved
+  logs, six of eight leaves Earshot did not start were followed by minutes of
+  messages and seven had nothing playing. The log records what each would have said.
+- Whether Windows' figure ever exists, and in what steps. It is shown as Windows
+  gives it, so it may not be in steps of 10%.
 - Whose the 17-byte messages are. They are counted by shape and not used.
 
 Left and right, rounds or floors, and the charging bits stay marked unproved
