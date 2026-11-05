@@ -518,6 +518,10 @@ internal static class WidgetCopy
     // The status row's words while Bluetooth is off.
     public const string BluetoothOff = "Bluetooth off";
     public const string TipBluetoothSettings = "Open Bluetooth settings";
+    public const string BluetoothNotWorking = "Bluetooth isn't working";
+    public const string TipBluetoothNotWorking = "Bluetooth on this PC isn't working";
+    public const string BluetoothSettingsButton = "Bluetooth settings";
+    public const string NoAirPodsPaired = "No AirPods paired";
     public const string NotListening = "Not listening";
     public const string ReadingBattery = "Reading the battery";
     public static readonly string NothingHeardOpenTheCase = "Nothing heard. " + OpenTheCase + " near this PC";

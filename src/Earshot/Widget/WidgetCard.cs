@@ -83,6 +83,9 @@ internal sealed record WidgetCardModel(
     // The failure of the last connect or disconnect, said in the status row: its glyph, the reason whole, and the next step as a
     // text button at the right of the last line. Its Hold is how long an unasked card showing it stays (null: until it is closed).
     public CompactContent? Failure { get; init; }
+
+    // This PC's own Bluetooth and whether any AirPods are paired, from the radio check's last result; Ok when nothing is known.
+    public CardRadio Radio { get; init; } = CardRadio.Ok;
 }
 
 // The dedicated three-column card: Left, Right, Case battery (each greyed when its value is not fresh), where
@@ -141,6 +144,9 @@ internal sealed partial class WidgetCard : Form
 
     // The status row's chevron was pressed while Bluetooth is off: the presenter opens Windows' Bluetooth settings.
     public event EventHandler? BluetoothSettingsRequested;
+
+    // The button was pressed while no AirPods are paired: the presenter starts Pair AirPods.
+    public event EventHandler? PairAirPodsRequested;
 
     // The Send to row was pressed (Enter, Space or a mouse click on it): the presenter closes the card and opens the picker.
     public event EventHandler? SendToRequested;
@@ -1068,7 +1074,18 @@ internal sealed partial class WidgetCard : Form
                 return;
             }
 
-            ToggleRequested?.Invoke(this, EventArgs.Empty);
+            if (NotWorking)
+            {
+                BluetoothSettingsRequested?.Invoke(this, EventArgs.Empty);
+            }
+            else if (NoAirPodsPaired)
+            {
+                PairAirPodsRequested?.Invoke(this, EventArgs.Empty);
+            }
+            else
+            {
+                ToggleRequested?.Invoke(this, EventArgs.Empty);
+            }
         }
         else if (_focus == WidgetCardFocus.Gear)
         {
@@ -1084,7 +1101,7 @@ internal sealed partial class WidgetCard : Form
         }
         else if (_focus == WidgetCardFocus.Refresh)
         {
-            if (!_mainLayout.Refresh.IsEmpty && !BluetoothOff)
+            if (!_mainLayout.Refresh.IsEmpty && !RefreshDisabled)
             {
                 RefreshRequested?.Invoke(this, EventArgs.Empty);
             }
@@ -1554,6 +1571,16 @@ internal sealed partial class WidgetCard : Form
                 return (FluentGlyphs.BluetoothOff, WidgetCopy.BluetoothOff, colours.Text);
             }
 
+            if (NotWorking)
+            {
+                return (FluentGlyphs.Error, WidgetCopy.BluetoothNotWorking, colours.Caution);
+            }
+
+            if (NoAirPodsPaired)
+            {
+                return (FluentGlyphs.Bluetooth, WidgetCopy.NoAirPodsPaired, colours.Text);
+            }
+
             if (_model.Refresh is { IsProblem: true } problem && problem.Outcome == BatteryRefreshOutcome.NothingHeard)
             {
                 return (FluentGlyphs.Warning, WidgetCopy.OpenTheCase, colours.Caution);
@@ -1578,8 +1605,23 @@ internal sealed partial class WidgetCard : Form
     // Connect are disabled while it is.
     internal bool BluetoothOff =>
         !_unasked
-        && (_model.Refresh?.Outcome == BatteryRefreshOutcome.BluetoothOff
+        && (_model.Radio == CardRadio.Off
+            || _model.Refresh?.Outcome == BatteryRefreshOutcome.BluetoothOff
             || (_model.Snapshot.Watcher == WidgetWatcherState.Stopped && _model.Snapshot.WatcherErrorCode == AdvertisementSourceCodes.RadioNotAvailableCode));
+
+    // This PC's Bluetooth is not working, or no AirPods are paired: the status row says so and the button does the next thing. Only on a
+    // card the person asked for.
+    internal bool NotWorking => !_unasked && !BluetoothOff && _model.Radio == CardRadio.NotWorking;
+
+    internal bool NoAirPodsPaired => !_unasked && !BluetoothOff && !NotWorking && _model.Radio == CardRadio.NoAirPodsPaired;
+
+    // The refresh icon cannot read while the radio is off or not working.
+    internal bool RefreshDisabled => BluetoothOff || NotWorking;
+
+    // The button's words: Connect or Disconnect, or the next step when the radio or the pairing is the problem.
+    internal string ButtonLabel => NotWorking ? WidgetCopy.BluetoothSettingsButton
+        : NoAirPodsPaired ? WidgetCopy.PairAirPodsRow
+        : _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect;
 
     // Whether a point is on the part of the status row that can be pressed: a carried notice's button, or the whole row when it leads
     // to Bluetooth settings.
@@ -1616,7 +1658,7 @@ internal sealed partial class WidgetCard : Form
     private void DrawButton(Graphics g, Rectangle rect)
     {
         CardColours colours = Colours;
-        bool connect = _model.ConnectIntent && !Working;
+        bool connect = (NoAirPodsPaired || _model.ConnectIntent) && !NotWorking && !Working;
         bool enabled = ButtonUsable || Working;
         Color fill = !enabled ? colours.ControlFillDisabled : connect ? colours.Accent : colours.ControlFill;
         Color stroke = !enabled ? colours.ControlStroke : connect ? colours.Accent : colours.ControlStroke;
@@ -1639,7 +1681,7 @@ internal sealed partial class WidgetCard : Form
             g.DrawLine(bottom, rect.Left + radius, rect.Bottom - 1, rect.Right - radius - 1, rect.Bottom - 1);
         }
 
-        DrawButtonFace(g, rect, _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, text, colours);
+        DrawButtonFace(g, rect, ButtonLabel, text, colours);
         if (!_unasked && _focus == WidgetCardFocus.Button && FocusShown)
         {
             CardPaint.Focus(g, rect, radius, colours, _dpi);

@@ -1077,6 +1077,15 @@ internal sealed partial class TrayContext : ApplicationContext
             _toggleReported = true;
             // A radio that is off, switched off, broken or absent is the whole story of a failed connect: its line and its button are
             // shown, and nothing that cannot help (Fix connection, Connect in Windows) is offered. Read once, only after a failure.
+            if (report.IsSuccess)
+            {
+                SetCardRadio(CardRadio.Ok);
+            }
+            else if (report.StartPairAirPods)
+            {
+                SetCardRadio(CardRadio.NoAirPodsPaired);
+            }
+
             RadioCheckResult? radio = wanted && !report.IsSuccess && !cancelled ? await ReadRadioAfterFailureAsync(cts.Token) : null;
             bool radioBlocks = radio is { BlocksRepair: true };
             bool fixOffered = !radioBlocks && FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);

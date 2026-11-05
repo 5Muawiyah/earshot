@@ -184,7 +184,8 @@ internal sealed partial class TrayContext
                 SendToRowOn: () => SendToAccess.CardRow(_registry.Settings.Current.Widget, unasked: false),
                 OpenSendTo: () => OpenSendTo(openedByKeyboard: false),
                 LowBatteryThreshold: () => _registry.Settings.Current.Widget.LowBatteryThresholdPercent,
-                MovedToOn: () => _registry.Settings.Current.Widget.MovedToOn);
+                MovedToOn: () => _registry.Settings.Current.Widget.MovedToOn,
+                Radio: () => CardRadioNow);
 
             // The one presenter opens the asked card and the unasked ones: built here, with the data pipeline, so a case opening
             // is shown with no gauge on the taskbar.

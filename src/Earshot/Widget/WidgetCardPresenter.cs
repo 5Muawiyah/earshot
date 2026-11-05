@@ -28,7 +28,8 @@ internal sealed record WidgetCardPresenterCallbacks(
     Func<bool>? SendToRowOn = null,   // whether the card shows its Send to row (SendToAccess.CardRow); off when null
     Action? OpenSendTo = null,        // the Send to row was pressed: the picker opens
     Func<int>? LowBatteryThreshold = null,   // the Low battery alerts level; a live reading at or under it is drawn in caution
-    Func<bool>? MovedToOn = null)            // whether the compact "Moved to" card may show (WidgetSettings.MovedToOn); on when null
+    Func<bool>? MovedToOn = null,            // whether the compact "Moved to" card may show (WidgetSettings.MovedToOn); on when null
+    Func<CardRadio>? Radio = null)           // this PC's Bluetooth and pairing from the radio check's last result; Ok when null
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }
@@ -454,6 +455,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
             Parts = BatteryFreshness.Shown(snapshot, time.GetUtcNow()),
             ShowSendTo = callbacks.SendToRowOn?.Invoke() ?? false,
             LowBatteryThresholdPercent = callbacks.LowBatteryThreshold?.Invoke() ?? WidgetSettings.DefaultLowBatteryThresholdPercent,
+            Radio = callbacks.Radio?.Invoke() ?? CardRadio.Ok,
         };
     }
 
@@ -481,6 +483,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
         _card.SettingsRequested += OnSettingsRequested;
         _card.RefreshRequested += OnRefreshRequested;
         _card.BluetoothSettingsRequested += OnBluetoothSettingsRequested;
+        _card.PairAirPodsRequested += OnPairAirPodsRequested;
         _card.SendToRequested += OnSendToRequested;
         _card.UpdateRequested += OnUpdateRequested;
         _card.SettingChanged += OnSettingChanged;
@@ -497,6 +500,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
         card.SettingsRequested -= OnSettingsRequested;
         card.RefreshRequested -= OnRefreshRequested;
         card.BluetoothSettingsRequested -= OnBluetoothSettingsRequested;
+        card.PairAirPodsRequested -= OnPairAirPodsRequested;
         card.SendToRequested -= OnSendToRequested;
         card.UpdateRequested -= OnUpdateRequested;
         card.SettingChanged -= OnSettingChanged;
@@ -505,6 +509,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
     }
 
     private void OnBluetoothSettingsRequested(object? sender, EventArgs e) => _host?.OpenBluetoothSettings(_place);
+
+    // Pair AirPods is the one pairing flow of this build, never Windows' own Bluetooth page.
+    private void OnPairAirPodsRequested(object? sender, EventArgs e) => _host?.PairAirPods();
 
     // The Send to row: the card goes away, as it does for any action it starts, and the picker opens where it was.
     private void OnSendToRequested(object? sender, EventArgs e)

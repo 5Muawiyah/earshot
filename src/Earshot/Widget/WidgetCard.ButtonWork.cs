@@ -109,6 +109,6 @@ internal sealed partial class WidgetCard
     {
         CardButtonWork.Connecting => WidgetCopy.GaugeConnecting,
         CardButtonWork.Disconnecting => WidgetCopy.GaugeDisconnecting,
-        _ => _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect,
+        _ => ButtonLabel,
     };
 }

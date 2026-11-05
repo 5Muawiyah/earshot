@@ -68,7 +68,7 @@ internal sealed partial class WidgetCard
 
         CardColours colours = Colours;
         bool reading = _model.Refresh is { Reading: true };
-        Color ink = reading ? colours.Accent : BluetoothOff ? colours.TextDisabled : colours.Text;
+        Color ink = reading ? colours.Accent : RefreshDisabled ? colours.TextDisabled : colours.Text;
         Rectangle bounds = layout.Refresh;
         GraphicsState saved = g.Save();
         if (reading)

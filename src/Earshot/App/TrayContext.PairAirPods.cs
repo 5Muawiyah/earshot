@@ -25,6 +25,29 @@ internal sealed partial class TrayContext
     // The "No AirPods are paired" card is offered once per run of the tray.
     private bool _noAirPodsOffered;
 
+    // What the radio check and the connect reports last said of this PC's Bluetooth and pairing, for the card's status row. Only what
+    // those already read: nothing here reads the device. Written on the thread that finished the read, read on the UI thread.
+    private int _cardRadio = (int)CardRadio.Ok;
+
+    private CardRadio CardRadioNow => (CardRadio)Volatile.Read(ref _cardRadio);
+
+    private void SetCardRadio(CardRadio radio) => Volatile.Write(ref _cardRadio, (int)radio);
+
+    // A radio check's result: a radio that is off or not working replaces what was known, an Ok one clears them (it does not clear
+    // "no AirPods paired", which the radio cannot know), and a result that says nothing changes nothing.
+    private void NoteRadioForCard(RadioCheckResult result)
+    {
+        if (CardRadioMap.FromOrNull(result.State) is not { } radio)
+        {
+            return;
+        }
+
+        if (radio != CardRadio.Ok || CardRadioNow is CardRadio.Off or CardRadio.NotWorking)
+        {
+            SetCardRadio(radio);
+        }
+    }
+
     // True while the start-time look at a pairing that did not finish runs: the run flag stays up for it whatever else ends.
     private bool _recoveringPair;
 
@@ -112,7 +135,7 @@ internal sealed partial class TrayContext
 
     internal void PairAirPodsFromSettings()
     {
-        _log.Info("Pair AirPods: started from the settings page.");
+        _log.Info("Pair AirPods: started from the settings page or the card.");
         StartPairAirPods(CardPlace.NearTray);
     }
 
@@ -591,6 +614,7 @@ internal sealed partial class TrayContext
             return RadioSays.Stop;
         }
 
+        NoteRadioForCard(result);
         _log.Info("Pairing check (" + reason + "): radio " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms." + StepOutcomes.DescribeFailures(result.ReadCodes));
         if (_closing || _elevatedRun == PairRun)
         {
@@ -646,6 +670,7 @@ internal sealed partial class TrayContext
 
         var watch = System.Diagnostics.Stopwatch.StartNew();
         RadioCheckResult result = await radio.CheckAsync(ct);
+        NoteRadioForCard(result);
         _log.Info("Radio check after a failed connect, " + result.State + " in " + watch.ElapsedMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " ms." + StepOutcomes.DescribeFailures(result.ReadCodes));
         return result;
     }
@@ -723,6 +748,7 @@ internal sealed partial class TrayContext
         }
 
         _noAirPodsOffered = true;
+        SetCardRadio(CardRadio.NoAirPodsPaired);
         _log.Info("No AirPods are paired with this PC, so Pair AirPods is offered.");
         // Stays up until it is used: it is the way forward after an install with nothing paired, often shown at sign-in.
         if (!await ShowStayingCardAsync(PairAirPodsText.NoAirPodsPaired, PairAirPodsText.Title, () => StartPairAirPods(place), place, cards))
@@ -980,6 +1006,11 @@ internal sealed partial class TrayContext
             session = new PairingSession(services.Api, services.Nodes, ui, services.Options, _log, services.Radio);
             _pairRunSession = session;
             RadioCheckResult? radio = await session.CheckRadioAsync(cancel.Token);
+            if (radio is not null)
+            {
+                NoteRadioForCard(radio);
+            }
+
             if (radio is not { BlocksRepair: true })
             {
                 // look-ms is the question's time alone, after the radio read.
@@ -1038,6 +1069,11 @@ internal sealed partial class TrayContext
                 _log.Warn("Pair AirPods: the paired device could not be checked, so the recovery marker is kept and the device picker is offered.");
                 OfferChooseLeftPair(PairingText.Unverified, place);
                 return new PairRunEnd(result, null, false);
+            }
+
+            if (result.Outcome == PairOutcome.Paired && CardRadioNow == CardRadio.NoAirPodsPaired)
+            {
+                SetCardRadio(CardRadio.Ok);
             }
 
             if (result.Outcome != PairOutcome.Paired || result.Adoptable is not { } found)

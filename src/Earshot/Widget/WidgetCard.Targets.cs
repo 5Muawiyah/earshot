@@ -102,7 +102,7 @@ internal sealed partial class WidgetCard
         {
             list.Add(new CardControl(
                 WidgetCopy.RefreshBattery, CardControlRole.PushButton, layout.Refresh, RefreshTip, true, false,
-                focus && _focus == WidgetCardFocus.Refresh, !BluetoothOff, () => Press(WidgetCardFocus.Refresh))
+                focus && _focus == WidgetCardFocus.Refresh, !RefreshDisabled, () => Press(WidgetCardFocus.Refresh))
             {
                 Tooltip = CardTooltips.ForRefresh(_model.Refresh is { Reading: true }),
             });
@@ -120,6 +120,14 @@ internal sealed partial class WidgetCard
                         focus && _focus == WidgetCardFocus.Status, true, () => Press(WidgetCardFocus.Status)));
                 }
             }
+        }
+        else if (NotWorking)
+        {
+            list.Add(new CardControl(
+                WidgetCopy.BluetoothNotWorking, CardControlRole.StaticText, layout.WhereLine, null, false, false, false, true, static () => { })
+            {
+                Tooltip = WidgetCopy.TipBluetoothNotWorking,
+            });
         }
         else if (BluetoothOff)
         {
