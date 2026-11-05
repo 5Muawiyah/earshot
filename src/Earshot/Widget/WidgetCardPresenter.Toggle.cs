@@ -118,6 +118,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         if (IsShown || IsUnaskedFullShown)
         {
             _failure = failure with { Displayed = true };
+            HoldCaseCardForFailure();
             RenderEveryCard();
             AnnounceFailure(reason);
             _log.Write(LogLevel.Debug, "Card: connect failed, said in the open card" + (next is null ? "." : ", with a next step."));
@@ -193,6 +194,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
     {
         StopFailureTimer();
         _failure = null;
+        EndFailureOnTheCaseCard();
     }
 
     private void StopFailureTimer()

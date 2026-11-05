@@ -35,6 +35,11 @@ internal sealed partial class WidgetCardPresenter
     private readonly OpenGeneration _generation = new();
     private readonly UnaskedParts? _unaskedParts;
     private ITimer? _unaskedCloseTimer;
+
+    // The close time the case card was opened with, and whether a failure drawn on it is holding that time (and the case closing) off.
+    private int _caseCloseSeconds;
+    private bool _caseTimerHeldForFailure;
+    private bool _caseClosedDuringFailure;
     private long _unaskedShownAt;
     private UnaskedKind _unaskedKind = UnaskedKind.CaseOpened;
 
@@ -96,6 +101,14 @@ internal sealed partial class WidgetCardPresenter
         {
             if (_generation.IsCurrent(generation) && _unaskedKind == UnaskedKind.CaseOpened)
             {
+                if (_caseTimerHeldForFailure)
+                {
+                    // A failure is drawn on the case card: it stays, and the card goes when the failure ends (EndFailureOnTheCaseCard).
+                    _caseClosedDuringFailure = true;
+                    _log.Write(LogLevel.Debug, "Card: the case closed, but a failure is on the case card, so it stays until the failure ends.");
+                    return;
+                }
+
                 CloseUnasked("the case closed", promoteWaiting: true);
             }
         });
@@ -156,11 +169,12 @@ internal sealed partial class WidgetCardPresenter
             return false;
         }
 
-        if (kind == UnaskedKind.CaseOpened && _unaskedKind == UnaskedKind.ConnectFailed && _failure is { Displayed: true })
+        if (kind == UnaskedKind.CaseOpened && _failure is { Displayed: true } && IsUnaskedFullShown)
         {
-            // The failure wins: the card that says it stays until it is dealt with or closes itself. Opening the case over it would make
-            // it the case's card, and the case closing would then close the failure unread.
-            _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), a connect failure is on the card and stays until it is dealt with.");
+            // The failure wins, whatever the card saying it is (the one it opened, a Moved to row grown full, the case card itself): it stays
+            // until it is dealt with or ends. Opening the case over it would make it the case's card, and the case closing or its close
+            // time would then close the failure unread.
+            _log.Write(LogLevel.Debug, "Card: not shown (" + name + "), a failure is on the card and stays until it is dealt with.");
             return false;
         }
 
@@ -275,6 +289,7 @@ internal sealed partial class WidgetCardPresenter
         }
         else if (request is null)
         {
+            _caseCloseSeconds = options.CloseSeconds;
             StartUnaskedCloseTimer(options.CloseSeconds, generation);
             closes = CaseOpenCardClose.After(options.CloseSeconds) is null
                 ? "closes when the case closes."
@@ -495,6 +510,8 @@ internal sealed partial class WidgetCardPresenter
     private void CloseUnasked(string why, bool promoteWaiting = false)
     {
         StopUnaskedCloseTimer();
+        _caseTimerHeldForFailure = false;
+        _caseClosedDuringFailure = false;
 
         // A card that folded by itself (its hold ended) has already hidden, so nothing of Take back outlives the close.
         ResetTakeBack();
@@ -610,6 +627,39 @@ internal sealed partial class WidgetCardPresenter
                 }
             }),
             null, after, Timeout.InfiniteTimeSpan);
+    }
+
+    // A failure drawn on the case card: its close time stops (and the case closing no longer closes it) until the failure ends.
+    private void HoldCaseCardForFailure()
+    {
+        if (_unaskedKind != UnaskedKind.CaseOpened || !IsUnaskedFullShown)
+        {
+            return;
+        }
+
+        StopUnaskedCloseTimer();
+        _caseTimerHeldForFailure = true;
+        _log.Write(LogLevel.Debug, "Card: the case card's close time is held while a failure is on it.");
+    }
+
+    // The failure on the case card ended. The case closed meanwhile: the card goes. Otherwise it goes back to its close time, counted
+    // from now.
+    private void EndFailureOnTheCaseCard()
+    {
+        if (!_caseTimerHeldForFailure)
+        {
+            return;
+        }
+
+        _caseTimerHeldForFailure = false;
+        if (_caseClosedDuringFailure)
+        {
+            _caseClosedDuringFailure = false;
+            CloseUnasked("the case closed while a failure was on it", promoteWaiting: true);
+            return;
+        }
+
+        StartUnaskedCloseTimer(_caseCloseSeconds, _generation.Current);
     }
 
     private void StopUnaskedCloseTimer()

@@ -20,12 +20,14 @@ public sealed partial class WidgetCardUnaskedTests
     {
         private long _clock;
 
-        public ConnectRig(bool asked = true, FakeCardEnvironment? environment = null, AirPodsWhere where = AirPodsWhere.NotInUse)
+        public ConnectRig(
+            bool asked = true, FakeCardEnvironment? environment = null, AirPodsWhere where = AirPodsWhere.NotInUse,
+            int closeSeconds = CaseOpenCardClose.UntilCaseCloses)
         {
             Callbacks = new FakeCallbacks { Snapshot = Snapshot(where) };
             Environment = environment ?? new FakeCardEnvironment();
             Presenter = NewPresenter(
-                () => new WidgetCard(Log, CardOpening.Unasked) { HoldClock = () => _clock }, Callbacks.Build(), Gate(), Environment, Inline, Time, Log,
+                () => new WidgetCard(Log, CardOpening.Unasked) { HoldClock = () => _clock }, Callbacks.Build(), Gate(closeSeconds: closeSeconds), Environment, Inline, Time, Log,
                 new FakeScene(), asked: asked ? () => new WidgetCard(Log) : null);
         }
 
@@ -583,7 +585,7 @@ public sealed partial class WidgetCardUnaskedTests
     }
 
     [TestMethod]
-    public void AFailureOnTheCaseCardIsSaidInThatCardAndEndsWhenItCloses()
+    public void AFailureOnTheCaseCardIsSaidInThatCardAndStaysPastTheCaseClosingUntilTheFailureEnds()
     {
         Phase5.CardDesktop.Run(() =>
         {
@@ -597,8 +599,13 @@ public sealed partial class WidgetCardUnaskedTests
 
             rig.Presenter.CaseClosed();
             Application.DoEvents();
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown, "The case closing does not take a failure away unread.");
+            Assert.IsTrue(rig.Presenter.FailureActiveForTest);
 
-            Assert.IsFalse(rig.Presenter.IsUnaskedShown);
+            rig.Presenter.ToggleStarted(connect: true);
+            Application.DoEvents();
+
+            Assert.IsFalse(rig.Presenter.IsUnaskedShown, "It goes with the failure, the case it waited on having closed.");
             Assert.IsFalse(rig.Presenter.FailureActiveForTest);
         });
     }
