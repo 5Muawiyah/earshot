@@ -41,7 +41,7 @@ public sealed class WidgetLiveTestConnectedOnlyTests
         string anHour = Quoted(script, "More than an hour after the AirPods were last heard");
         StringAssert.Contains(anHour, "case mark");
         StringAssert.Contains(anHour, "Last read");
-        StringAssert.Contains(anHour, "Estimated");
+        Assert.IsFalse(anHour.Contains("Estimated", StringComparison.Ordinal), "Nothing is estimated any more: the last reading is shown as read.");
         Assert.IsFalse(anHour.Contains("No recent reading", StringComparison.Ordinal), "A reading older than an hour no longer leaves the gauge.");
     }
 

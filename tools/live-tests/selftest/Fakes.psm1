@@ -253,12 +253,11 @@ $script:Answers = [ordered]@{
     'does the "where" line on the card say "on this pc"'                     = 'yes'
     'did the audio keep playing on this pc'                                  = 'yes'
     'with the airpods not connected to this pc, does the card say'           = 'yes'
-    'did a small card with the left, right and case figures appear by itself' = 'yes'
+    'did the card with the left, right and case figures open by itself' = 'yes'
     'did the card close by itself after the lid was shut'                    = 'yes'
     'did the card close when you clicked the cross'                          = 'yes'
     'does the gauge show the case mark with a grey ring'                     = 'yes'
-    'compared with the last live reading'                                    = 'yes'
-    'did live figures replace the estimate'                                  = 'yes'
+    'did live figures replace the last reading'                             = 'yes'
 
     # test 24: Pair AirPods.
     'did the earshot card say "bluetooth is off."'                           = 'yes'

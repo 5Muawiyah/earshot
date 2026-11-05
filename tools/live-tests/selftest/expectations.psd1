@@ -719,7 +719,7 @@
                 'case-open-no-auto-connect' = 'pass'; 'bluetooth-off-then-on' = 'inconclusive'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
-                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'estimate-marked-with-age' = 'pass'; 'estimate-never-falls' = 'pass'; 'live-replaces-estimate' = 'pass'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'last-reading-with-age' = 'pass'; 'live-replaces-last-reading' = 'pass'
                 'gauge-stays-on-top' = 'inconclusive'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 0; 'refreshEndedLines' = 0
@@ -737,7 +737,7 @@
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
-                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'estimate-marked-with-age' = 'pass'; 'estimate-never-falls' = 'pass'; 'live-replaces-estimate' = 'pass'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'last-reading-with-age' = 'pass'; 'live-replaces-last-reading' = 'pass'
                 'gauge-stays-on-top' = 'pass'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 1; 'refreshEndedLines' = 1
@@ -755,7 +755,7 @@
                 'case-open-no-auto-connect' = 'fail'; 'bluetooth-off-then-on' = 'pass'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'pass'
-                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'estimate-marked-with-age' = 'pass'; 'estimate-never-falls' = 'pass'; 'live-replaces-estimate' = 'pass'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'last-reading-with-age' = 'pass'; 'live-replaces-last-reading' = 'pass'
                 'gauge-stays-on-top' = 'pass'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 2; 'refreshEndedLines' = 2
@@ -773,7 +773,7 @@
                 'case-open-no-auto-connect' = 'pass'; 'bluetooth-off-then-on' = 'inconclusive'
                 'notification-shortcut-exists' = 'fail'; 'low-battery-alert-fires' = 'inconclusive'
                 'battery-greys-when-old' = 'pass'; 'refresh-says-nothing-heard' = 'pass'; 'refresh-reads-again' = 'pass'; 'refresh-logged' = 'fail'
-                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'estimate-marked-with-age' = 'pass'; 'estimate-never-falls' = 'pass'; 'live-replaces-estimate' = 'pass'
+                'gauge-next-to-apps' = 'pass'; 'gauge-ring-accent' = 'pass'; 'gauge-reading-older-than-an-hour' = 'pass'; 'last-reading-with-age' = 'pass'; 'live-replaces-last-reading' = 'pass'
                 'gauge-stays-on-top' = 'inconclusive'; 'shell-stays-responsive' = 'pass' }
             FindingsInclude = @{
                 'refreshBatteryInMenu' = 'yes'; 'airPodsPickedOutLines' = 0; 'chosenCounterRose' = 'yes'; 'refreshEndedLines' = 0

@@ -233,7 +233,7 @@ $tests = @(
     },
     [ordered]@{
         Number = '19'; Script = '19-Widget.ps1'
-        Title = 'The AirPods widget: gauge, card and case-open card'
+        Title = 'The AirPods widget: gauge and card'
         Settles = 'Whether the taskbar gauge and its cards work as built today, and whether every reading the decode table cannot yet prove honestly shows nothing rather than a guessed figure.'
         Needs = 'Set up, tray running, "Show on the taskbar" ticked, AirPods paired, time for a long sitting.'
         Halves = 'one, but it takes a while'
