@@ -80,4 +80,18 @@ public sealed class UnaskedGateTests
         Assert.IsTrue(UnaskedGate.ClosesOnRecheck(0, Shell.QUNS_RUNNING_D3D_FULL_SCREEN, 0, null, null));
         Assert.IsTrue(UnaskedGate.ClosesOnRecheck(0, Shell.QUNS_QUIET_TIME, 0, null, null));
     }
+
+    // The result of his own click is shown without asking the notification state, so a recheck does not close it either, whatever
+    // it reads (a failed read included).
+    [TestMethod]
+    public void ARecheckNeverClosesACardThatFollowsHisClick()
+    {
+        DisplayInfo one = CaseOpenCardChoiceTests.One;
+        ForegroundWindowReading game = Game(one.Bounds);
+
+        Assert.IsFalse(UnaskedGate.ClosesOnRecheck(0, Shell.QUNS_RUNNING_D3D_FULL_SCREEN, 1, game, one, afterClick: true));
+        Assert.IsFalse(UnaskedGate.ClosesOnRecheck(0, Shell.QUNS_BUSY, 0, null, null, afterClick: true));
+        Assert.IsFalse(UnaskedGate.ClosesOnRecheck(unchecked((int)0x80004005), Shell.QUNS_ACCEPTS_NOTIFICATIONS, 1, null, one, afterClick: true));
+        Assert.IsTrue(UnaskedGate.ClosesOnRecheck(0, Shell.QUNS_RUNNING_D3D_FULL_SCREEN, 1, game, one, afterClick: false), "Any other card closes.");
+    }
 }

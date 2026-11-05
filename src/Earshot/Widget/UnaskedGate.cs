@@ -65,9 +65,18 @@ internal sealed record UnaskedGate(
     public static bool FallbackMayShow(int state) => AcceptsUnrequestedCard(state);
 
     // Whether a card that is open must close at a recheck of the full-screen state. Fails closed as the show does: a failed
-    // read closes it. A card with no display (placed without a display list) answers to the global state alone.
-    public static bool ClosesOnRecheck(int hResult, int state, int displayCount, ForegroundWindowReading? foreground, DisplayInfo? display)
+    // read closes it. A card with no display (placed without a display list) answers to the global state alone. A card that follows his
+    // own click (afterClick) never closes at a recheck.
+    public static bool ClosesOnRecheck(
+        int hResult, int state, int displayCount, ForegroundWindowReading? foreground, DisplayInfo? display, bool afterClick = false)
     {
+        // The result of his own click was shown without asking the state, whatever it was: it is the result of what he did, so what
+        // the state says now does not take it away either.
+        if (afterClick)
+        {
+            return false;
+        }
+
         if (hResult < 0)
         {
             return true;

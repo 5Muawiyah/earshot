@@ -402,7 +402,8 @@ internal sealed partial class WidgetCardPresenter
             : null;
         foreach ((_, WidgetCard card, DisplayInfo? display) in open)
         {
-            if (UnaskedGate.ClosesOnRecheck(reading.HResult, reading.State, displays.Count, foreground, display))
+            if (UnaskedGate.ClosesOnRecheck(
+                reading.HResult, reading.State, displays.Count, foreground, display, afterClick: _unaskedRequest is { Anchor: CardAnchor.NearCursor }))
             {
                 if (reading.HResult >= 0)
                 {
