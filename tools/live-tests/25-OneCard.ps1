@@ -340,7 +340,7 @@ try
             $rightSeen = Read-Answer -Run $run -Question 'Does the card show the figure of the right AirPod, within one step of ten of the iPhone, and not the figure of the left one?' -Options @('yes', 'no', 'unsure')
             Wait-Owner -Run $run -Text 'Swap them: put the right AirPod in the case and take the left one out. Wait ten seconds, then look at the card and your iPhone again.'
             $leftSeen = Read-Answer -Run $run -Question 'Does the card show the figure of the left AirPod, within one step of ten of the iPhone, and not the figure of the right one?' -Options @('yes', 'no', 'unsure')
-            Add-Finding -Run $run -Name 'sidesAndStepsAnswers' -Value ($bothSeen + ', ' + $rightSeen + ', ' + $leftSeen)
+            Add-Finding -Run $run -Name 'sidesAndStepsAnswers' -Value ([string]$bothSeen + ', ' + $rightSeen + ', ' + $leftSeen)
             $answers = @($bothSeen, $rightSeen, $leftSeen)
             if ($answers -contains 'no') { $o = 'fail'; $w = 'you said a figure did not match your iPhone''s within one step' }
             elseif ($answers -contains 'unsure') { $o = 'inconclusive'; $w = 'you were not sure of every figure' }
