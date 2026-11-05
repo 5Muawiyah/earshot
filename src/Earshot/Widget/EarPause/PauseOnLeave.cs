@@ -56,6 +56,13 @@ internal sealed class PauseOnLeave : IDisposable
 
     private sealed record Sample(RenderActivityState State, DateTimeOffset At, long Episode);
 
+    // A leave Earshot did not start and that no Earshot change was running for: the phone took the AirPods, or they went out
+    // of range or into their case. Raised with the time the change was seen, just before the decision to pause, and whether or
+    // not pause on leave is on, so turning the pause off leaves whoever listens (the moved-to rule) alone. It is raised on
+    // the thread OnRender was called on, a listener must not block, and one that throws is logged and does not stop the
+    // pause. An own leave (BeforeOwnLeaveAsync), a leave during a change and a leave already decided never raise it.
+    public event Action<DateTimeOffset>? LeftByOther;
+
     public PauseOnLeave(IMediaSessions sessions, IRenderActivity activity, Func<bool> enabled, TimeProvider time, ILog log)
     {
         ArgumentNullException.ThrowIfNull(sessions);
@@ -135,7 +142,25 @@ internal sealed class PauseOnLeave : IDisposable
             _handledEpisode = episode;
         }
 
+        if (changeInFlight is null)
+        {
+            RaiseLeftByOther(seenAt);
+        }
+
         return LeftAsync(seenAt, sample, changeInFlight);
+    }
+
+    private void RaiseLeftByOther(DateTimeOffset seenAt)
+    {
+        try
+        {
+            LeftByOther?.Invoke(seenAt);
+        }
+        catch (Exception ex)
+        {
+            // A listener is another part of the tray; its failure is logged and the pause goes on.
+            _log.Error(PauseOnLeaveText.Prefix + "telling the leave to its listener failed (" + ex.GetType().Name + ": " + ex.Message + ").", ex);
+        }
     }
 
     // A leave Earshot is about to start: reads this PC's activity afresh and, when it was playing to the AirPods,
