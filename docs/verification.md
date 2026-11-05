@@ -102,6 +102,8 @@ Still unproved at release:
   not towards a false row.
 - Whether Windows' figure ever exists, and in what steps. It is shown as Windows
   gives it, so it may not be in steps of 10%.
+- A stale pin after the AirPods were paired again under a new device: a disconnect then reads the pinned nodes as not found,
+  blocks nothing of the new ones, and no card says so.
 - Whose the 17-byte messages are. They are counted by shape and not used.
 
 Left and right, rounds or floors, and the charging bits stay marked unproved

@@ -34,13 +34,15 @@ public sealed class ToggleOutcomeTrayTests
         var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), time: new TestTimeProvider(), arrange: t => t.Block.Status = Block(BlockState.Allowed));
         tray.Block.OnBlock = _ => Task.FromResult(ControllerResult.Fail(CouldNotBlock, [StepOutcomes.FromConfigRet("cm-disable", 0x33)]));
 
-        // No card is open to say it, so it is held for the next one (a card that said it would end the cross, which has its own test).
+        // The card here is a fake that answers Held: no card is open to say it, so it is held for the next one (a card that said it
+        // would end the cross, which has its own test). That the real card holds it with the notice gate refusing, in presentation
+        // mode, is executed in WidgetCardUnaskedBlockFailureTests: its path never asks the gate.
         tray.Toggle.Answer = FailureShown.Held;
         return tray;
     }
 
     [TestMethod]
-    public void ADisconnectWhoseBlockDidNotTakeIsToldAsAFailureOnTheGaugeWhateverBecomesOfItsNotice()
+    public void ADisconnectWhoseBlockDidNotTakeIsToldAsAFailureOnTheGaugeWhenTheCardHoldsIt()
     {
         StaThread.Run(() =>
         {

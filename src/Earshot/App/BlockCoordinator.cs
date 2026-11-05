@@ -2424,8 +2424,10 @@ internal sealed partial class BlockCoordinator : IDisposable
                 NoteAtRestFromRead(request, status);
 
                 // Unknown (the nodes are not present or cannot be read) with Block at boot on is not Blocked either: the disconnect says
-                // the block was not applied, as it does for a status that could not be read. NotSetUp and NotFound are states the
-                // person is told about elsewhere and stay as they were.
+                // the block was not applied, as it does for a status that could not be read. NotSetUp (nothing to block) and NotFound
+                // (the pinned AirPods' nodes are not present) stay as they were. A stale pin, after the AirPods were paired again under a
+                // new device, reads NotFound here, and the new nodes are then not blocked by this disconnect: not caught here, and not
+                // told on the card.
                 if (status.State == BlockState.Unknown)
                 {
                     _log.Warn("disconnect: the nodes read Unknown with Block at boot on, so they were not blocked and the AirPods may still be paged.");
