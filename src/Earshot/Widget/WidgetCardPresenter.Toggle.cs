@@ -19,6 +19,9 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
     {
         public TimeSpan? Hold { get; init; }
 
+        // Its name in the log: connect failed, disconnect failed, or failure.
+        public string What { get; init; } = "failure";
+
         // When a gate held it back, so a held failure can grow too old to say.
         public DateTimeOffset? HeldAt { get; init; }
 
@@ -36,6 +39,9 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
     // How the toggle that ran last ended, for what the log says of a failure: only a Failed one is told by the gauge's cross.
     private ToggleOutcome? _lastOutcome;
+
+    // Which toggle ended last, for the log's name of the failure that follows it: null when none did, or it was used.
+    private bool? _lastEndedConnect;
     private ActiveFailure? _failure;
     private int _failureToken;
     private ITimer? _failureTimer;
@@ -74,6 +80,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
         NoteToggleStartedForMovedTo(connect);
         _lastOutcome = null;
+        _lastEndedConnect = null;
         DropFailure();
         _work = connect ? CardButtonWork.Connecting : CardButtonWork.Disconnecting;
         _log.Write(LogLevel.Debug, "Card: " + (connect ? "connecting" : "disconnecting") + ".");
@@ -89,6 +96,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
         _work = CardButtonWork.None;
         _lastOutcome = outcome;
+        _lastEndedConnect = connect;
         if (outcome is ToggleOutcome.Succeeded or ToggleOutcome.Partial)
         {
             DropFailure();
@@ -114,14 +122,21 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
 
         DropFailure();
-        var failure = new ActiveFailure(reason, next, _callbacks.CurrentSnapshot().Where, ++_failureToken) { MustBeSaid = mustBeSaid };
+
+        // What the failure is named in the log, and whether the gauge drew a cross for it, from the toggle that ended just before; each
+        // is used once, so a failure with no toggle before it (Pair AirPods) is not named after an earlier one.
+        string what = _lastEndedConnect switch { true => "connect failed", false => "disconnect failed", null => "failure" };
+        bool crossDrawn = _lastOutcome == ToggleOutcome.Failed;
+        _lastEndedConnect = null;
+        _lastOutcome = null;
+        var failure = new ActiveFailure(reason, next, _callbacks.CurrentSnapshot().Where, ++_failureToken) { MustBeSaid = mustBeSaid, What = what };
         if (IsShown || IsUnaskedFullShown)
         {
             _failure = failure with { Displayed = true };
             HoldCaseCardForFailure();
             RenderEveryCard();
             AnnounceFailure(reason);
-            _log.Write(LogLevel.Debug, "Card: connect failed, said in the open card" + (next is null ? "." : ", with a next step."));
+            _log.Write(LogLevel.Debug, "Card: " + what + ", said in the open card" + (next is null ? "." : ", with a next step."));
             return FailureShown.Shown;
         }
 
@@ -136,8 +151,8 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
         if (next is null)
         {
-            _log.Write(LogLevel.Debug, _lastOutcome == ToggleOutcome.Failed
-                ? "Card: connect failed, no card is open and there is no next step, so the gauge's cross says it."
+            _log.Write(LogLevel.Debug, crossDrawn
+                ? "Card: " + what + ", no card is open and there is no next step, so the gauge's cross says it."
                 : "Card: failure not said on a card, no card is open and there is no next step, and no cross is drawn for it.");
             return FailureShown.NotShown;
         }
@@ -167,7 +182,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
 
         _failure = failure with { Held = true, Hold = null, HeldAt = _time.GetUtcNow() };
-        _log.Write(LogLevel.Debug, "Card: held (connect failed), it is shown when he next asks for the card.");
+        _log.Write(LogLevel.Debug, "Card: held (" + failure.What + "), it is shown when he next asks for the card.");
     }
 
     // The status row's content for the failure on show, or null. A held failure is on no card yet, and one still waiting for the

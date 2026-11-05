@@ -492,6 +492,8 @@ public sealed partial class WidgetCardUnaskedTests
         {
             var environment = new FakeCardEnvironment { Notifications = State(Shell.QUNS_RUNNING_D3D_FULL_SCREEN) };
             using var rig = new ConnectRig(environment: environment);
+            rig.Presenter.ToggleEnded(connect: true, ToggleOutcome.Failed);
+            Application.DoEvents();
             rig.Fail(AReason, "Connect in Windows");
             rig.PassTheCross();
             Application.DoEvents();
@@ -503,6 +505,40 @@ public sealed partial class WidgetCardUnaskedTests
             rig.OpenAsked();
 
             Assert.AreEqual(AReason, rig.Asked.StatusRow.Text, "His next asked open shows it.");
+        });
+    }
+
+    // The log names what failed: a disconnect is not a connect, and a failure with no toggle before it (Pair AirPods) is neither.
+    [TestMethod]
+    public void TheLogNamesADisconnectThatFailedAsADisconnect()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig();
+            rig.OpenAsked();
+            rig.Presenter.ToggleEnded(connect: false, ToggleOutcome.Failed);
+            Application.DoEvents();
+
+            rig.Fail(AReason, null);
+
+            Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: disconnect failed, said in the open card."), string.Join("\n", rig.Log.Entries.Select(e => e.Message)));
+        });
+    }
+
+    [TestMethod]
+    public void AFailureWithNoToggleBeforeItIsNotNamedAfterAnEarlierConnect()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig();
+            rig.OpenAsked();
+            rig.Presenter.ToggleEnded(connect: true, ToggleOutcome.Failed);
+            Application.DoEvents();
+            rig.Fail(AReason, null);
+
+            rig.Fail("Pairing did not finish.", null);
+
+            Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: failure, said in the open card."), string.Join("\n", rig.Log.Entries.Select(e => e.Message)));
         });
     }
 
