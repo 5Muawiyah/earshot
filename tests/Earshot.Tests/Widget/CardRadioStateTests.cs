@@ -1,4 +1,5 @@
 using System.Drawing;
+using Earshot.App;
 using Earshot.Bluetooth;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;

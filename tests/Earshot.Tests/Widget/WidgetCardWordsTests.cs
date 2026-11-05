@@ -23,8 +23,8 @@ public sealed class WidgetCardWordsTests
             {
                 int words = row.Label.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
                 // One to three words, except the two rows the owner named in full on 2 October 2026 ("Pause when a bud comes out", "Pause when
-                // AirPods leave"), which keep those words.
-                int most = row.Row is SettingsRowId.PauseBud or SettingsRowId.PauseLeave ? 6 : 3;
+                // AirPods leave"), which keep those words, and the case-open row, which reads "Open when the case opens".
+                int most = row.Row is SettingsRowId.PauseBud or SettingsRowId.PauseLeave ? 6 : row.Row is SettingsRowId.CaseCard ? 5 : 3;
                 Assert.IsTrue(words >= 1 && words <= most, row.Row + " says \"" + row.Label + "\", " + words + " words (at most " + most + ").");
                 // The design gives two rows a caption of their own: Hand back, "Shut down, sleep, Exit", and Updates, with the version.
                 // Any other row says nothing under its label unless something is wrong.
