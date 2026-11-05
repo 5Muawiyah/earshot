@@ -95,6 +95,11 @@ Still unproved at release:
   this PC was playing at the leave, a choice made without a live trial. In the saved
   logs, six of eight leaves Earshot did not start were followed by minutes of
   messages and seven had nothing playing. The log records what each would have said.
+- Whether sound that stopped just before a move counts as playing. This PC's
+  output is read once a second and each reading replaces the last, so sound
+  that stopped more than a second before the AirPods changed hands reads as not
+  playing, and Moved to shows nothing for that move. It errs towards silence,
+  not towards a false row.
 - Whether Windows' figure ever exists, and in what steps. It is shown as Windows
   gives it, so it may not be in steps of 10%.
 - Whose the 17-byte messages are. They are counted by shape and not used.

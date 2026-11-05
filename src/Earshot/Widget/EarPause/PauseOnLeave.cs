@@ -252,6 +252,9 @@ internal sealed class PauseOnLeave : IDisposable
                 return;
             }
 
+            // Each reading replaces the last, Silent included, until the leave is seen. So sound that stopped more than SampleInterval
+            // before the AirPods changed hands reads as not playing at the leave, and Moved to then shows nothing for that move. That
+            // errs towards silence, not towards a false "Moved to"; it is kept so, and nothing keeps the last playing reading.
             _lastSample = new Sample(reading.State, _time.GetUtcNow(), episode);
             if (reading.State == RenderActivityState.Unknown && !_unreadableNoted)
             {
