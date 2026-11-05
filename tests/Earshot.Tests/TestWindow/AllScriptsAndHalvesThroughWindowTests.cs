@@ -79,8 +79,8 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         "22-ServiceHandBack.ps1 resume|shutdown-was-clean",
     };
 
-    private const int ExpectedScriptCount = 25;
-    private const int ExpectedHalfCount = 34;
+    private const int ExpectedScriptCount = 26;
+    private const int ExpectedHalfCount = 35;
 
     [TestMethod]
     public void EveryScriptAndHalfIsDrivenThroughTheWindowWithMatchingEvidence()
@@ -184,7 +184,7 @@ public sealed class AllScriptsAndHalvesThroughWindowTests
         string liveTestRoot = Path.Combine(sandbox.Path, "local", "Earshot", "livetest");
         string runRoot = Path.Combine(liveTestRoot, "20260921T000000Z");
         string exePath = Path.Combine(sandbox.Path, "nowhere", "Earshot.exe");
-        TimeSpan timeout = row.Number switch { "03" => LongHalfTimeout, "23" => ConnectEveryStateTimeout, _ => DefaultHalfTimeout };
+        TimeSpan timeout = row.Number switch { "03" => LongHalfTimeout, "23" => ConnectEveryStateTimeout, "25" => ConnectEveryStateTimeout, _ => DefaultHalfTimeout };
 
         for (int index = 0; index < row.Halves.Count; index++)
         {

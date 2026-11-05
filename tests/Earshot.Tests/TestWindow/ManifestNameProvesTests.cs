@@ -40,6 +40,7 @@ public sealed class ManifestNameProvesTests
         ["22"] = "Even with the Earshot icon closed, the AirPods are handed back before this computer shuts down, and left alone at the next start.",
         ["23"] = "Earshot connects the AirPods within 20 seconds whatever state they were in, and leaves a connection made in Windows alone.",
         ["24"] = "Earshot says when Bluetooth is off, pairs your AirPods from its menu, is still set up afterwards with at most one Windows permission box, connects them once and saves a Bluetooth trace to your folder.",
+        ["25"] = "Earshot has one card: it opens when the case opens, a shut case shows nothing, and Moved to shows only when your iPhone really took the AirPods.",
     };
 
     private static IReadOnlyList<ManifestRow> LoadManifest() =>

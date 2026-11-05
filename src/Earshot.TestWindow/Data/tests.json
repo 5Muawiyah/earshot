@@ -377,6 +377,19 @@
       "settles": "Whether Pair AirPods pairs and adopts the AirPods from the tray, leaves Earshot set up with at most one prompt and connects once, whether the radio check reads a real radio turned off, and whether a Bluetooth trace is saved to the person's folder.",
       "powerCycleRequirement": "none",
       "maxSilenceSeconds": 900
+    },
+    {
+      "number": "25",
+      "script": "25-OneCard.ps1",
+      "testId": "25-one-card",
+      "kind": "owner-present",
+      "halves": 1,
+      "name": "One card",
+      "title": "One card",
+      "proves": "Earshot has one card: it opens when the case opens, a shut case shows nothing, and Moved to shows only when your iPhone really took the AirPods.",
+      "settles": "Whether the gauge says Connect and Disconnect with the card closed, whether the failed Connect ends in a cross and then a card with a reason, whether the case opens and closes the card without taking focus, whether a shut case shows nothing for five minutes, and whether Moved to shows when the iPhone takes the AirPods and not otherwise.",
+      "powerCycleRequirement": "none",
+      "maxSilenceSeconds": 900
     }
   ]
 }

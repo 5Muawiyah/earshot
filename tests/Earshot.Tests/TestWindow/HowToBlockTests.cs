@@ -110,8 +110,9 @@ public sealed class HowToBlockTests
         // questions, replacing one of each) and its estimate steps (two instructions and three questions) add
         // nine, all with no block: 255. Test 24 drops its question whether the radio line went from the card and its
         // question about a battery figure before the case was opened, two with no block: 270. Test 19's estimate
-        // steps lose the question whether an estimate ever fell: 269.
-        const int expectedMissingCount = 269;
+        // steps lose the question whether an estimate ever fell: 269. Test 25 (One card) adds 26 with no block: five preconditions, four
+        // actions, fourteen questions and three instructions; the other prompts carry the shortcut, case lid, open case, phone and Moved to blocks: 295.
+        const int expectedMissingCount = 295;
         Assert.AreEqual(expectedMissingCount, actual.Count,
             "The set of instruction-shaped entries with no how-to block changed size. If this is a deliberate " +
             "improvement (or regression), update expectedMissingCount to match. Current list:" + Environment.NewLine +

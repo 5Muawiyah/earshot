@@ -164,6 +164,30 @@
         "Find your AirPods in the list.",
         "Click the three dots next to them, then Remove device."
       ]
+    },
+    "press-the-connect-or-disconnect-shortcut": {
+      "picture": "shortcut-keys",
+      "steps": [
+        "Hold down the Ctrl, Alt and Shift keys together.",
+        "While you hold them, press A to connect the AirPods, or D to disconnect them.",
+        "Watch the gauge near the clock. You do not need to open the card."
+      ]
+    },
+    "shut-the-case-lid": {
+      "picture": "airpods-case-shut",
+      "steps": [
+        "Put both AirPods in their case.",
+        "Close the lid until it clicks.",
+        "Leave the case where it is, next to this computer."
+      ]
+    },
+    "take-back-on-the-moved-to-card": {
+      "picture": "moved-to-card",
+      "steps": [
+        "When your iPhone takes the AirPods, a small card opens by itself near the clock.",
+        "It says Moved to and the name of your iPhone.",
+        "Press the icon on the right of the card to take the AirPods back. It spins, then shows a tick."
+      ]
     }
   },
   "entries": [
@@ -854,6 +878,58 @@
     { "test": "24", "kind": "check", "scriptText": "setup-one-prompt", "plain": "Earshot should still be set up afterwards, with at most one Windows permission box." },
     { "test": "24", "kind": "check", "scriptText": "connect-after-pairing", "plain": "One Connect should finish within 20 seconds." },
     { "test": "24", "kind": "check", "scriptText": "trace-saved", "plain": "The Bluetooth trace should record and be saved." },
-    { "test": "24", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." }
+    { "test": "24", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." },
+    { "test": "25", "kind": "precondition", "scriptText": "Earshot 1.7.0 or later is installed, set up, and running in the tray.", "plain": "Earshot 1.7.0 or later is installed, set up, and its icon is showing near the clock." },
+    { "test": "25", "kind": "precondition", "scriptText": "Block at boot is on.", "plain": "Block at boot is on." },
+    { "test": "25", "kind": "precondition", "scriptText": "The AirPods are paired with this PC and with your iPhone, and your iPhone and the AirPods case are with you.", "plain": "The AirPods are paired with this computer and with your iPhone, and your iPhone and the AirPods case are with you." },
+    { "test": "25", "kind": "precondition", "scriptText": "The Earshot card is closed, and the shortcuts are the ones Earshot ships with: Ctrl+Alt+Shift+A to connect and Ctrl+Alt+Shift+D to disconnect.", "plain": "The Earshot card is closed, and the shortcuts are the ones Earshot comes with: Ctrl+Alt+Shift+A to connect and Ctrl+Alt+Shift+D to disconnect." },
+    { "test": "25", "kind": "precondition", "scriptText": "The Moved to switch under More in Earshot settings is on.", "plain": "The Moved to switch under More in Earshot settings is on." },
+    { "test": "25", "kind": "action", "scriptText": "Connect and disconnect the AirPods with the shortcuts while the card is closed.", "plain": "Connect and disconnect the AirPods with the shortcuts while the card is closed." },
+    { "test": "25", "kind": "action", "scriptText": "Put the AirPods in the shut case and try to connect them, then open and shut the case lid.", "plain": "Put the AirPods in the shut case and try to connect them, then open and shut the case lid." },
+    { "test": "25", "kind": "action", "scriptText": "Leave the case shut for five minutes without touching it.", "plain": "Leave the case shut for five minutes without touching it." },
+    { "test": "25", "kind": "action", "scriptText": "Play something on your iPhone so it takes the AirPods, then take them back from the card.", "plain": "Play something on your iPhone so it takes the AirPods, then take them back from the card." },
+    { "test": "25", "kind": "instruction", "scriptText": "Close the Earshot card if it is open. Put both AirPods in your ears, then press Ctrl+Alt+Shift+A to connect them. Watch the gauge: the ring spins, then a tick, then the reading of the AirPods. Come back here when it settles.", "plain": "Close the Earshot card if it is open. Put both AirPods in your ears, then press Ctrl+Alt+Shift+A to connect them. Watch the gauge: the ring spins, then a tick, then the reading of the AirPods. Come back here when it settles.", "howTo": ["press-the-connect-or-disconnect-shortcut"] },
+    { "test": "25", "kind": "question", "scriptText": "With the card closed, did the ring on the gauge spin, then show a tick, then show the reading of the AirPods, with no card or popup opening?", "plain": "With the card closed, did the ring on the gauge spin, then show a tick, then show the reading of the AirPods, with no card or popup opening?" },
+    { "test": "25", "kind": "check", "scriptText": "shortcut-connect-card-closed", "plain": "With the card closed, the connect shortcut should spin the ring on the gauge, then show a tick and the reading, within 20 seconds." },
+    { "test": "25", "kind": "instruction", "scriptText": "Disconnect the AirPods from this PC with Ctrl+Alt+Shift+D, with the card still closed. Watch the gauge: the ring spins, then the gauge says the AirPods are not on this PC. Come back here when it settles.", "plain": "Disconnect the AirPods from this PC with Ctrl+Alt+Shift+D, with the card still closed. Watch the gauge: the ring spins, then the gauge says the AirPods are not on this PC. Come back here when it settles.", "howTo": ["press-the-connect-or-disconnect-shortcut"] },
+    { "test": "25", "kind": "question", "scriptText": "With the card closed, did the ring spin and then the gauge say the AirPods are not on this PC, with no card or popup opening?", "plain": "With the card closed, did the ring spin and then the gauge say the AirPods are not on this PC, with no card or popup opening?" },
+    { "test": "25", "kind": "check", "scriptText": "shortcut-disconnect-card-closed", "plain": "With the card closed, the disconnect shortcut should spin the ring, then show that the AirPods are not on this computer." },
+    { "test": "25", "kind": "instruction", "scriptText": "Take the AirPods out of your ears, put them in the case and shut the lid. Then press Ctrl+Alt+Shift+A to connect them. Watch the gauge: the ring spins, then a cross, then a card tells you why it failed. Come back here when the card has shown.", "plain": "Take the AirPods out of your ears, put them in the case and shut the lid. Then press Ctrl+Alt+Shift+A to connect them. Watch the gauge: the ring spins, then a cross, then a card tells you why it failed. Come back here when the card has shown.", "howTo": ["shut-the-case-lid", "press-the-connect-or-disconnect-shortcut"] },
+    { "test": "25", "kind": "question", "scriptText": "Did the ring spin, then show a cross, and then did a card tell you why the connection failed?", "plain": "Did the ring spin, then show a cross, and then did a card tell you why the connection failed?" },
+    { "test": "25", "kind": "check", "scriptText": "failed-connect-cross-then-reason", "plain": "A Connect that fails with the AirPods in the shut case should end in a cross on the gauge, then a card that says why." },
+    { "test": "25", "kind": "instruction", "scriptText": "Close the failed card if it is still open. Start typing in any other window, then open the case lid next to this computer. Leave the lid open and do not touch Earshot.", "plain": "Close the failed card if it is still open. Start typing in any other window, then open the case lid next to this computer. Leave the lid open and do not touch Earshot.", "howTo": ["open-the-case-next-to-this-computer"] },
+    { "test": "25", "kind": "question", "scriptText": "Within ten seconds, did the Earshot card open by itself while the window you were typing in kept the keyboard focus?", "plain": "Within ten seconds, did the Earshot card open by itself while the window you were typing in kept the keyboard focus?" },
+    { "test": "25", "kind": "check", "scriptText": "case-opens-the-card", "plain": "Opening the case next to the computer should open the Earshot card by itself, without taking over the keyboard." },
+    { "test": "25", "kind": "instruction", "scriptText": "Shut the case lid, and wait about fifteen seconds.", "plain": "Shut the case lid, and wait about fifteen seconds.", "howTo": ["shut-the-case-lid"] },
+    { "test": "25", "kind": "question", "scriptText": "Did the card close by itself after the lid was shut?", "plain": "Did the card close by itself after the lid was shut?" },
+    { "test": "25", "kind": "check", "scriptText": "case-shut-closes-the-card", "plain": "Shutting the case should close the card the case opened." },
+    { "test": "25", "kind": "instruction", "scriptText": "Open the case lid next to this computer, then shut it. Leave it shut, and do not touch the case, the AirPods or Earshot for the next five minutes. Come back here once the lid is shut.", "plain": "Open the case lid next to this computer, then shut it. Leave it shut, and do not touch the case, the AirPods or Earshot for the next five minutes. Come back here once the lid is shut.", "howTo": ["open-the-case-next-to-this-computer", "shut-the-case-lid"] },
+    { "test": "25", "kind": "question", "scriptText": "While the case stayed shut, did any card open by itself?", "plain": "While the case stayed shut, did any card open by itself?" },
+    { "test": "25", "kind": "check", "scriptText": "shut-case-no-card", "plain": "A case that was opened and shut once, then left shut for five minutes, should show no card." },
+    { "test": "25", "kind": "instruction", "scriptText": "Put both AirPods in your ears and press Ctrl+Alt+Shift+A to connect them. Wait for the tick.", "plain": "Put both AirPods in your ears and press Ctrl+Alt+Shift+A to connect them. Wait for the tick.", "howTo": ["press-the-connect-or-disconnect-shortcut"] },
+    { "test": "25", "kind": "instruction", "scriptText": "Play something on your iPhone so that it takes the AirPods from this PC. Do not touch Earshot. Wait ten seconds.", "plain": "Play something on your iPhone so that it takes the AirPods from this PC. Do not touch Earshot. Wait ten seconds.", "howTo": ["airpods-in-and-phone-playing"] },
+    { "test": "25", "kind": "question", "scriptText": "Within ten seconds, did a small card open by itself saying Moved to and the name of your iPhone, with a Take back icon?", "plain": "Within ten seconds, did a small card open by itself saying Moved to and the name of your iPhone, with a Take back icon?", "howTo": ["take-back-on-the-moved-to-card"] },
+    { "test": "25", "kind": "question", "scriptText": "Was that true: did your iPhone have the AirPods at that moment?", "plain": "Was that true: did your iPhone have the AirPods at that moment?" },
+    { "test": "25", "kind": "check", "scriptText": "moved-to-shows-and-is-true", "plain": "When your iPhone takes the AirPods, a small card should say Moved to within ten seconds, and it should be true." },
+    { "test": "25", "kind": "instruction", "scriptText": "Press the Take back icon on the card. Wait for the tick.", "plain": "Press the Take back icon on the card. Wait for the tick.", "howTo": ["take-back-on-the-moved-to-card"] },
+    { "test": "25", "kind": "question", "scriptText": "Did the Take back icon spin and then show a tick, and are the AirPods playing from this PC again?", "plain": "Did the Take back icon spin and then show a tick, and are the AirPods playing from this PC again?" },
+    { "test": "25", "kind": "check", "scriptText": "take-back-returns-the-airpods", "plain": "The Take back icon should bring the AirPods back to this computer, with a spin and then a tick." },
+    { "test": "25", "kind": "instruction", "scriptText": "Left-click the Earshot icon and choose Disconnect. Then do nothing for thirty seconds.", "plain": "Left-click the Earshot icon and choose Disconnect. Then do nothing for thirty seconds.", "howTo": ["find-and-left-click-the-earshot-icon"] },
+    { "test": "25", "kind": "question", "scriptText": "After you chose Disconnect in Earshot, did a Moved to card open?", "plain": "After you chose Disconnect in Earshot, did a Moved to card open?" },
+    { "test": "25", "kind": "check", "scriptText": "own-disconnect-shows-nothing", "plain": "Disconnect in Earshot should never show Moved to." },
+    { "test": "25", "kind": "instruction", "scriptText": "Press Ctrl+Alt+Shift+A to connect the AirPods again and wait for the tick. Then, with the AirPods in your ears, walk out of range of this PC, for example into another room, and stay away for one minute. Then come back here.", "plain": "Press Ctrl+Alt+Shift+A to connect the AirPods again and wait for the tick. Then, with the AirPods in your ears, walk out of range of this PC, for example into another room, and stay away for one minute. Then come back here.", "howTo": ["press-the-connect-or-disconnect-shortcut"] },
+    { "test": "25", "kind": "question", "scriptText": "When you came back, had a Moved to card opened on this PC while you were away?", "plain": "When you came back, had a Moved to card opened on this PC while you were away?" },
+    { "test": "25", "kind": "check", "scriptText": "out-of-range-shows-nothing", "plain": "Walking out of range with the AirPods should never show Moved to." },
+    { "test": "25", "kind": "question", "scriptText": "Do you want to check the sides and steps now, with your iPhone beside this PC?", "plain": "Do you want to check the sides and steps now, with your iPhone beside this PC?" },
+    { "test": "25", "kind": "instruction", "scriptText": "Take both AirPods out of the case, side by side, with the battery screen of your iPhone beside this PC. Open the Earshot card and look at the left and right figures.", "plain": "Take both AirPods out of the case, side by side, with the battery screen of your iPhone beside this PC. Open the Earshot card and look at the left and right figures." },
+    { "test": "25", "kind": "question", "scriptText": "Do the left and right figures on the card match the iPhone, each within one step of ten?", "plain": "Do the left and right figures on the card match the iPhone, each within one step of ten?" },
+    { "test": "25", "kind": "instruction", "scriptText": "Put the left AirPod in the case and keep the right one out. Wait ten seconds, then look at the card and your iPhone again.", "plain": "Put the left AirPod in the case and keep the right one out. Wait ten seconds, then look at the card and your iPhone again." },
+    { "test": "25", "kind": "question", "scriptText": "Does the card show the figure of the right AirPod, within one step of ten of the iPhone, and not the figure of the left one?", "plain": "Does the card show the figure of the right AirPod, within one step of ten of the iPhone, and not the figure of the left one?" },
+    { "test": "25", "kind": "instruction", "scriptText": "Swap them: put the right AirPod in the case and take the left one out. Wait ten seconds, then look at the card and your iPhone again.", "plain": "Swap them: put the right AirPod in the case and take the left one out. Wait ten seconds, then look at the card and your iPhone again." },
+    { "test": "25", "kind": "question", "scriptText": "Does the card show the figure of the left AirPod, within one step of ten of the iPhone, and not the figure of the right one?", "plain": "Does the card show the figure of the left AirPod, within one step of ten of the iPhone, and not the figure of the right one?" },
+    { "test": "25", "kind": "check", "scriptText": "sides-and-steps", "plain": "With the AirPods side by side with your iPhone and one AirPod out each way, the left and right numbers should match the iPhone within one step of ten." },
+    { "test": "25", "kind": "check", "scriptText": "battery-in-steps-of-ten", "plain": "Every battery number on the gauge should be a plain number in steps of ten." },
+    { "test": "25", "kind": "instruction", "scriptText": "Disconnect the AirPods from this PC with Ctrl+Alt+Shift+D if they are connected, then wait ten seconds.", "plain": "Disconnect the AirPods from this PC with Ctrl+Alt+Shift+D if they are connected, then wait ten seconds.", "howTo": ["press-the-connect-or-disconnect-shortcut"] },
+    { "test": "25", "kind": "check", "scriptText": "run", "plain": "The test should run all the way through." }
   ]
 }

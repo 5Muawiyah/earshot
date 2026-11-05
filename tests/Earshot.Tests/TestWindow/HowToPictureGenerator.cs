@@ -34,6 +34,9 @@ internal static class HowToPictureGenerator
         ["airpods-case-front-tap"] = AirPodsCaseFrontTap,
         ["airpods-case-back-button"] = AirPodsCaseBackButton,
         ["earshot-pair-window"] = EarshotPairWindow,
+        ["shortcut-keys"] = ShortcutKeys,
+        ["airpods-case-shut"] = AirPodsCaseShut,
+        ["moved-to-card"] = MovedToCard,
     };
 
     private static byte[] EarshotIconTaskbar()
@@ -394,6 +397,63 @@ internal static class HowToPictureGenerator
         return ToPngBytes(bitmap);
     }
 
+    private static byte[] ShortcutKeys()
+    {
+        const int width = 380, height = 110;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 2);
+        using var ringPen = new Pen(Highlight, 3);
+        using var font = new Font(FontFamily.GenericSansSerif, 13f);
+        using var ink = new SolidBrush(Ink);
+
+        // Five key caps in a row: Ctrl, Alt and Shift held together, then A or D, which are ringed.
+        string[] labels = ["Ctrl", "Alt", "Shift", "A", "D"];
+        for (int i = 0; i < labels.Length; i++)
+        {
+            var cap = new Rectangle(10 + i * 72, 24, 62, 58);
+            g.DrawRectangle(i >= 3 ? ringPen : pen, cap);
+            g.DrawString(labels[i], font, ink, cap, CentreFormat);
+        }
+
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] AirPodsCaseShut()
+    {
+        const int width = 300, height = 200;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 3);
+
+        // The case seen from the front with its lid shut: the body and the lid on top of it, the seam between them ringed.
+        var body = new Rectangle(80, 100, 140, 70);
+        g.DrawRectangle(pen, body);
+        var lid = new Rectangle(80, 60, 140, 40);
+        g.DrawRectangle(pen, lid);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawLine(ringPen, 80, 100, 220, 100);
+        return ToPngBytes(bitmap);
+    }
+
+    private static byte[] MovedToCard()
+    {
+        const int width = 380, height = 120;
+        using var bitmap = new Bitmap(width, height);
+        using var g = BeginDraw(bitmap);
+        using var pen = new Pen(Ink, 2);
+        using var font = new Font(FontFamily.GenericSansSerif, 14f);
+        using var ink = new SolidBrush(Ink);
+
+        // The small card: a phone mark, the words, and a round icon on the right, ringed, which is the one to press.
+        var card = new Rectangle(16, 24, width - 32, 72);
+        g.DrawRectangle(pen, card);
+        g.DrawRectangle(pen, new Rectangle(card.Left + 16, card.Top + 14, 24, 44));
+        g.DrawString("Moved to", font, ink, card.Left + 56, card.Top + 22);
+        using var ringPen = new Pen(Highlight, 3);
+        g.DrawEllipse(ringPen, card.Right - 60, card.Top + 14, 44, 44);
+        return ToPngBytes(bitmap);
+    }
     private static readonly StringFormat CentreFormat = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
 
     private static Graphics BeginDraw(Bitmap bitmap)
