@@ -236,6 +236,8 @@ public sealed class GaugeAllDisplaysTests
 
         public int LastRenderDpi { get; private set; }
 
+        public GaugeStoryView LastRenderStory { get; private set; }
+
         public event EventHandler? LeftClicked;
 
         public event EventHandler<Point>? RightClicked;
@@ -275,6 +277,7 @@ public sealed class GaugeAllDisplaysTests
             RenderCount++;
             LastRenderBounds = bounds;
             LastRenderDpi = dpi;
+            LastRenderStory = settings.Story;
             lock (_drawnScales)
             {
                 _drawnScales.Add(dpi);
@@ -420,6 +423,30 @@ public sealed class GaugeAllDisplaysTests
     }
 
     [TestMethod]
+    public void EveryGaugeOnEveryDisplayDrawsTheSameConnectStoryAndSettlesTogether()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
+            FeedSecondary(rig, Two);
+            TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null && rig.ShownOn(Right1080) is not null, "Not every display got a gauge. " + Why(rig));
+            var connect = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            rig.Tray.Connection.OnConnect = _ => connect.Task;
+
+            rig.Tray.Context.StartToggleFromWidget(CardPlace.NearTray);
+
+            TrayHarness.PumpUntil(
+                () => rig.Surfaces.Where(s => !s.IsDisposed).All(s => s.LastRenderStory.Kind == GaugeStoryKind.Spinning && s.LastRenderStory.Connect),
+                "Every gauge draws the sweep while it connects.");
+
+            connect.SetResult(new ConnectResult(ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", []));
+            TrayHarness.PumpUntil(
+                () => rig.Surfaces.Where(s => !s.IsDisposed).All(s => s.LastRenderStory.Kind == GaugeStoryKind.Cross),
+                "Every gauge draws the cross when it fails.");
+        });
+    }
+
+    [TestMethod]
     public void WithAllDisplaysTwoFakeDisplaysBothGetAGaugeEachOnItsOwnTaskbar()
     {
         Phase5.CardDesktop.Run(() =>
@@ -482,6 +509,41 @@ public sealed class GaugeAllDisplaysTests
             var closing = Message.Create(rig.Tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 0);
             rig.Tray.Context.Window.Dispatch(ref closing);
             TrayHarness.PumpUntil(() => rig.Tray.Context.SecondaryGaugesForTest.Single().State is GaugeState.Shown, "The gauge never came back when the full-screen window closed.");
+        });
+    }
+
+    [TestMethod]
+    public void AGaugeHiddenForAFullScreenWindowKeepsTheStoryDrawsNothingAndTellsItWhenItComesBack()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using Rig rig = StartRig(GaugeDisplayChoice.AllDisplays);
+            FeedSecondary(rig, Two);
+            TrayHarness.PumpUntil(() => rig.ShownOn(Left1080) is not null && rig.ShownOn(Right1080) is not null, "The gauges were never shown.");
+            var connect = new TaskCompletionSource<ConnectResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            rig.Tray.Connection.OnConnect = _ => connect.Task;
+            rig.Tray.Context.StartToggleFromWidget(CardPlace.NearTray);
+            TrayHarness.PumpUntil(() => rig.ShownOn(Right1080)!.LastRenderStory.Kind == GaugeStoryKind.Spinning, "The sweep never reached the gauge.");
+
+            rig.Foreground = Game(Right1080, "Display 2");
+            var opening = Message.Create(rig.Tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 1);
+            rig.Tray.Context.Window.Dispatch(ref opening);
+            TestSurface hiddenGauge = rig.ShownOn(Right1080)!;
+            Assert.IsTrue(hiddenGauge.Hidden);
+            int drawnWhileHidden = hiddenGauge.RenderCount;
+
+            Assert.AreEqual(GaugeStoryKind.Spinning, rig.Tray.Context.GaugeStoryForTest.Current.Kind, "The story is kept while the gauge is hidden.");
+            rig.Tray.Context.GaugeStoryForTest.SetCardOnScreen(true);
+            rig.Tray.Context.GaugeStoryForTest.SetCardOnScreen(false);
+            Assert.AreEqual(drawnWhileHidden, hiddenGauge.RenderCount, "A gauge hidden for a full-screen window draws nothing, though the story moved.");
+
+            var closing = Message.Create(rig.Tray.Context.Window.Handle, unchecked((int)AppBarRegistration.CallbackMessage), Shell.ABN_FULLSCREENAPP, 0);
+            rig.Tray.Context.Window.Dispatch(ref closing);
+            TrayHarness.PumpUntil(
+                () => rig.Tray.Context.SecondaryGaugesForTest.Single().State is GaugeState.Shown && hiddenGauge.LastRenderStory.Kind == GaugeStoryKind.Spinning && !hiddenGauge.Hidden,
+                "Shown again, the gauge draws the story that is still running.");
+            connect.SetResult(new ConnectResult(ConnectOutcome.Confirmed, "Connected", []));
+            rig.Tray.PumpUntilIdle();
         });
     }
 
