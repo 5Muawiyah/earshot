@@ -441,6 +441,29 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // Connected, though the protection did not apply: the AirPods are back, so the row ticks and folds. It never grows to the failed card.
+    [TestMethod]
+    public void TakeBackThatConnectsButIsNotProtectedTicksAndFoldsAndDoesNotGrowToTheFailedCard()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new MovedRig();
+            rig.Show();
+            WidgetCard card = rig.Card;
+            rig.ClickTakeBack();
+            rig.Presenter.ToggleStarted(connect: true);
+
+            rig.Presenter.ToggleEnded(connect: true, ToggleOutcome.Partial);
+
+            Assert.IsTrue(card.IsCompactShown, "Still the compact row, not the failed card.");
+            Assert.IsNotNull(rig.Presenter.UnaskedCompactForTest);
+            Assert.AreEqual(CompactActionState.Done, card.ActionStateShown);
+            rig.MoveHold(TimeSpan.FromMilliseconds(800));
+            card.CheckHold();
+            Assert.IsFalse(rig.Presenter.IsUnaskedShown, "Then it folds.");
+        });
+    }
+
     [TestMethod]
     public void TakeBackThatIsCancelledGoesBackToTheButtonAndHoldsAgain()
     {

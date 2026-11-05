@@ -148,7 +148,9 @@ internal sealed partial class WidgetCardPresenter
         switch (outcome)
         {
             case ToggleOutcome.Succeeded:
-                // The tick holds 800 ms and the card folds (WidgetCard); the gauge then shows the reading.
+            case ToggleOutcome.Partial:
+                // The AirPods are back (Partial: back, with the protection not applied, which is said as a notice, not as a failed
+                // take back). The tick holds 800 ms and the card folds (WidgetCard); the gauge then shows the reading.
                 _takeBack = TakeBackState.Done;
                 return false;
 

@@ -74,7 +74,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
 
         _work = CardButtonWork.None;
-        if (outcome == ToggleOutcome.Succeeded)
+        if (outcome is ToggleOutcome.Succeeded or ToggleOutcome.Partial)
         {
             DropFailure();
         }

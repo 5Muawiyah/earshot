@@ -110,6 +110,21 @@ public sealed class GaugeStoryTests
         Assert.IsNull(story.NextChange);
     }
 
+    // Connected but not protected, or disconnected but not blocked: the gauge claims neither a tick nor a cross, it shows what is true.
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public void APartialToggleShowsNeitherATickNorACross(bool connect)
+    {
+        var story = new GaugeStory();
+        story.Started(connect, ToggleOrigin.Elsewhere, Begin);
+
+        story.Ended(ToggleOutcome.Partial, Begin + Ms(900));
+
+        Assert.AreEqual(GaugeStoryKind.None, story.View(Begin + Ms(900)).Kind);
+        Assert.IsNull(story.NextChange, "Nothing is held.");
+    }
+
     [TestMethod]
     public void AnEndWithNoStartChangesNothing()
     {

@@ -952,6 +952,20 @@ internal sealed partial class TrayContext : ApplicationContext
     }
 
     // connect: the intent a newer click asked for, or null to take it from the device state.
+    // How a finished toggle is told to the gauge and the card.
+    internal static ToggleOutcome OutcomeOf(ToggleReport report, bool cancelled)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        if (cancelled)
+        {
+            return ToggleOutcome.Cancelled;
+        }
+
+        // Partial is the AirPods in the state that was asked for with a part of the work after it not taken (connected, not protected):
+        // not a failure, so no cross and no failed card.
+        return report.IsSuccess ? ToggleOutcome.Succeeded : report.Status == OpStatus.Partial ? ToggleOutcome.Partial : ToggleOutcome.Failed;
+    }
+
     private async Task RunToggleAsync(
         CardPlace place, long clickedAt, bool? connect, bool viaHotkey = false, SwitchTrigger trigger = SwitchTrigger.Click, ToggleOrigin origin = ToggleOrigin.Elsewhere)
     {
@@ -1066,7 +1080,7 @@ internal sealed partial class TrayContext : ApplicationContext
             // A controller that reports a cancellation rather than throwing one is still a cancelled click. The
             // coordinator names the reason when it cancelled the operation itself (a session end, say).
             bool cancelled = report.Cancelled || cts.IsCancellationRequested;
-            EndGauge(cancelled ? ToggleOutcome.Cancelled : report.IsSuccess ? ToggleOutcome.Succeeded : ToggleOutcome.Failed);
+            EndGauge(OutcomeOf(report, cancelled));
             string text = TrayReport.Describe(
                 cancelled ? action + " (cancelled because " + (report.CancelledBecause ?? CancelReason()) + ")" : action,
                 report.Status,

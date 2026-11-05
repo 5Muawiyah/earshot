@@ -206,4 +206,21 @@ public sealed class GaugeStoryTrayTests
             tray.PumpUntilIdle();
         });
     }
+
+    // A connect that took but whose protection did not (BlockCoordinator.ConnectedNotProtectedMessage) is told as Partial, not as a
+    // failure: the gauge shows no cross and the card does not grow to the failed card.
+    [TestMethod]
+    [DataRow(OpStatus.Success, false, "Succeeded")]
+    [DataRow(OpStatus.AlreadyInState, false, "Succeeded")]
+    [DataRow(OpStatus.Partial, false, "Partial")]
+    [DataRow(OpStatus.Failed, false, "Failed")]
+    [DataRow(OpStatus.NotAttempted, false, "Failed")]
+    [DataRow(OpStatus.Partial, true, "Cancelled")]
+    [DataRow(OpStatus.Success, true, "Cancelled")]
+    public void AFinishedToggleIsToldAsItsStatusSaysAndPartialIsItsOwnOutcome(OpStatus status, bool cancelled, string expected)
+    {
+        var report = new ToggleReport(true, status, "Connected, but audio quality protection did not apply.", [], cancelled);
+
+        Assert.AreEqual(expected, TrayContext.OutcomeOf(report, cancelled).ToString());
+    }
 }

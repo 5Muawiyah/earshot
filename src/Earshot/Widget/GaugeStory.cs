@@ -39,6 +39,11 @@ internal enum ToggleOutcome
     // The attempt did not get there.
     Failed,
 
+    // The AirPods are in the state that was asked for, but a part of the work after it did not take (connected, and the audio
+    // quality protection did not apply; disconnected, and the block did not). The gauge claims nothing either way: no tick that
+    // would say it all worked and no cross that would say they did not connect. A notice beside it says what did not take.
+    Partial,
+
     // The attempt was stopped (a newer click, Exit, a session end): nothing is said of it.
     Cancelled,
 }
@@ -48,7 +53,8 @@ internal enum ToggleOutcome
 //   Idle -> Spinning(connect | disconnect) -> Tick (800 ms) | Cross (1500 ms) | Idle
 //
 // A connect that succeeds ticks; a connect or a disconnect that fails shows a cross; a disconnect that succeeds and a toggle that
-// is cancelled go straight to Idle, since what is true is then shown as it is. The hold times are design choices: a tick is
+// is cancelled go straight to Idle, since what is true is then shown as it is; so does one that ends Partial (the AirPods are as asked,
+// part of the work after it did not take): no tick that says all worked, no cross that says they did not connect. The hold times are design choices: a tick is
 // glanced at, and a failure earns a longer look.
 //
 // Pure: every call is handed the time, and the story reads no clock and owns no timer. A spin has no end of its own: only Ended
