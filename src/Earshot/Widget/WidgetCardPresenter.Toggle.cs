@@ -190,12 +190,15 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         DropFailure();
     }
 
-    // The card he asked for opened: a failure a gate held back is now said on it.
+    // The card he asked for opened: a failure a gate held back is now said on it, and so is one still waiting for the gauge's cross to
+    // have had its time (its timer is cancelled, so no second card opens for it later). Either way it is then on a card, with its button
+    // working, and it ends when that card closes.
     private void ShowHeldFailure()
     {
-        if (_failure is { Held: true } held)
+        if (_failure is { Displayed: false } waiting)
         {
-            _failure = held with { Held = false, Hold = null, Displayed = true };
+            StopFailureTimer();
+            _failure = waiting with { Held = false, Hold = null, Displayed = true };
         }
     }
 
