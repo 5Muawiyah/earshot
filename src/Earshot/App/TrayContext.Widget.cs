@@ -459,6 +459,9 @@ internal sealed partial class TrayContext
     // Drives the same path a real IWidgetStatus.CaseOpened event does, without a real case-open advert.
     internal void RaiseCaseOpenedForTest() => OnCaseOpened(this, new CaseOpenedEventArgs(_time.GetUtcNow()));
 
+    // Shows a compact row on the tray's own card presenter, for tests; null when the tray has none.
+    internal Task<bool>? ShowCompactForTest(CompactRequest request) => _widgetCardPresenter?.ShowCompact(request);
+
     // Whether the case-open notice is currently open, for tests: the same IsShown a real CaseOpened event,
     // a gauge click closing it or the tray closing would change.
     internal bool WidgetCaseOpenCardIsShownForTest => _widgetCardPresenter?.IsUnaskedShown ?? false;
@@ -545,7 +548,9 @@ internal sealed partial class TrayContext
     // takes the story over.
     private void OnCardOnScreenChanged() => _gaugeStory?.SetCardOnScreen(CardIsOnScreen());
 
-    private bool CardIsOnScreen() => _widgetCardPresenter is { } presenter && (presenter.IsShown || presenter.IsUnaskedShown);
+    // Only a full card counts: a compact row says nothing of a toggle, so the gauge tells it (a failure with no next step is then
+    // said by the cross, and nowhere else).
+    private bool CardIsOnScreen() => _widgetCardPresenter is { } presenter && presenter.IsFullCardShown;
 
     // What every gauge draws besides the reading: the numbers the owner set, and the story.
     private GaugeDisplaySettings GaugeSettings() =>

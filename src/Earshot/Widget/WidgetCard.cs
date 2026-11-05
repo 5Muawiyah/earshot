@@ -346,6 +346,7 @@ internal sealed partial class WidgetCard : Form
     public void Render(WidgetCardModel model, int dpi)
     {
         WidgetCardView before = _shownView;
+        CardForm formBefore = _shownForm;
         FormChange formChange = BeginFormChange(model);
         if (FormOrRowChanges(model))
         {
@@ -360,6 +361,12 @@ internal sealed partial class WidgetCard : Form
         NotePageChange(before, _shownView);
         EndFormChange(formChange);
         NoteWork(model.Work);
+        if (Visible && _shownForm != formBefore)
+        {
+            // Compact or full is what the gauge's story hands over by: it looks again.
+            RaiseOnScreenChanged();
+        }
+
         if (restartHold)
         {
             StartHold();
