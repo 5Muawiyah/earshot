@@ -1,8 +1,5 @@
 using Earshot.App;
 using Earshot.Contracts;
-using Earshot.Infra;
-using Earshot.Tests.Phase3;
-using Earshot.Tests.Streaming;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -14,116 +11,12 @@ namespace Earshot.Tests.Widget;
 [TestClass]
 public sealed class MovedToServiceTests
 {
-    private sealed class Rig : IDisposable
-    {
-        private readonly TempFolder _temp = new();
-        private readonly DateTimeOffset _start;
-
-        public Rig()
-        {
-            Log = new CapturingLog();
-            Clock = new TestTimeProvider();
-            Source = new FakeAdvertisementSource();
-            Monitor = new FakeDeviceMonitor(Clock);
-            Settings = new JsonSettingsStore(_temp.File("settings.json"), Log);
-            Settings.Update(s => s.PinnedContainerId = Container);
-            Service = new WidgetStatusService(
-                () => Source, Settings, Monitor, () => null, Log, action => action(), Clock, new FakePairedModelSource(),
-                new FakeHandsFreeBatterySource(), ProximityDecodeTable.Documented, runInBackground: work => work());
-            Service.MovedTo += (_, e) => Moved.Add(e);
-            _start = Clock.GetUtcNow();
-            Service.Start();
-        }
-
-        public Guid Container { get; } = Guid.NewGuid();
-
-        public CapturingLog Log { get; }
-
-        public TestTimeProvider Clock { get; }
-
-        public FakeAdvertisementSource Source { get; }
-
-        public FakeDeviceMonitor Monitor { get; }
-
-        public JsonSettingsStore Settings { get; }
-
-        public WidgetStatusService Service { get; }
-
-        public List<MovedToEventArgs> Moved { get; } = new();
-
-        public double Now => (Clock.GetUtcNow() - _start).TotalSeconds;
-
-        public AirPodsWhere Where => Service.Current.Where;
-
-        public void AdvanceTo(double seconds)
-        {
-            TimeSpan wait = TimeSpan.FromSeconds(seconds) - (Clock.GetUtcNow() - _start);
-            if (wait > TimeSpan.Zero)
-            {
-                Clock.Advance(wait);
-            }
-        }
-
-        // One message of the invented pair at the given time, as the watcher would hand it over.
-        public void Hear(
-            double seconds, sbyte rssi = -62, bool caseKnown = false, byte modelLow = WidgetFixtures.ModelLow, byte colour = WidgetFixtures.Colour,
-            uint tag = 1)
-        {
-            AdvanceTo(seconds);
-            byte batteryB = caseKnown ? (byte)0x05 : (byte)0x0F;
-            Source.Raise(new AdvertisementSample(
-                ProximityParser.AppleCompanyId,
-                WidgetFixtures.Proximity(modelLow: modelLow, batteryA: 0xFF, batteryB: batteryB, colour: colour), rssi, Clock.GetUtcNow(), tag));
-        }
-
-        // The burst that links the set: five case-known messages half a second apart.
-        public void Link()
-        {
-            for (int i = 0; i < 5; i++)
-            {
-                Hear(i * 0.5, caseKnown: true, rssi: -60);
-            }
-        }
-
-        // The AirPods leave this PC without Earshot having asked.
-        public void LeaveByOther() => Service.NoteLeftByOther(Clock.GetUtcNow());
-
-        public void ThisPc(bool active)
-        {
-            var endpoint = new AudioEndpoint("ep1", EndpointFlow.Render, active ? EndpointState.Active : EndpointState.Unplugged, "AirPods", Container);
-            var model = new DeviceModel(Container, "AirPods", active ? ConnectionState.Connected : ConnectionState.Disconnected, [endpoint]);
-            Monitor.Raise(new DeviceSnapshot(model, [model], Clock.GetUtcNow())
-            {
-                ReadStatus = SnapshotReadStatus.Ok,
-                Resolution = TargetResolution.Pinned,
-            });
-        }
-
-        public bool LogHas(string fragment) => Log.Has(LogLevel.Info, fragment);
-
-        // The leave, then the pair heard near for four seconds: the shape that is moved.
-        public void LeaveAndBeHeardNear()
-        {
-            LeaveByOther();
-            double t = Now;
-            Hear(t + 0.9);
-            Hear(t + 2.4);
-            Hear(t + 3.8);
-        }
-
-        public void Dispose()
-        {
-            Service.Dispose();
-            _temp.Dispose();
-        }
-    }
-
     // ---- The verdict makes Where read Elsewhere
 
     [TestMethod]
     public void AMovedVerdictMakesWhereElsewhereAndRaisesOnce()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         Assert.AreNotEqual(AirPodsWhere.Elsewhere, rig.Where);
 
         rig.LeaveAndBeHeardNear();
@@ -138,7 +31,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void ItNeedsNoLink()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
 
         rig.LeaveAndBeHeardNear();
 
@@ -149,7 +42,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void WhereStaysElsewhereWhileTheLinkedPairIsHeardToo()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.Link();
         rig.AdvanceTo(15);
 
@@ -163,7 +56,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void ItRunsWithTheSettingOff()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.Settings.Update(s => s.Widget = s.Widget with { MovedToOn = false });
 
         rig.LeaveAndBeHeardNear();
@@ -177,7 +70,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void IntoTheCaseJustBeforeShowsNothing()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.Hear(0, caseKnown: true);
         rig.Hear(3, caseKnown: true);
 
@@ -191,7 +84,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void NotHeardShowsNothingAtTheBound()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveByOther();
         rig.AdvanceTo(rig.Now + 9.9);
         Assert.IsFalse(rig.LogHas("not heard."), "It is not said before the bound.");
@@ -206,7 +99,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void AWeakPairShowsNothing()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveByOther();
         double t = rig.Now;
         rig.Hear(t + 1, rssi: -88);
@@ -222,7 +115,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void AnotherModelIsNotCounted()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveByOther();
         double t = rig.Now;
         rig.Hear(t + 1, modelLow: WidgetFixtures.StrangerModelLow);
@@ -239,7 +132,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void AnotherColourOfTheRememberedPairIsNotCounted()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.Link();
         rig.AdvanceTo(15);
         rig.LeaveByOther();
@@ -257,7 +150,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void ThisPcHavingThemAgainFirstShowsNothing()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.ThisPc(active: true);
         rig.LeaveByOther();
         rig.ThisPc(active: false);
@@ -278,7 +171,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void ThirtySecondsAfterTheLeaveTheLineSaysWhatItHeld()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         double t = rig.Now;
         rig.LeaveAndBeHeardNear();
         for (int i = 1; i <= 15; i++)
@@ -294,7 +187,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void TheLongLineIsWrittenOnceEvenWithNothingHeard()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveByOther();
 
         rig.AdvanceTo(rig.Now + 45);
@@ -307,7 +200,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void ThisPcActiveAgainClearsIt()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
         Assert.AreEqual(AirPodsWhere.Elsewhere, rig.Where);
 
@@ -323,7 +216,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void ACaseKnownMessageOfThePairClearsIt()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
 
         rig.Hear(rig.Now + 1, caseKnown: true);
@@ -334,7 +227,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void AnotherModelsCaseKnownMessageDoesNotClearIt()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
 
         rig.Hear(rig.Now + 1, caseKnown: true, modelLow: WidgetFixtures.StrangerModelLow);
@@ -345,7 +238,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void TwoMinutesWithNoMessageOfThePairClearsIt()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
         double last = rig.Now;
         var changes = new List<EventArgs>();
@@ -364,7 +257,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void AMessageEveryMinuteKeepsItForAsLongAsTheyAreHeard()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
         double t = rig.Now;
 
@@ -381,7 +274,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void ForgettingThePairDropsIt()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
 
         rig.Service.ForgetPair("another pair was adopted");
@@ -394,7 +287,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void TheGaugeShowsThePhoneMark()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
 
         GaugeContent content = GaugeContent.From(rig.Service.Current, rig.Clock.GetUtcNow(), GaugeDisplaySettings.Default);
@@ -406,7 +299,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void TheCardSaysOnYourIPhoneAndOnAnotherDeviceWithNoLabel()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
 
         Assert.AreEqual("On your iPhone", WidgetCopy.Where(rig.Where, "iPhone"));
@@ -416,7 +309,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void SendToHasTheOtherDeviceAsTheCurrentRow()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.LeaveAndBeHeardNear();
 
         SendToModel model = SendToModel.From(rig.Where, "iPhone", busy: false);
@@ -429,7 +322,7 @@ public sealed class MovedToServiceTests
     [TestMethod]
     public void TheConnectFailureReasonIsInUseOnYourIPhone()
     {
-        using var rig = new Rig();
+        using var rig = new MovedToRig();
         rig.Link();
         rig.AdvanceTo(15);
         rig.LeaveAndBeHeardNear();

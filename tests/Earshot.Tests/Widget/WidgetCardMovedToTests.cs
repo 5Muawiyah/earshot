@@ -109,6 +109,26 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // The one consumer that needs a window: the card the owner asks for, given the snapshot a real verdict made.
+    [TestMethod]
+    public void TheAskedCardSaysOnYourIPhoneWithThePhoneGlyphAfterARealVerdict()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var verdict = new MovedToRig();
+            verdict.LeaveAndBeHeardNear();
+            using var rig = new ConnectRig();
+            rig.Callbacks.Snapshot = verdict.Service.Current;
+            rig.Callbacks.OtherDeviceLabel = "iPhone";
+
+            rig.OpenAsked();
+
+            (char glyph, string text, _) = rig.Asked.StatusRow;
+            Assert.AreEqual(FluentGlyphs.CellPhone, glyph);
+            Assert.AreEqual("On your iPhone", text);
+        });
+    }
+
     // ---- When it opens, and when not
 
     [TestMethod]
