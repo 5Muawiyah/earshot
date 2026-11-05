@@ -351,6 +351,7 @@ internal sealed partial class WidgetCard : Form
         {
             // What was pressed belonged to the form or row that is going: its up is no click on the one that replaces it.
             ClearPressedFlags();
+            NoteShownChange();
         }
 
         // A row on show that says something else starts its hold again, with or without a crossfade.
@@ -738,6 +739,13 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
+        if (PressTooSoonAfterChange)
+        {
+            // The second press of a double-click on what was here a moment ago: it is not a choice on what is here now.
+            ClearPressedFlags();
+            return;
+        }
+
         NoteMouseForFocusCue();
         HideTip();
         if (e.Button == MouseButtons.Left)
@@ -789,6 +797,12 @@ internal sealed partial class WidgetCard : Form
         }
 
         TrackHot(e.Location, pressed: false);
+        if (PressTooSoonAfterChange)
+        {
+            ClearPressedFlags();
+            return;
+        }
+
         if (IsCompactShown)
         {
             CompactMouseUp(e);

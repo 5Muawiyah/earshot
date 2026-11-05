@@ -389,6 +389,24 @@ internal sealed partial class WidgetCard
     // The clock the hold counts on, in milliseconds. A test hands in its own.
     internal Func<long> HoldClock = static () => Environment.TickCount64;
 
+    // The clock the double-click guard counts on, in milliseconds. A test hands in its own.
+    internal Func<long> PressClock = static () => Environment.TickCount64;
+
+    // When the form on show, or the compact row on show, last changed under the pointer. A growing row puts the full card's Connect
+    // where the row was, so the second press of a double-click on the row would otherwise press it: for the system's own double-click
+    // time after a change on screen, a press on any button of the card is ignored (animation effects on or off alike).
+    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdoubleclicktime
+    private long _shownChangedAt = long.MinValue;
+
+    private bool PressTooSoonAfterChange =>
+        _shownChangedAt != long.MinValue && PressClock() - _shownChangedAt < SystemInformation.DoubleClickTime;
+
+    // The shown form or row is changing under a card that is on screen (called from Render, before the change).
+    private void NoteShownChange()
+    {
+        _shownChangedAt = Visible ? PressClock() : long.MinValue;
+    }
+
     // Whether the compact row is holding, and whether the pointer has paused it, for tests.
     internal bool HoldActive => _hold.Active;
 
@@ -545,8 +563,10 @@ internal sealed partial class WidgetCard
             FinishFormFade();
             _pointerOver = false;
 
-            // A press left over from the showing that ended is not answered by an up on the next one.
+            // A press left over from the showing that ended is not answered by an up on the next one, and a change on that showing
+            // does not guard the next.
             ClearPressedFlags();
+            _shownChangedAt = long.MinValue;
         }
         else
         {

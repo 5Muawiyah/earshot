@@ -30,16 +30,18 @@ public sealed class WidgetCardCompactPressTests
         public int Body { get; set; }
     }
 
-    private static (WidgetCard Card, Counts Counts) Shown(CompactContent content)
+    private static (WidgetCard Card, Counts Counts, Steady Time) Shown(CompactContent content)
     {
         WidgetCard card = DesignPixels.NewCard(DesignTheme.Light, 1.0, notice: true);
         var counts = new Counts();
+        var time = new Steady();
+        card.PressClock = time.Now;
         card.CompactActionRequested += (_, _) => counts.Action++;
         card.CompactBodyClicked += (_, _) => counts.Body++;
         card.Render(Compact(content), 96);
         card.Show();
         Application.DoEvents();
-        return (card, counts);
+        return (card, counts, time);
     }
 
     private static nint At(Point p) => (nint)(((p.Y & 0xFFFF) << 16) | (p.X & 0xFFFF));
@@ -55,7 +57,7 @@ public sealed class WidgetCardCompactPressTests
     {
         CardDesktop.Run(() =>
         {
-            (WidgetCard card, Counts counts) = Shown(MovedTo("Moved to iPhone"));
+            (WidgetCard card, Counts counts, Steady time) = Shown(MovedTo("Moved to iPhone"));
             using (card)
             {
                 Point button = Centre(card.CurrentCompactLayout!.Action);
@@ -63,6 +65,7 @@ public sealed class WidgetCardCompactPressTests
 
                 card.Render(Compact(MovedTo("Moved to another device")), 96);
                 Point replacement = Centre(card.CurrentCompactLayout!.Action);
+                time.Ms += DoubleClick + 1;
                 Up(card, replacement);
 
                 Assert.AreEqual(0, counts.Action, "Take back is not run by a press that began on a row that has gone");
@@ -75,7 +78,7 @@ public sealed class WidgetCardCompactPressTests
     {
         CardDesktop.Run(() =>
         {
-            (WidgetCard card, Counts counts) = Shown(MovedTo("Moved to iPhone"));
+            (WidgetCard card, Counts counts, Steady time) = Shown(MovedTo("Moved to iPhone"));
             using (card)
             {
                 Rectangle text = card.CurrentCompactLayout!.Text;
@@ -83,6 +86,7 @@ public sealed class WidgetCardCompactPressTests
                 Down(card, body);
 
                 card.Render(Compact(Charged), 96);
+                time.Ms += DoubleClick + 1;
                 Up(card, body);
 
                 Assert.AreEqual(0, counts.Body, "A press that began on a row that has gone does not grow the card");
@@ -95,7 +99,7 @@ public sealed class WidgetCardCompactPressTests
     {
         CardDesktop.Run(() =>
         {
-            (WidgetCard card, Counts counts) = Shown(MovedTo("Moved to iPhone"));
+            (WidgetCard card, Counts counts, Steady time) = Shown(MovedTo("Moved to iPhone"));
             using (card)
             {
                 Point button = Centre(card.CurrentCompactLayout!.Action);
@@ -106,10 +110,135 @@ public sealed class WidgetCardCompactPressTests
                 card.Render(Compact(MovedTo("Moved to iPhone")), 96);
                 card.Show();
                 Application.DoEvents();
+                time.Ms += DoubleClick + 1;
                 Up(card, Centre(card.CurrentCompactLayout!.Action));
 
                 Assert.AreEqual(0, counts.Action, "An up with no down on this showing is no click");
             }
         });
+    }
+
+    // ---- A press just after a form change is a double-click's second press, not a choice
+
+    private sealed class Steady
+    {
+        public long Ms { get; set; }
+
+        public long Now() => Ms;
+    }
+
+    private static int DoubleClick => SystemInformation.DoubleClickTime;
+
+    private static (WidgetCard Card, Counts Counts, Steady Time, Counts Toggles) ShownOnAClock(CompactContent content, WidgetCardModel? first = null)
+    {
+        var time = new Steady();
+        WidgetCard card = DesignPixels.NewCard(DesignTheme.Light, 1.0, notice: true);
+        card.PressClock = time.Now;
+        var counts = new Counts();
+        var toggles = new Counts();
+        card.CompactActionRequested += (_, _) => counts.Action++;
+        card.CompactBodyClicked += (_, _) => counts.Body++;
+        card.ToggleRequested += (_, _) => toggles.Action++;
+        card.Render(first ?? Compact(content), 96);
+        card.Show();
+        Application.DoEvents();
+        return (card, counts, time, toggles);
+    }
+
+    [TestMethod]
+    public void AFullCardsConnectIgnoresAPressWithinTheDoubleClickTimeOfTheRowGrowingAndTakesOneAfterIt()
+    {
+        CardDesktop.Run(() =>
+        {
+            (WidgetCard card, _, Steady time, Counts toggles) = ShownOnAClock(MovedTo("Moved to iPhone"));
+            using (card)
+            {
+                time.Ms = 100_000;
+                card.Render(CardKit.MainModel(), 96);
+
+                time.Ms = 100_000 + DoubleClick - 1;
+                CardKit.Click(card, card.CurrentMainLayout.Button);
+                Assert.AreEqual(0, toggles.Action, "The second press of a double-click on the row is not Connect");
+
+                time.Ms = 100_000 + DoubleClick;
+                CardKit.Click(card, card.CurrentMainLayout.Button);
+                Assert.AreEqual(1, toggles.Action, "A press the double-click time after is a choice");
+            }
+        });
+    }
+
+    [TestMethod]
+    public void TheRowsButtonAndBodyIgnoreAPressWithinTheDoubleClickTimeOfTheFullCardFoldingBack()
+    {
+        CardDesktop.Run(() =>
+        {
+            (WidgetCard card, Counts counts, Steady time, _) = ShownOnAClock(MovedTo("Moved to iPhone"), CardKit.MainModel());
+            using (card)
+            {
+                time.Ms = 100_000;
+                card.Render(Compact(MovedTo("Moved to iPhone")), 96);
+                WidgetCardLayout.CompactLayout layout = card.CurrentCompactLayout!;
+
+                time.Ms = 100_000 + DoubleClick - 1;
+                CardKit.Click(card, layout.Action);
+                CardKit.Click(card, layout.Text);
+                Assert.AreEqual((0, 0), (counts.Action, counts.Body), "Neither Take back nor a grow");
+
+                time.Ms = 100_000 + DoubleClick;
+                CardKit.Click(card, layout.Action);
+                CardKit.Click(card, layout.Text);
+                Assert.AreEqual((1, 1), (counts.Action, counts.Body), "Both after the time");
+            }
+        });
+    }
+
+    [TestMethod]
+    public void ARowReplacedByAnotherRowIgnoresAPressWithinTheDoubleClickTime()
+    {
+        CardDesktop.Run(() =>
+        {
+            (WidgetCard card, Counts counts, Steady time, _) = ShownOnAClock(Charged);
+            using (card)
+            {
+                time.Ms = 100_000;
+                card.Render(Compact(MovedTo("Moved to iPhone")), 96);
+
+                time.Ms = 100_000 + DoubleClick - 1;
+                CardKit.Click(card, card.CurrentCompactLayout!.Action);
+                Assert.AreEqual(0, counts.Action, "Take back is not pressed by the second press of a double-click");
+
+                time.Ms = 100_000 + DoubleClick;
+                CardKit.Click(card, card.CurrentCompactLayout!.Action);
+                Assert.AreEqual(1, counts.Action);
+            }
+        });
+    }
+
+    [TestMethod]
+    public void TheGuardDoesNotDependOnMotionSoItHoldsWithAnimationEffectsOnAndOff()
+    {
+        foreach (bool animations in new[] { false, true })
+        {
+            CardDesktop.Run(() =>
+            {
+                (WidgetCard card, _, Steady time, Counts toggles) = ShownOnAClock(MovedTo("Moved to iPhone"));
+                using (card)
+                {
+                    var clock = new FakeVBlankClock(60);
+                    card.AttachMotion(clock, () => animations);
+                    time.Ms = 100_000;
+                    card.Render(CardKit.MainModel(), 96);
+                    clock.RunUntil(clock.Now + TimeSpan.FromMilliseconds(400));
+
+                    time.Ms = 100_000 + DoubleClick - 1;
+                    CardKit.Click(card, card.CurrentMainLayout.Button);
+                    Assert.AreEqual(0, toggles.Action, "Ignored, with animation effects " + (animations ? "on" : "off"));
+
+                    time.Ms = 100_000 + DoubleClick;
+                    CardKit.Click(card, card.CurrentMainLayout.Button);
+                    Assert.AreEqual(1, toggles.Action, "Taken after the time, with animation effects " + (animations ? "on" : "off"));
+                }
+            });
+        }
     }
 }
