@@ -142,6 +142,7 @@ internal sealed partial class TrayContext
             _widgetStatus.Changed += OnWidgetStatusChanged;
             _widgetStatus.CaseOpened += OnCaseOpened;
             _widgetStatus.CaseClosed += OnCaseClosed;
+            _widgetStatus.MovedTo += OnMovedTo;
             _widgetSnapshotCache = _widgetStatus.Current;
             _widgetStatus.Start();
             _lowBatteryAlertService = CompositionRoot.BuildLowBatteryAlertService(_registry, _widgetStatus, _time);
@@ -182,7 +183,8 @@ internal sealed partial class TrayContext
                 QueryHistory: end => _widgetStatus?.QueryHistory(end) ?? HistoryStore.Window([], end),
                 SendToRowOn: () => SendToAccess.CardRow(_registry.Settings.Current.Widget, unasked: false),
                 OpenSendTo: () => OpenSendTo(openedByKeyboard: false),
-                LowBatteryThreshold: () => _registry.Settings.Current.Widget.LowBatteryThresholdPercent);
+                LowBatteryThreshold: () => _registry.Settings.Current.Widget.LowBatteryThresholdPercent,
+                MovedToOn: () => _registry.Settings.Current.Widget.MovedToOn);
 
             // The one presenter opens the asked card and the unasked ones: built here, with the data pipeline, so a case opening
             // is shown with no gauge on the taskbar.
@@ -823,6 +825,22 @@ internal sealed partial class TrayContext
 
         _widgetCardPresenter?.CaseOpened(GaugeBoundsIfShown());
     }
+
+    // WidgetStatusService.MovedTo, on the UI thread: the pair kept sending, out of the case and near, after a leave Earshot did not start.
+    // The snapshot is read again first, as for CaseOpened, so the card sees Where as the verdict made it. The presenter runs the
+    // setting and every gate; the latch behind Where does not depend on the setting.
+    private void OnMovedTo(object? sender, MovedToEventArgs e)
+    {
+        if (_widgetStatus is { } status)
+        {
+            _widgetSnapshotCache = status.Current;
+        }
+
+        _widgetCardPresenter?.MovedTo();
+    }
+
+    // A leave Earshot did not start (PauseOnLeave.LeftByOther), told to the widget's moved-to rule once it exists.
+    private void OnLeftByOther(DateTimeOffset at) => _widgetStatus?.NoteLeftByOther(at);
 
     // IWidgetStatus.CaseClosed, on the UI thread: the linked pair's case-known messages stopped, so the case-open card
     // closes on every display, whatever its own close time says.

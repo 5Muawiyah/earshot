@@ -32,12 +32,18 @@ internal sealed partial class TrayContext
 
         _pauseOnLeave = new PauseOnLeave(
             sessions, new CoreAudioRenderActivity(worker), () => _registry.Settings.Current.PauseWhenAirPodsLeave, _time, _log);
+        _pauseOnLeave.LeftByOther += OnLeftByOther;
         _coordinator.LeavePause = _pauseOnLeave;
     }
 
     private void ClosePauseOnLeave()
     {
         _coordinator.LeavePause = null;
+        if (_pauseOnLeave is not null)
+        {
+            _pauseOnLeave.LeftByOther -= OnLeftByOther;
+        }
+
         _pauseOnLeave?.Dispose();
         _pauseOnLeave = null;
     }

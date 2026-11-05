@@ -199,6 +199,7 @@ internal sealed partial class WidgetCard
 
         if (state == CompactActionState.Progress)
         {
+            StopHold();
             StartSpin();
         }
         else
@@ -390,7 +391,9 @@ internal sealed partial class WidgetCard
 
     // The card holds and a pointer over it stops the clock: the compact row, and the full card an unasked failure opened (a failure
     // that carries a hold). Any other card stays until it is closed.
-    private bool HoldApplies => IsCompactShown || (_unasked && _shownForm == CardForm.Full && _model.Failure?.Hold is not null);
+    // While the button's work runs (Take back) the row does not fold: its end decides what the card does next.
+    private bool HoldApplies => (IsCompactShown && _actionShown != CompactActionState.Progress) ||
+        (_unasked && _shownForm == CardForm.Full && _model.Failure?.Hold is not null);
 
     private TimeSpan? HoldLength => IsCompactShown ? _model.Compact?.Hold : HoldApplies ? _model.Failure?.Hold : null;
 

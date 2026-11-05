@@ -27,7 +27,8 @@ internal sealed record WidgetCardPresenterCallbacks(
     Func<DateTimeOffset, HistoryWindow>? QueryHistory = null,   // the 24 hours of live readings ending then; the history page is empty when null
     Func<bool>? SendToRowOn = null,   // whether the card shows its Send to row (SendToAccess.CardRow); off when null
     Action? OpenSendTo = null,        // the Send to row was pressed: the picker opens
-    Func<int>? LowBatteryThreshold = null)   // the Low battery alerts level; a live reading at or under it is drawn in caution
+    Func<int>? LowBatteryThreshold = null,   // the Low battery alerts level; a live reading at or under it is drawn in caution
+    Func<bool>? MovedToOn = null)            // whether the compact "Moved to" card may show (WidgetSettings.MovedToOn); on when null
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }

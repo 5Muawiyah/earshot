@@ -39,7 +39,7 @@ internal sealed partial class WidgetCardPresenter
         WidgetCardModel model = BuildModel(_callbacks, _time);
         return compact is null
             ? model with { Work = _work, Failure = FailureContent() }
-            : model with { Form = CardForm.Compact, Compact = compact, CompactState = CompactActionState.Idle };
+            : model with { Form = CardForm.Compact, Compact = compact, CompactState = CompactStateFor(compact) };
     }
 
     // The notice the asked card carries now, for tests; null when none.
@@ -214,7 +214,9 @@ internal sealed partial class WidgetCardPresenter
         {
             (CompactRequest request, long at) = _waiting[kind];
             _waiting.Remove(kind);
-            bool stillTrue = request.Content.Hold is not { } hold || _time.GetElapsedTime(at) < hold;
+            bool stillTrue = kind == UnaskedKind.MovedTo
+                ? MovedToIsTrue(out _)
+                : request.Content.Hold is not { } hold || _time.GetElapsedTime(at) < hold;
             if (!stillTrue)
             {
                 _log.Write(LogLevel.Debug, "Card: dropped (" + KindName(kind) + "), it was no longer true when its turn came.");
@@ -296,6 +298,12 @@ internal sealed partial class WidgetCardPresenter
     // the message loop.
     private void OnCompactActionRequested(object? sender, EventArgs e)
     {
+        if (_unaskedCompact is { Kind: UnaskedKind.MovedTo })
+        {
+            OnTakeBackPressed();
+            return;
+        }
+
         CompactRequest? request = _unaskedRequest;
         string label = request?.Content.Action?.Label ?? string.Empty;
         _log.Write(LogLevel.Debug, "Card: button pressed" + (request?.OnAction is null ? ", but it has no action." : " (" + label + ")."));

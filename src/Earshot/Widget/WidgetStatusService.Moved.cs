@@ -11,15 +11,6 @@ internal sealed class MovedToEventArgs(MovedVerdict verdict, DateTimeOffset at) 
     public DateTimeOffset At { get; } = at;
 }
 
-// What the tray needs of the service for Moved to, apart from IWidgetStatus: the leave Earshot did not start goes in, and the
-// verdict comes out. UI thread for the event.
-internal interface IMovedToSource
-{
-    event EventHandler<MovedToEventArgs>? MovedTo;
-
-    void NoteLeftByOther(DateTimeOffset at);
-}
-
 // The service's side of Moved to. The rule (MovedToRule) is fed every message of the paired model, and of the remembered colour
 // when one is remembered, linked or not: it shows no figure, so it needs no link. A verdict of moved latches, and while the
 // latch holds Where reads Elsewhere, which is what makes "On your iPhone" and "On another device" appear. The latch clears three

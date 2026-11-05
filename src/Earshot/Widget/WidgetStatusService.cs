@@ -23,7 +23,7 @@ namespace Earshot.Widget;
 // Start, Suspend, Resume and Close are not on IWidgetStatus: they are called directly by whatever wires the
 // widget into the tray (out of scope here), the way the device monitor's own Start is called once and its
 // suspend/resume handling sits in the tray's power-event plumbing.
-internal sealed partial class WidgetStatusService : IWidgetStatus, IMovedToSource, IDisposable
+internal sealed partial class WidgetStatusService : IWidgetStatus, IDisposable
 {
     private readonly Func<IAdvertisementSource> _sourceFactory;
     private readonly ISettingsStore _settings;

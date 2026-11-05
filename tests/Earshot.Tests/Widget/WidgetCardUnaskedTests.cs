@@ -977,6 +977,8 @@ public sealed partial class WidgetCardUnaskedTests
 
         public string OtherDeviceLabel { get; set; } = "";
 
+        public bool MovedToOnValue { get; set; } = true;
+
         public List<CardPlace> ToggleCalls { get; } = new();
 
         public List<(bool On, CardPlace Place)> AutoPauseCalls { get; } = new();
@@ -991,6 +993,7 @@ public sealed partial class WidgetCardUnaskedTests
             HighContrast: () => HighContrast,
             OtherDeviceLabel: () => OtherDeviceLabel,
             RequestToggle: place => ToggleCalls.Add(place),
-            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)));
+            SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)),
+            MovedToOn: () => MovedToOnValue);
     }
 }

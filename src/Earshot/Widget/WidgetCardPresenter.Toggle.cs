@@ -59,6 +59,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
             CloseUnasked("a new attempt began");
         }
 
+        NoteToggleStartedForMovedTo(connect);
         DropFailure();
         _work = connect ? CardButtonWork.Connecting : CardButtonWork.Disconnecting;
         _log.Write(LogLevel.Debug, "Card: " + (connect ? "connecting" : "disconnecting") + ".");
@@ -79,7 +80,15 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
 
         _log.Write(LogLevel.Debug, "Card: " + (connect ? "connect" : "disconnect") + " ended, " + outcome + ".");
+        bool restartHold = NoteToggleEndedForMovedTo(outcome);
         RenderEveryCard();
+        if (restartHold)
+        {
+            foreach ((_, WidgetCard card, _) in UnaskedOpenCards())
+            {
+                card.RestartHold();
+            }
+        }
     }
 
     private FailureShown ShowFailedOnUiThread(string reason, FailureNextStep? next)

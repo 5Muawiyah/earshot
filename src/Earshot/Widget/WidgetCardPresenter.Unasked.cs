@@ -105,6 +105,7 @@ internal sealed partial class WidgetCardPresenter
     private void DisposeUnasked()
     {
         StopUnaskedCloseTimer();
+        ResetTakeBack();
         foreach ((WidgetCard card, _) in _unaskedCards.Values)
         {
             UnhookUnasked(card);
@@ -465,6 +466,9 @@ internal sealed partial class WidgetCardPresenter
     private void CloseUnasked(string why, bool promoteWaiting = false)
     {
         StopUnaskedCloseTimer();
+
+        // A card that folded by itself (its hold ended) has already hidden, so nothing of Take back outlives the close.
+        ResetTakeBack();
         if (why == AskedOpenedWhy)
         {
             // The card he asked for is in front of him: a notice that waited for the unasked card is not shown behind it.
