@@ -398,6 +398,9 @@ internal sealed partial class WidgetCard
     // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getdoubleclicktime
     private long _shownChangedAt = long.MinValue;
 
+    // The press now down was ignored by that rule, so its release is too.
+    private bool _pressIgnored;
+
     private bool PressTooSoonAfterChange =>
         _shownChangedAt != long.MinValue && PressClock() - _shownChangedAt < SystemInformation.DoubleClickTime;
 
@@ -552,6 +555,7 @@ internal sealed partial class WidgetCard
             // A press left over from the showing that ended is not answered by an up on the next one, and a change on that showing
             // does not guard the next.
             ClearPressedFlags();
+            _pressIgnored = false;
             _shownChangedAt = long.MinValue;
         }
         else

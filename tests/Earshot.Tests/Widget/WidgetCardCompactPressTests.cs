@@ -242,6 +242,39 @@ public sealed class WidgetCardCompactPressTests
         }
     }
 
+    // ---- An ignored press takes its release with it
+
+    [TestMethod]
+    public void APressIgnoredInsideTheDoubleClickTimeTakesItsReleaseWithItHoweverLateItComes()
+    {
+        CardDesktop.Run(() =>
+        {
+            (WidgetCard card, _, Steady time, Counts toggles) = ShownOnAClock(MovedTo("Moved to iPhone"));
+            using (card)
+            {
+                var closes = new List<WidgetCardCloseReason>();
+                card.CloseRequested += (_, reason) => closes.Add(reason);
+                time.Ms = 100_000;
+                card.Render(CardKit.MainModel(), 96);
+                var empty = new Point(3, 3);
+
+                time.Ms = 100_000 + DoubleClick - 50;
+                Down(card, empty);
+                time.Ms = 100_000 + DoubleClick + 50;
+                Up(card, empty);
+
+                Assert.IsEmpty(closes, "The press was ignored, so its release past the time does not close the grown card.");
+                Assert.AreEqual(0, toggles.Action);
+                Assert.IsTrue(card.Visible);
+
+                time.Ms += DoubleClick;
+                Down(card, empty);
+                Up(card, empty);
+                Assert.HasCount(1, closes, "A whole click after the time is a click outside, as before.");
+            }
+        });
+    }
+
     // ---- A card that is fading out answers no press
 
     [TestMethod]

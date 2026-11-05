@@ -746,9 +746,11 @@ internal sealed partial class WidgetCard : Form
             return;
         }
 
-        if (PressTooSoonAfterChange)
+        _pressIgnored = PressTooSoonAfterChange;
+        if (_pressIgnored)
         {
-            // The second press of a double-click on what was here a moment ago: it is not a choice on what is here now.
+            // The second press of a double-click on what was here a moment ago: it is not a choice on what is here now. Its release
+            // is ignored too, however late it comes, or it would read as a click outside and close the card.
             ClearPressedFlags();
             return;
         }
@@ -804,8 +806,9 @@ internal sealed partial class WidgetCard : Form
         }
 
         TrackHot(e.Location, pressed: false);
-        if (PressTooSoonAfterChange)
+        if (_pressIgnored || PressTooSoonAfterChange)
         {
+            _pressIgnored = false;
             ClearPressedFlags();
             return;
         }
