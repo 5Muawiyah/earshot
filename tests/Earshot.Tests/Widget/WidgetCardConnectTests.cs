@@ -54,8 +54,8 @@ public sealed partial class WidgetCardUnaskedTests
 
         public void MoveHoldClock(TimeSpan by) => _clock += (long)by.TotalMilliseconds;
 
-        public FailureShown Fail(string reason, string? next, Action? onPress = null) =>
-            Presenter.ShowFailed(reason, next is null ? null : new FailureNextStep(next, onPress ?? (() => { }))).GetAwaiter().GetResult();
+        public FailureShown Fail(string reason, string? next, Action? onPress = null, bool mustBeSaid = false) =>
+            Presenter.ShowFailed(reason, next is null ? null : new FailureNextStep(next, onPress ?? (() => { })), mustBeSaid).GetAwaiter().GetResult();
 
         public void Dispose() => Presenter.Dispose();
     }

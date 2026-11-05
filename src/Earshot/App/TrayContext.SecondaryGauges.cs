@@ -115,6 +115,10 @@ internal sealed partial class TrayContext
         }
 
         gauge.Render(_widgetSnapshotCache, _time.GetUtcNow(), GaugeSettings(), theme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
+        if (gauge.ShownBounds is not null)
+        {
+            _gaugeStory?.GaugeDrawn();
+        }
     }
 
     private void RenderSecondaryGauges()
@@ -125,6 +129,10 @@ internal sealed partial class TrayContext
         }
 
         set.Render(_widgetSnapshotCache, _time.GetUtcNow(), GaugeSettings(), theme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
+        if (set.Gauges.Any(g => g.ShownBounds is not null))
+        {
+            _gaugeStory?.GaugeDrawn();
+        }
     }
 
     private void PokeSecondaryGauges(bool resetBackoff) => _secondaryGauges?.Poke(resetBackoff);

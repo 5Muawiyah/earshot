@@ -42,8 +42,9 @@ internal enum ToggleOutcome
     // A connect that took, with the audio quality protection after it not applied (connected, not protected). The gauge claims nothing
     // either way: no tick that would say it all worked and no cross that would say they did not connect. The notice the coordinator
     // raises says what did not take, and it may be refused (presentation mode, quiet time), so nothing relies on it for the gauge.
-    // A disconnect whose block did not take is never Partial: the nodes stay enabled and the PC can page the AirPods, so it is Failed
-    // and the gauge's cross says so whether or not a notice is shown.
+    // A disconnect whose block did not take is never Partial: the nodes stay enabled and the PC can page the AirPods, so it is Failed.
+    // Its cross waits for a gauge on screen to draw it (GaugeStory.Ended, mustBeSeen), and the failure is held for the next card he
+    // asks for and spoken, so it is said whether or not a notice is shown or a gauge was hidden at the time.
     Partial,
 
     // The attempt was stopped (a newer click, Exit, a session end): nothing is said of it.
@@ -70,17 +71,22 @@ internal sealed class GaugeStory
     private GaugeStoryKind _kind;
     private bool _connect;
     private DateTimeOffset _holdEnds;
+    private bool _awaitingSight;
 
     // Where the toggle that is being told was started from.
     public ToggleOrigin Origin { get; private set; }
 
+    // A cross that has to be seen has not yet been drawn by a gauge on screen: it has no end until one does.
+    public bool AwaitingSight => _kind == GaugeStoryKind.Cross && _awaitingSight;
+
     // When the story next changes without being told, or null when it changes only when told: a hold's end.
-    public DateTimeOffset? NextChange => _kind is GaugeStoryKind.Tick or GaugeStoryKind.Cross ? _holdEnds : null;
+    public DateTimeOffset? NextChange => (_kind is GaugeStoryKind.Tick or GaugeStoryKind.Cross) && !_awaitingSight ? _holdEnds : null;
 
     // What the gauge tells at now.
     public GaugeStoryView View(DateTimeOffset now) => _kind switch
     {
         GaugeStoryKind.Spinning => new GaugeStoryView(GaugeStoryKind.Spinning, _connect),
+        GaugeStoryKind.Cross when _awaitingSight => new GaugeStoryView(GaugeStoryKind.Cross, _connect),
         GaugeStoryKind.Tick or GaugeStoryKind.Cross when now < _holdEnds => new GaugeStoryView(_kind, _connect),
         _ => default,
     };
@@ -91,12 +97,15 @@ internal sealed class GaugeStory
         _ = now;
         _kind = GaugeStoryKind.Spinning;
         _connect = connect;
+        _awaitingSight = false;
         Origin = origin;
     }
 
     // The toggle that was started has ended. An end with no spin to end is ignored: a result nobody was shown starting has no
-    // mark to show.
-    public void Ended(ToggleOutcome outcome, DateTimeOffset now)
+    // mark to show. mustBeSeen is a failure the person has to be told (a disconnect whose block did not take): its cross is not
+    // timed from now but from the first moment a gauge on screen draws it (Seen), since a gauge hidden for a presentation or a
+    // full-screen game would otherwise let the whole hold pass unseen.
+    public void Ended(ToggleOutcome outcome, DateTimeOffset now, bool mustBeSeen = false)
     {
         if (_kind != GaugeStoryKind.Spinning)
         {
@@ -112,10 +121,37 @@ internal sealed class GaugeStory
             case ToggleOutcome.Failed:
                 _kind = GaugeStoryKind.Cross;
                 _holdEnds = now + CrossHold;
+                _awaitingSight = mustBeSeen;
                 break;
             default:
                 _kind = GaugeStoryKind.None;
                 break;
         }
+    }
+
+    // A gauge on screen drew the cross that was waiting for one: its hold runs from now. False when none was waiting.
+    public bool Seen(DateTimeOffset now)
+    {
+        if (!AwaitingSight)
+        {
+            return false;
+        }
+
+        _awaitingSight = false;
+        _holdEnds = now + CrossHold;
+        return true;
+    }
+
+    // The cross that was waiting to be seen is no longer owed (it was said another way, or it is over): the story goes idle.
+    public bool Dismiss()
+    {
+        if (!AwaitingSight)
+        {
+            return false;
+        }
+
+        _awaitingSight = false;
+        _kind = GaugeStoryKind.None;
+        return true;
     }
 }

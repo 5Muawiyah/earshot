@@ -962,7 +962,8 @@ internal sealed partial class TrayContext : ApplicationContext
 
         // Partial is a connect that took with the audio quality protection after it not taken (connected, not protected): not a failure,
         // so no cross and no failed card. A disconnect whose block did not take is a failure: the nodes stay enabled and the PC can page
-        // the AirPods, so it is told on the gauge as a cross, which does not depend on its notice being shown.
+        // the AirPods, so it is told as a cross that waits for a gauge to draw it, held for the next card he asks for and spoken, none of
+        // which depends on a notice being shown.
         return report.IsSuccess ? ToggleOutcome.Succeeded : report.Status == OpStatus.Partial && report.Connect ? ToggleOutcome.Partial : ToggleOutcome.Failed;
     }
 
@@ -1063,12 +1064,12 @@ internal sealed partial class TrayContext : ApplicationContext
         // report arrives (the radio and pair looks after a failure do not keep the sweep turning), and the finally tells it if
         // nothing else did, so a toggle can never leave the gauge turning.
         bool gaugeTold = false;
-        void EndGauge(ToggleOutcome outcome)
+        void EndGauge(ToggleOutcome outcome, bool mustBeSeen = false)
         {
             if (!gaugeTold)
             {
                 gaugeTold = true;
-                TellToggleEnded(wanted, outcome);
+                TellToggleEnded(wanted, outcome, mustBeSeen);
             }
         }
 
@@ -1081,7 +1082,16 @@ internal sealed partial class TrayContext : ApplicationContext
             // A controller that reports a cancellation rather than throwing one is still a cancelled click. The
             // coordinator names the reason when it cancelled the operation itself (a session end, say).
             bool cancelled = report.Cancelled || cts.IsCancellationRequested;
-            EndGauge(OutcomeOf(report, cancelled));
+
+            // A disconnect whose block did not take leaves the nodes enabled, so the PC can page the AirPods: it is owed to the person
+            // until it has been said, whatever the gauge or the notice gate is doing (see NoteBlockFailureOwed).
+            bool blockFailed = !wanted && !cancelled && report.Status == OpStatus.Partial;
+            if (blockFailed)
+            {
+                NoteBlockFailureOwed();
+            }
+
+            EndGauge(OutcomeOf(report, cancelled), mustBeSeen: blockFailed);
             string text = TrayReport.Describe(
                 cancelled ? action + " (cancelled because " + (report.CancelledBecause ?? CancelReason()) + ")" : action,
                 report.Status,
@@ -1136,20 +1146,29 @@ internal sealed partial class TrayContext : ApplicationContext
                 // A read that answered as a new click superseded this attempt shows nothing for it; the new request has its own.
                 if (say && !cts.IsCancellationRequested)
                 {
-                    _ = await SayFailureAsync(reason, next);
+                    // Held for the next card only while it is still owed: a gauge that has already drawn the cross said it.
+                    FailureShown shown = await SayFailureAsync(reason, next, mustBeSaid: blockFailed && _blockFailureOwed);
+                    if (blockFailed && shown == FailureShown.Shown)
+                    {
+                        EndBlockFailureOwed("a card says it", dismissCross: true, dropHeld: false);
+                    }
                 }
             }
 
             // VoiceOver: announce on the transition itself, never on a poll and never a state the app
-            // only assumed, so a cancelled toggle says nothing. There is no VoiceLine for a failed
-            // disconnect (the closed set of phrases has no "disconnect failed" line), so that case is
-            // left unspoken rather than widening the set past what the design's own acceptance tests
-            // audited.
+            // only assumed, so a cancelled toggle says nothing. The closed set of phrases has no "disconnect
+            // failed" line, so a disconnect that did not disconnect is left unspoken rather than widening the
+            // set past what the design's own acceptance tests audited; a disconnect whose block did not take
+            // says "Block failed", since the person must hear that the AirPods are not protected.
             if (!cancelled)
             {
                 if (report.IsSuccess)
                 {
                     AnnounceIfEnabled(wanted ? VoiceLine.Connected : VoiceLine.Disconnected);
+                }
+                else if (blockFailed)
+                {
+                    AnnounceIfEnabled(VoiceLine.BlockFailed);
                 }
                 else if (wanted)
                 {
@@ -1387,6 +1406,7 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         _snapshot = e.Snapshot;
+        NoteSnapshotForOwedBlockFailure();
         UpdatePresentation(forceIcon: false);
         _ = PinIfFirstSightingAsync();
     }
@@ -2186,6 +2206,10 @@ internal sealed partial class TrayContext : ApplicationContext
         }
 
         UpdatePresentation(forceIcon: false);
+        if (_blockFailureOwed && BlockStatus?.State == BlockState.Blocked)
+        {
+            EndBlockFailureOwed("the nodes read blocked", dismissCross: true, dropHeld: true);
+        }
 
         // Once Exit is chosen, the card for the block before closing goes up only when that block is sent.
         if (_exitPlace is { } place && !_blockingCardShown && _coordinator.BlockingBeforeClosing)

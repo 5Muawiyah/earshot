@@ -24,6 +24,10 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
         public bool Held { get; init; }
 
+        // The failure leaves the PC able to page the AirPods (a disconnect whose block did not take): it is held until a card has said it,
+        // however long that takes, and the AirPods moving does not end it. The tray ends it when they connect again or a block takes.
+        public bool MustBeSaid { get; init; }
+
         // A card on screen says it now. Neither held nor displayed: it waits for the gauge's cross to have had its time.
         public bool Displayed { get; init; }
     }
@@ -47,11 +51,11 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
     public void ToggleEnded(bool connect, ToggleOutcome outcome) => _uiPost(() => ToggleEndedOnUiThread(connect, outcome));
 
-    public Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep)
+    public Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false)
     {
         ArgumentNullException.ThrowIfNull(reason);
         var result = new TaskCompletionSource<FailureShown>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _uiPost(() => result.TrySetResult(ShowFailedOnUiThread(reason, nextStep)));
+        _uiPost(() => result.TrySetResult(ShowFailedOnUiThread(reason, nextStep, mustBeSaid)));
         return result.Task;
     }
 
@@ -102,7 +106,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
     }
 
-    private FailureShown ShowFailedOnUiThread(string reason, FailureNextStep? next)
+    private FailureShown ShowFailedOnUiThread(string reason, FailureNextStep? next, bool mustBeSaid)
     {
         if (_disposed)
         {
@@ -110,7 +114,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
 
         DropFailure();
-        var failure = new ActiveFailure(reason, next, _callbacks.CurrentSnapshot().Where, ++_failureToken);
+        var failure = new ActiveFailure(reason, next, _callbacks.CurrentSnapshot().Where, ++_failureToken) { MustBeSaid = mustBeSaid };
         if (IsShown || IsUnaskedFullShown)
         {
             _failure = failure with { Displayed = true };
@@ -118,6 +122,15 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
             AnnounceFailure(reason);
             _log.Write(LogLevel.Debug, "Card: connect failed, said in the open card" + (next is null ? "." : ", with a next step."));
             return FailureShown.Shown;
+        }
+
+        if (next is null && mustBeSaid)
+        {
+            // No card is open and there is no button to open one for, but the gauge's cross may never have been on screen (a presentation,
+            // a full-screen game): the next card he asks for says it.
+            _failure = failure with { Held = true, HeldAt = _time.GetUtcNow() };
+            _log.Write(LogLevel.Debug, "Card: held (the block did not take), it is shown when he next asks for the card.");
+            return FailureShown.Held;
         }
 
         if (next is null)
@@ -191,7 +204,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
     // Where the AirPods are changed: a failure that was about how things stood is over.
     private void EndFailureOnStateChange()
     {
-        if (_failure is not { } failure || _callbacks.CurrentSnapshot().Where == failure.Where)
+        if (_failure is not { MustBeSaid: false } failure || _callbacks.CurrentSnapshot().Where == failure.Where)
         {
             return;
         }
@@ -210,7 +223,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
     // working, and it ends when that card closes.
     private void ShowHeldFailure()
     {
-        if (_failure is { Held: true, HeldAt: { } heldAt } && _time.GetUtcNow() - heldAt > HeldFailureLimit)
+        if (_failure is { Held: true, MustBeSaid: false, HeldAt: { } heldAt } && _time.GetUtcNow() - heldAt > HeldFailureLimit)
         {
             _log.Write(LogLevel.Debug, "Card: a held failure was dropped, it is too old to say anything about now.");
             DropFailure();
@@ -221,8 +234,26 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         {
             StopFailureTimer();
             _failure = waiting with { Held = false, Hold = null, Displayed = true };
+            if (waiting.MustBeSaid)
+            {
+                OwedFailureSaid?.Invoke();
+            }
         }
     }
+
+    // A failure that had to be said (a block that did not take) has been drawn on a card: the tray lets its cross go.
+    internal event Action? OwedFailureSaid;
+
+    // The tray found the failure over without a card saying it (the gauge drew its cross, the AirPods connected again, a block took).
+    // A failure already on a card stays until that card closes.
+    internal void DropOwedFailure() => _uiPost(() =>
+    {
+        if (!_disposed && _failure is { MustBeSaid: true, Displayed: false })
+        {
+            _log.Write(LogLevel.Debug, "Card: the held failure is over, it was said or has ended.");
+            DropFailure();
+        }
+    });
 
     // The card it was said on closed, so it is over. A failure no card has said yet stays.
     private void EndShownFailure()

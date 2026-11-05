@@ -33,6 +33,9 @@ public sealed class ToggleOutcomeTrayTests
     {
         var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), time: new TestTimeProvider(), arrange: t => t.Block.Status = Block(BlockState.Allowed));
         tray.Block.OnBlock = _ => Task.FromResult(ControllerResult.Fail(CouldNotBlock, [StepOutcomes.FromConfigRet("cm-disable", 0x33)]));
+
+        // No card is open to say it, so it is held for the next one (a card that said it would end the cross, which has its own test).
+        tray.Toggle.Answer = FailureShown.Held;
         return tray;
     }
 
@@ -51,6 +54,81 @@ public sealed class ToggleOutcomeTrayTests
             Assert.IsFalse(tray.Context.GaugeStoryForTest.Current.Connect, "It is a disconnect's cross.");
             CollectionAssert.AreEqual(new[] { (false, ToggleOutcome.Failed) }, tray.Toggle.Ended);
             Assert.AreEqual(CouldNotBlock, tray.Toggle.Failures.Single().Reason, "and the card says why.");
+        });
+    }
+
+    // The nodes stay enabled, so the failure must be said even where the cross and the notice cannot be: it is handed to the card as
+    // one that has to be held, and it is spoken when spoken status is on.
+    [TestMethod]
+    public void ADisconnectWhoseBlockDidNotTakeIsHandedToTheCardAsOneThatMustBeSaidAndIsSpoken()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(
+                snapshot: Target(ConnectionState.Connected), time: new TestTimeProvider(),
+                settings: s => s.VoiceOver = s.VoiceOver with { Enabled = true },
+                arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            tray.Block.OnBlock = _ => Task.FromResult(ControllerResult.Fail(CouldNotBlock, [StepOutcomes.FromConfigRet("cm-disable", 0x33)]));
+            tray.Toggle.Answer = FailureShown.Held;
+
+            LeftClick(tray);
+            tray.PumpUntilIdle();
+
+            FailureSaid said = tray.Toggle.Failures.Single();
+            Assert.IsTrue(said.MustBeSaid, "A disconnect whose block did not take is held until it has been said.");
+            Assert.IsNull(said.NextLabel);
+            Assert.IsTrue(tray.Voice.SpeakCompleted.Wait(TimeSpan.FromSeconds(5)), "Something was spoken.");
+            Assert.AreEqual("Block failed", string.Join("|", tray.Voice.Utterances));
+        });
+    }
+
+    [TestMethod]
+    public void AConnectThatFailsIsNotHeldOnTheCard()
+    {
+        StaThread.Run(() =>
+        {
+            using var connect = new TrayHarness(snapshot: Target(ConnectionState.Disconnected), time: new TestTimeProvider());
+            connect.Connection.OnConnect = _ => Task.FromResult(new ConnectResult(ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", []));
+            LeftClick(connect);
+            connect.PumpUntilIdle();
+            Assert.IsFalse(connect.Toggle.Failures.Single().MustBeSaid, "Nothing is at risk when a connect fails.");
+        });
+    }
+
+    // The gauge may be hidden (a presentation, a full-screen game) for the whole of the cross's hold: the cross waits for a gauge to
+    // draw it instead of ending unseen.
+    [TestMethod]
+    public void TheCrossOfADisconnectWhoseBlockDidNotTakeOutlastsItsHoldWhileNoGaugeHasDrawnIt()
+    {
+        StaThread.Run(() =>
+        {
+            var time = new TestTimeProvider();
+            using TrayHarness tray = new(snapshot: Target(ConnectionState.Connected), time: time, arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            tray.Block.OnBlock = _ => Task.FromResult(ControllerResult.Fail(CouldNotBlock, [StepOutcomes.FromConfigRet("cm-disable", 0x33)]));
+            tray.Toggle.Answer = FailureShown.Held;
+
+            LeftClick(tray);
+            tray.PumpUntilIdle();
+            time.Advance(TimeSpan.FromMinutes(30));
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(GaugeStoryKind.Cross, tray.Context.GaugeStoryForTest.Current.Kind, "No gauge showed it, so it is still owed.");
+        });
+    }
+
+    [TestMethod]
+    public void ACardThatSaysTheBlockFailureEndsTheCrossThatWasOwed()
+    {
+        StaThread.Run(() =>
+        {
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), time: new TestTimeProvider(), arrange: t => t.Block.Status = Block(BlockState.Allowed));
+            tray.Block.OnBlock = _ => Task.FromResult(ControllerResult.Fail(CouldNotBlock, [StepOutcomes.FromConfigRet("cm-disable", 0x33)]));
+            tray.Toggle.Answer = FailureShown.Shown;
+
+            LeftClick(tray);
+            tray.PumpUntilIdle();
+
+            Assert.AreEqual(GaugeStoryKind.None, tray.Context.GaugeStoryForTest.Current.Kind, "A card said it, so no cross is owed.");
         });
     }
 

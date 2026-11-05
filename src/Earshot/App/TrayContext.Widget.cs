@@ -520,6 +520,9 @@ internal sealed partial class TrayContext
         var host = new GaugeStoryHost(_time, _registry.UiPost);
         host.SetCardOnScreen(CardIsOnScreen());
         host.Changed += RenderGaugeIfShown;
+
+        // A gauge on screen drew the cross that was owed: that said it, so the failure held for a card goes.
+        host.CrossSeen += () => EndBlockFailureOwed("a gauge drew the cross", dismissCross: false, dropHeld: true);
         return host;
     }
 
@@ -539,17 +542,77 @@ internal sealed partial class TrayContext
     {
         if (!_closing)
         {
+            // A new attempt replaces the story and the card's failure, so what was owed from the last is over.
+            _blockFailureOwed = false;
             GaugeStory.ToggleStarted(wanted, origin);
             ToggleCard?.ToggleStarted(wanted);
         }
     }
 
-    private void TellToggleEnded(bool wanted, ToggleOutcome outcome)
+    private void TellToggleEnded(bool wanted, ToggleOutcome outcome, bool mustBeSeen = false)
     {
         if (!_closing)
         {
-            GaugeStory.ToggleEnded(outcome);
+            GaugeStory.ToggleEnded(outcome, mustBeSeen);
             ToggleCard?.ToggleEnded(wanted, outcome);
+        }
+    }
+
+    // A disconnect whose block did not take is owed to the person until it has been said: the cross waits for a gauge on screen to draw
+    // it (a presentation or a full-screen game can hide the gauge for its whole hold), the failure is held for the next card he asks for
+    // when none is open, and it is spoken. It is over when a gauge has drawn the cross, when a card says it, when a block takes, when
+    // the AirPods connect again, or when the next connect or disconnect begins.
+    private bool _blockFailureOwed;
+
+    // The AirPods have been seen away from this PC since the failure, so a connection that follows is a new one.
+    private bool _owedAwayConfirmed;
+
+    private void NoteBlockFailureOwed()
+    {
+        _blockFailureOwed = true;
+        _owedAwayConfirmed = !AirPodsConnectedToThisPc();
+        _log.Write(LogLevel.Debug, "Block failure: owed until a gauge, a card or the person has had it said.");
+    }
+
+    private bool AirPodsConnectedToThisPc() =>
+        TrayStatus.ActiveTarget(_snapshot, _registry.Settings.Current)?.Connection is ConnectionState.Connected or ConnectionState.Connecting;
+
+    private void NoteSnapshotForOwedBlockFailure()
+    {
+        if (!_blockFailureOwed)
+        {
+            return;
+        }
+
+        if (!AirPodsConnectedToThisPc())
+        {
+            _owedAwayConfirmed = true;
+        }
+        else if (_owedAwayConfirmed)
+        {
+            EndBlockFailureOwed("the AirPods connected again", dismissCross: true, dropHeld: true);
+        }
+    }
+
+    // The failure no longer has to be said. dismissCross: the cross still waiting for a gauge goes; dropHeld: the failure held for the
+    // next card goes. Neither is touched when the thing that said it already did its own end.
+    private void EndBlockFailureOwed(string why, bool dismissCross, bool dropHeld)
+    {
+        if (!_blockFailureOwed)
+        {
+            return;
+        }
+
+        _blockFailureOwed = false;
+        _log.Write(LogLevel.Debug, "Block failure: no longer owed, " + why + ".");
+        if (dismissCross)
+        {
+            _gaugeStory?.DismissOwedCross();
+        }
+
+        if (dropHeld)
+        {
+            _widgetCardPresenter?.DropOwedFailure();
         }
     }
 
@@ -630,6 +693,7 @@ internal sealed partial class TrayContext
                 anchor => SystemDisplaySource.WorkAreaFor(_displaySource, anchor), frameClockFor: card => NewFrameClock(() => card.IsHandleCreated ? card.Handle : 0),
                 unasked: unasked);
             WireLook();
+            _widgetCardPresenter.OwedFailureSaid += () => EndBlockFailureOwed("a card says it", dismissCross: true, dropHeld: false);
 
             // The notices every other part of the tray shows through registry.Cards go to this card.
             if (_registry.Cards is CompactNoticePresenter notices)
@@ -777,6 +841,7 @@ internal sealed partial class TrayContext
             surface.Render(
                 _widgetSnapshotCache, _time.GetUtcNow(), GaugeSettings(),
                 _widgetLayoutDpi, shown.Bounds, _widgetTheme.Ink(), TypeRamp.FamilyFor(TypeRole.Gauge));
+            _gaugeStory?.GaugeDrawn();
         }
     }
 

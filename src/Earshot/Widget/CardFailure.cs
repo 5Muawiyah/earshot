@@ -33,6 +33,8 @@ internal interface IToggleCard
     // It ended, whatever way: the ring goes. Called once for every ToggleStarted.
     void ToggleEnded(bool connect, ToggleOutcome outcome);
 
-    // The attempt failed: reason is the whole sentence, nextStep the one button that can help, or null.
-    Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep);
+    // The attempt failed: reason is the whole sentence, nextStep the one button that can help, or null. mustBeSaid is a failure that
+    // leaves the PC able to page the AirPods (a disconnect whose block did not take): with no card open and no next step it is held
+    // for the next card he asks for instead of being left to the gauge's cross, which may never have been on screen.
+    Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false);
 }
