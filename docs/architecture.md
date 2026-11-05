@@ -339,21 +339,30 @@ or dropped, with counts only.
 
 **Opening and closing the case.** `CaseOpenTracker` works out from the linked
 pair's own messages, and no other pair's, when its case opens and closes; the
-case-open card (below) is shown and closed from it. An open is either the
-linked pair's case-known messages starting after silence (a case-known message
-with none before it for the close time, or none since the link was made, so
-the case open that links a pair is an open too), or its lid open counter
-changing while those messages never stopped (the lid was shut and opened again
-inside the close time). The counter is the one-byte "Lid Open Counter" the
-furiousMAC notes list right after the charging and case byte, "Counter for
-opening lid" (github.com/furiousMAC/continuity,
-messages/proximity_pairing.md); the whole byte is read, as the notes give it.
-Each sender's counter is compared only with that sender's own last value,
-since nothing says the two buds carry the same value, and the first value from
-a sender is only a baseline; a change from the other bud within two seconds of
-an open is the same open. A case-unknown message (0xF, buds in use) never opens
-anything, and a closed case sends nothing, so worn buds and a shut case never
-show the card.
+main card is opened from it, unasked (The one card, below). An open is either
+the message that makes a link, whose own rule has already seen the burst, or,
+while the case is closed, the linked pair's case-known messages reaching five
+inside five seconds, the first and last at least two seconds apart, counted
+together across the pair's two senders. Those are the link's own figures
+(`BroadcastRules.LinkMessages`, `LinkWindow` and `LinkSpan`), reused as design
+choices, not measured limits. A case-unknown message (0xF, buds in use) never
+counts.
+
+Nothing else opens. The lid open counter the furiousMAC notes list right after
+the charging and case byte ("Counter for opening lid",
+github.com/furiousMAC/continuity, messages/proximity_pairing.md) is logged and
+no longer read. The rule changed because the saved logs
+showed seven links, each followed about a minute later by a second show of the
+old card, from one or two case-known messages of the linked set and then
+nothing, and because one saved capture has both senders cycling the counter
+through four values inside a single run of messages. What the logs prove is
+that a card was on screen at each second show. They do not prove the lid was
+shut at each one: nothing records the lid. The new rule is checked against
+replays of those logs and against synthetic messages, and has not had a live
+run. A real open while linked now shows about two seconds later than before,
+and a lid opened for under two seconds while linked shows nothing. Every open,
+every burst that did not open and every close is logged as a `Case:` line
+with counts, never an address.
 
 A close is the linked pair's case-known messages stopping for eight seconds.
 No source documents a bit that says the lid is shut, only the counter of opens,
@@ -380,10 +389,10 @@ clear: the 8 dB margin is asked only while an anchor of the linked set has been 
 inside the ten second window. These need a stranger of the same model
 (and, once one is held, the same colour) to be close and, for the first two, to match. A pair
 that is linked this way is read like the owner's: what it says is saved as the last readings,
-replacing the owner's, and is shown and estimated from, until the owner opens their own case next
-to the PC again and the link moves back (a pair that does not take the link is never saved). The case-open
-card follows the link: an open that links a pair by these rules, including one that moves the link to a
-pair 8 dB nearer, counts as an open and shows the card, and a set that does not take the link never does. This is an
+replacing the owner's, and is shown, until the owner opens their own case next
+to the PC again and the link moves back (a pair that does not take the link is never saved). The card that
+opens with the case follows the link: an open that links a pair by these rules, including one that moves the
+link to a pair 8 dB nearer, counts as an open and opens the card, and a set that does not take the link never does. This is an
 owner decision, not an oversight: the owner accepted that risk rather than ask for
 a set-up step to rule it out. There is no consistency check against another
 device.
@@ -401,26 +410,27 @@ and the last readings stay on show, greyed with their age.
 
 **What is shown, and for how long.** `BatteryFreshness.Shown` is the one
 definition of what the card, the gauge and its tooltip show. The owner's pair is
-shown wherever it is. A part's value is one of three kinds:
+shown wherever it is. A part's value is one of two kinds, and both are readings:
 
 - *Live*: a reading of the linked set heard by this run within 30 seconds, drawn
   as current. In the saved records the set in use sends about 35 documented messages a minute; a closed
   case sends nothing, so values stop being live about half a minute after the lid
   closes.
 - *Last*: the last reading of the part, of any age, drawn in the stale style
-  (tertiary ink) with its age, until a newer reading is heard.
-- *Estimated*: a last reading of a part that was charging, grown at its rate
-  (`ChargeEstimator`), drawn like a last reading with "≈" before the value and the
-  age of the reading it grew from; the tooltip says "Estimated". Only while the
-  AirPods are not on this PC: with them on it, the last reading is shown as it was read.
+  (tertiary ink) with its age, until a newer reading is heard. The age is
+  rounded down to whole minutes, hours or days, never below 1m.
+
+Earshot shows no estimate. A part that was charging at its last reading is shown
+as it was read. The charge estimate, its learned rates and its seed were removed
+in 1.7.0.
 
 From the linked set Earshot reads the left bud, the right bud and the case, each in
 steps of 10% (that is what the message carries), and the charging bits. Each fresh
 reading of the linked set, and of nothing else, goes into the last reading store
 (`LastReadingStore`, `last-reading.json` in the widget folder, under
 `EARSHOT_DATA_ROOT` when that is set): per part the value, the charging flag, the
-read time and the model, and nothing about the sender. A changed value, flag, model
-or rate is written at once and a read time alone at most once a minute, and the
+read time and the model, and nothing about the sender. A changed value, flag or model
+is written at once and a read time alone at most once a minute, and the
 file is read at start. A saved reading is shown only when its model is the paired
 model, and is never live, since this run did not hear it. A dropped link or a
 restart therefore leaves the last readings on show.
@@ -434,39 +444,55 @@ not be read or is of a newer schema.
 
 Beside it, `battery-history.json` (`HistoryStore`, same folder and data root) keeps the
 live readings of the linked pair for the history page: per sample the part, the level,
-the charging flag and the time. Never a last reading, an estimate or Windows' figure,
+the charging flag and the time. Never a last reading or Windows' figure,
 and the file's shape has no member for an address, a name or a model. One sample per
 part per minute at most, 7 days kept, and the same load and write rules as above.
 
-*The estimate.* It is for a pair that is away from this PC, where nothing is heard of it
-and it may have been charging since; with the AirPods on this PC a last reading is
-shown as it was read, never grown. A part charging at its last reading rises from it
-at its rate until 100, then stops. Buds charge only in the case, so a bud that was not charging, and a
-case that was not itself charging, keep their value. A clock behind the read time
-gives no rise, and the service hands in the latest time it has worked anything out
-at. An estimate is also never shown lower than one already shown for the same
-reading (`EstimateHighWater`, keyed by the reading's read time and value, raised by
-`BatteryFreshness.Shown` for every surface and written into `last-reading.json`), so a
-clock put back, or a restart with the clock set back, never makes an estimate fall.
-A newer live reading replaces the estimate, even with a lower value: it is a reading.
-Each book written carries a sequence number taken under the service's lock, and the
-store drops one that arrives after a later one. A file that could not be read (locked,
-corrupt, cut short) is not written over until it can be read or is removed. Rates are per model and part (`ChargeRates`): one rate for both buds of
-a model and one for the case, learned from the owner's own live readings by
-`ChargeRateLearner` (two steps up of one part, both while charging, the first seen
-within two minutes of the reading before it, the last below 100%, 15 minutes to
-3 hours apart; a new sample replaces the rate held) and kept beside the last readings.
-There is no case estimate until a charge of the case has been learned. The buds of
-one model have a seed from the fast-charge figure on Apple's AirPods Pro 3 tech specs page (https://support.apple.com/en-us/125135): about one hour of listening, of up to eight, in five minutes, worked out as 150 points an hour. The wording was confirmed against that page on 12 October 2026, and the seed is on (`ChargeRates.UseAppleBudSeed`).
+*One reading per part.* A part with no held value takes its first reading at
+once. A part with a held value takes a new value or charging flag only when
+two messages in a row for that part, from the linked set, say the same new thing
+within ten seconds (`PartConfirm`). One stray value changes nothing, and two
+senders that disagree leave the last confirmed value on show. Two is a design
+choice: the smallest count that is more than one message. A file that could not
+be read (locked, corrupt, cut short) is not written over until it can be read or
+is removed, and each book written carries a sequence number taken under the
+service's lock, so the store drops one that arrives after a later one. Old
+`last-reading.json` files that hold learned rates or estimate marks still load;
+those members are read and never written.
 
-*The gauge.* On this PC its number is the lower bud, live or else last in tertiary
-ink (never an estimate), or Windows' own figure while that is current and no bud is live.
+*Steps of 10%.* The message carries each part in steps of 10%, so a figure here
+cannot match the iPhone to the percent, and anything finer would need Apple's own
+link protocol, which is out of scope. Whether a step is rounded or floored is
+not proved.
+
+*The gauge.* On this PC its number is the lower of the buds that were read within
+two minutes of the newer bud (`GaugeBudHold`, a design choice equal to the link's
+lost limit), live or else last in tertiary ink with its age, or Windows' own figure
+while that is current and no bud has been live since the AirPods came to this PC.
+Once a bud has been live, Windows' figure does not come back until the AirPods
+leave. The gauge keeps the last reading at any age, and a last reading has no bolt.
 Not on this PC, a case mark (our own shape, never in the accent colour) takes the
-earbud mark's place, and the ring and the number are the case's last or estimated
-value in tertiary ink, with the bolt if the case was charging; with no case value
+earbud mark's place, and the ring and the number are the case's last
+value in tertiary ink; with no case value
 the gauge keeps the faded earbud mark. "On your iPhone" keeps its phone mark, with
 the case in its tooltip. The low battery alert still acts only on live values with
 the AirPods on this PC.
+
+*The gauge's Connect story.* With the card closed, a Connect or Disconnect shows
+on the gauge instead of in a popup (`GaugeStory`, a pure state machine with the
+clock handed in): `Idle`, then `Spinning`, then a tick held for 800 ms or a cross
+held for 1500 ms, then `Idle`. The ring's arc turns while it runs. A successful
+Connect crossfades a tick into the number's place and sweeps the arc to the live
+level. A failed one empties the arc and shows a cross. A successful Disconnect
+goes straight to Not on this PC with no tick. The hold times and the sweep are
+design choices. The story shows only while no card is on screen, so opening the
+card hands it over at once, and closing the card mid-attempt leaves the attempt
+running with the gauge taking over. Every gauge, including those on other
+displays, draws the same story, and one hidden for a full-screen window keeps its
+state and draws nothing. With animation effects off the arc is still and the
+marks appear and leave without a fade. The end of a spin always comes from the
+toggle's `finally`, never from a timer of the story's own. Tooltips and spoken
+text say "Connecting", then "Connected" or "Didn't connect".
 
 **Left and right.** Which bud is the left and which the right rests partly on
 a published description of the message and partly on one local capture. No
@@ -614,7 +640,7 @@ shown, the reader returns the main display's taskbar and says why in the
 layout; the controller writes one line when the reason changes, and another
 when the display returns. `WM_DISPLAYCHANGE` and `TaskbarCreated` already ask
 for an immediate read, so the return is seen at once. The card takes the work
-area of the display the gauge is on; the case-open card takes the work area of
+area of the display the gauge is on; a card nobody asked for takes the work area of
 each display it is shown on.
 
 The two full-screen signals, `ABN_FULLSCREENAPP`
@@ -661,7 +687,9 @@ restarts, on the documented `TaskbarCreated` broadcast
 this is unofficial, a Windows update to the taskbar's own layout could break
 it; the tray icon fallback is what keeps the widget usable if that happens.
 
-**The card and the case-open card.** A borderless window with rounded
+**The one card.** The main card is Earshot's only popup. The small status popup
+that said Connecting, Failed and Connected, and the separate case-open card, are
+gone. A borderless window with rounded
 corners and Windows' own translucent card backdrop, applied through the
 `DWMWA_SYSTEMBACKDROP_TYPE` window attribute
 (https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmsetwindowattribute)
@@ -672,52 +700,113 @@ following the system's light or dark theme; on a Windows build older than
 instead of the translucent one. The card paints itself into a bitmap and copies the
 finished pixels to the window in one step, never a clear followed by drawing on the window, which would
 show the backdrop alone for a moment; a repaint that was asked for is compared with what the window
-shows, and only the pixels that differ are invalidated, so most status updates touch nothing. It
-opens above the gauge, closes
-when it loses focus, and works from the keyboard.
+shows, and only the pixels that differ are invalidated, so most status updates touch nothing.
 
-The case-open card (`CaseOpenCardPresenter`) is the same window in separate,
-never-activated instances, one per display it is shown on. It is shown when the
-linked pair's case opens (Opening and closing the case, above) and is on by
-default, for a new install and an existing one alike: the setting is a member
-v1.4 added, `CaseOpenCardOn`, so a file written before it reads as on, and the
-old `CaseOpenCard` member is no longer read (the card could never show before
-v1.4 and its switch was hidden, so whatever that member held was never the
-owner's choice of this card). It is the main card: live L, R and Case, the
-Where line reading "Case open", and the Connect or Disconnect button, with a
-close button (the Cancel glyph) where the gear is. It closes when the case
-closes, after its own close time when one is chosen (5, 10, 30 or 60 seconds;
-the default is when the case closes), on its close button, on a click on it
-that misses its buttons; a press of Connect or Disconnect leaves it open, its
-button turning to Disconnect or Connecting in place; one close closes every
-display's card. The passive watcher now runs for it even with the gauge hidden
-(listen-only, nothing is paged): `Enabled` is recomputed from the four consumers
-when the settings load, so an older file that saved it off still has the watcher
-running while the card is on. The close time replaces the dismiss time it used to
-read from `SPI_GETMESSAGEDURATION`, which is no longer read. It goes where the
-gauge is by default (the display Gauge display names; with All displays, the
-main display), or on all displays, or on a chosen set of displays, stored as
-the monitors' device interface names as Gauge display stores one; a set none of
-whose displays is connected falls back to where the gauge is. On a display with
-a gauge it sits above the gauge, elsewhere in the corner of the work area by
-the taskbar's end, drawn at that display's scale. It is never shown on a
-display a full-screen application is on, by the gauge's own rule:
-`SHQueryUserNotificationState` saying a full-screen application runs is global,
-so the foreground window must cover that display's bounds; with one display the
-state alone says it, and presentation settings, quiet time and a locked or
-switched session keep it off every display. It is still shown on the other
-chosen displays, and a full-screen application that comes to the front later
-(the foreground hook, `ABN_FULLSCREENAPP`) closes that display's card only. It
-never takes the focus: `WS_EX_NOACTIVATE`, shown without activation
-(`Form.ShowWithoutActivation`), and `MA_NOACTIVATE` for a mouse press. A screen
-reader is told of each open once, from one card, through a UI Automation
-notification
+*Asked and unasked.* A card the person asked for (a gauge click, the card
+shortcut) opens above the gauge, closes when it loses focus, works from the
+keyboard, and always opens, full screen or not. It stays open through a Connect.
+A card nobody asked for (the case opening, a failed Connect with a next step, a
+Moved to, a low or fully charged notice, any other notice) is the same window in
+separate, never-activated instances, one per display it is shown on, and takes
+no focus: `WS_EX_NOACTIVATE`, shown without activation
+(`Form.ShowWithoutActivation`), and `MA_NOACTIVATE` for a mouse press. Its
+keyboard does nothing. `WidgetCardPresenter` runs both: the asked card by
+`Toggle`, the unasked ones by a partial of the same class that keeps one window
+per display id, a close timer, a recheck and a display-change handler.
+
+*Compact and full.* An unasked card opens either full (the case opening, a
+failure with a next step) or compact: one row, 360 px wide, 56 px high at 100%
+scale and 66 at 150%, with a glyph, a line of text and at most one action. A
+longer notice wraps to at most three lines and the card grows with its bottom
+edge pinned. A compact card grows to the full card on a click on its body, and
+the case opening morphs a compact card into the full one in place. The compact
+states are Moved to (below), Low battery and Fully charged (the fallback for
+Windows' notifications, which stay), and a notice (a line and, when it has one,
+a text button). A compact card holds 6 seconds, or 12 seconds when it has a
+button, none when the caller asked for it to stay up; the hold pauses while the
+pointer is over it and resumes with the time left. The durations are design
+choices.
+
+*The arbiter.* `OneCardArbiter` is a pure table: given what is showing and an
+event, it says what to do, and holds no window. Among unasked cards the order is
+case opened, failed Connect, Moved to, low battery, fully charged, notice, and a
+lower one waits in a slot of its own and is shown after only if still true. An
+asked card ignores a case opening and a Moved to (its status row already says
+so), and takes a notice in its status row, or in a strip at the foot of a
+settings or update page. A request the gates refuse is not queued, except that a
+case opening or a low battery notice may open when full screen ends, if still
+true.
+
+*The gates.* One `UnaskedGate` serves every unasked opening, in this order, each
+refusal logged: the setting, a close in progress, an asked card open, Windows'
+notification state (when it cannot be read, closed), hand-back or session end,
+then each display. A full-screen application on a display keeps the card off
+that display only (`CaseOpenCardFullScreen.Covers`); the others still show it.
+Presentation settings, quiet time and a locked or switched session keep it off
+every display. The case-open settings now govern every unasked opening: on by
+default, closing when the case closes or after 5, 10, 30 or 60 seconds, where
+the gauge is or all displays or a chosen set (stored as the monitors' device
+interface names), never over a full-screen application, never taking focus. A
+set none of whose displays is connected falls back to where the gauge is. One
+close closes every display's card. The passive watcher runs for it even with
+the gauge hidden (listen-only, nothing is paged): `Enabled` is recomputed from the
+consumers when the settings load. Every show and every refusal is a `Card:` line,
+with the kind and never a device name.
+
+*Connect and the card.* Every toggle tells the card when it starts and when it
+ends. With the card open, the button's label fades, a ring turns in it, clicks are
+ignored, and the card stays usable elsewhere; Connected turns the button to
+Disconnect, a failure puts the reason in the status row with its next step
+("Connect in Windows" or "Fix connection", by the same offer rules as before) as
+a text button. With the card closed, the gauge tells it (above); a failed Connect
+with a next step then opens the full card unasked in the failed state, under the
+same gates, with a close button and a 12 second hold. If a gate refuses, the
+failure is held and shown on the next card the person asks for. With no next step
+the gauge's cross and its tooltip are all there is.
+
+*Accessibility.* A screen reader is told of each unasked card once, from one card,
+through a UI Automation notification
 ([`AccessibleObject.RaiseAutomationNotification`](https://learn.microsoft.com/en-us/dotnet/api/system.windows.forms.accessibleobject.raiseautomationnotification)),
 for example "AirPods case open. Left 70%, Right 70%, Case 50%.", a part that is
-not live saying what kind of value it is and how old; its two buttons are
-described to a screen reader and never focused. Its Connect or Disconnect button
-only ever fires on a genuine click on that button; nothing else in its code
-path can press it.
+not live saying it is a last reading and how old. The window is named "Earshot:
+Case open" or "Earshot: AirPods", and a compact card "Earshot: " plus its text.
+The Connect or Disconnect button only ever fires on a genuine click on that
+button; nothing else in the code path can press it.
+
+**Moved to.** When another device takes the AirPods, the card opens compact
+with "Moved to iPhone" (or "Moved to another device" when the other device has
+no name set) and a take-back icon, holds 6 seconds and folds. The broadcast has
+no documented in-ear bit, so `AirPodsWhere.Elsewhere` could not occur before:
+`MovedToRule` reads the pair's messages itself. `PauseOnLeave` raises
+`LeftByOther` for a leave Earshot did not start, whether or not pause on leave is
+on. Earshot's own leaves (Disconnect, Send to, the shortcut, the hand-back at
+shut down, sleep or Exit, and any change in flight) start no watch. A leave then
+gives one of four verdicts within ten seconds: Moved (at least three messages of
+the paired model with the case level unknown, the first and last at least two
+seconds apart, a median of -80 dBm or stronger, and no case-known message from
+ten seconds before the leave on), Into the case (any case-known message in that
+span), Not heard (too few or too weak), or Back here. The ten seconds, the
+three messages and the -80 dBm are design choices. The first two reuse the
+re-find rule's figures; -80 dBm adds 4 dB to the strongest worn-nearby reading
+saved, and the signal at the edge of range is unmeasured. A Moved verdict
+latches `Where` as elsewhere until this PC is active again, a case-known message
+is heard, or 120 seconds pass with no message of the pair. That latch runs
+whatever the setting says; only the compact card obeys it, and **Moved to** is
+on by default, under More, `moved-to` on the command line. The take-back button
+is a Connect, from a genuine click only: the icon turns to a ring, then a tick
+and the card folds, or the card grows to the full one in its failed state.
+Thirty seconds after each leave a `Move:` line records how many messages arrived
+and at what median strength, so a longer bound can be judged from the log.
+
+What it cannot tell: the broadcast says only that the pair is out of the case and
+near. It does not say the iPhone took it. AirPods out of the case and idle, after
+Windows dropped the link for its own reasons, read the same, so the card may show
+when the AirPods simply left for another reason. In the saved logs, six of eight
+leaves Earshot did not start were followed by minutes of messages, none while
+anyone was watching, and each would show "Moved to iPhone" under this rule. A
+same-model pair near the PC at a real out-of-range leave would also read as
+moved, which is part of the accepted risk, and no figure is shown. Moved to has
+not been tested live.
 
 **Type and text size.** Text is Segoe UI Variable in the Windows 11 type ramp
 (https://learn.microsoft.com/en-us/windows/apps/design/signature-experiences/typography):
@@ -808,7 +897,7 @@ by the same renderer, with a neutral bar where there is no number and an outline
 charging; choosing one changes the gauge on the taskbar at once.
 
 **Probe target.** `Earshot.exe probe widget --out <folder>` renders the
-gauge, the card and the case-open card from fixed, synthetic snapshots, at
+gauge, the card and the compact cards from fixed, synthetic snapshots, at
 three DPIs and in both taskbar inks, straight to PNG files, the same
 drawing and layout code the real widget uses. `--set design` renders the design
 set instead: every gauge state and each of the six orders, and the card with its
@@ -826,7 +915,7 @@ for. Every change goes through the same path the tray menu's own item uses.
 The page follows the Windows 11 settings grouping, from one set of colour tokens and figures (`DesignTokens`).
 The rows are, in order: Taskbar (Display, a button that steps through Main display, All displays and the
 connected displays; Order, an expander showing the gauge as it is and, open, the six pictures), Behaviour
-(Case-open card, a switch and a chevron that expands the row to its Close choice, a button that steps through
+(Open when the case opens, a switch and a chevron that expands the row to its Close choice, a button that steps through
 Until the case closes, 5 s, 10 s, 30 s and 60 s, and its Displays choice, a button that steps between Where the
 gauge is and All displays, with a box for each display when there is more than one; Hand back), Audio (Microphone
 off, with a Sound settings button while it is on), Shortcuts (Connect, Disconnect and Card), About (a row that
@@ -858,11 +947,11 @@ release build is published with ReadyToRun (`tools\build-release.ps1`, `-p:Publi
 not single file), which precompiles the managed code beside the IL; the zip grew from about 57.6 MB to about 68.4 MB in one local publish on Linux (cross-targeted win-x64), not a Windows release build; the sizes were read off that publish, not timed or run. `StartupIdleAndCardMeasureTests` prints the start, idle and first card open figures;
 none has been measured on a release build.
 
-**Screen readers.** The gauge, the three battery columns, the buttons, the settings rows, the case-open card and
+**Screen readers.** The gauge, the three battery columns, the buttons, the settings rows, the card and
 the history chart carry a name and, where it changes, a value, built from the same snapshot, time and settings as
 what is drawn (`GaugeSpeech`, `SpokenText`), so a spoken value never says more than the screen does. A part that
-is not live says what it is and how old: "Left about 90%, estimated, read 2 h ago", "Right 80%, last read 2 h
-ago". The case-open card announces itself once per open (see above).
+is not live says what it is and how old: "Left 80%, last read 2 h
+ago". An unasked card announces itself once per show (see above).
 
 **Copy diagnostics and the stall log.** **Copy diagnostics**, in the tray menu and under More, puts on the
 clipboard the app and Windows versions, the end of the log (200 lines at most) and the UI stall log
@@ -1095,7 +1184,7 @@ check that fails is not retried until the next day.
 |---|---|
 | `%APPDATA%\Earshot\settings.json` | The owner's settings |
 | `%LOCALAPPDATA%\Earshot\logs` | The log |
-| `%LOCALAPPDATA%\Earshot\widget\last-reading.json` | The last reading of each part of the linked pair (level, charging flag, read time, model), the learned charge rates, the high-water marks of shown estimates and the fully charged notices spent. No address and no name. Written beside a `.tmp` and moved over; not written over when it could not be read |
+| `%LOCALAPPDATA%\Earshot\widget\last-reading.json` | The last reading of each part of the linked pair (level, charging flag, read time, model), and the fully charged notices spent. Older files may hold learned rates and estimate marks; they are read and never written. No address and no name. Written beside a `.tmp` and moved over; not written over when it could not be read |
 | `%LOCALAPPDATA%\Earshot\widget\battery-history.json` | The live readings of the linked pair, 7 days: part, level, charging flag, time. No address, name or model |
 | `%LOCALAPPDATA%\Earshot\livetest` | Live-test evidence |
 | `%ProgramData%\Earshot` | Machine files the elevated tasks and the service read: `device.json`, `config.json`, `protection.json`, `protection-intent.json` and the per-run status files |
@@ -1114,7 +1203,7 @@ Not built, and not close to being built, on Windows without one:
 - The hearing features.
 - Real-time in-ear detection and whether the lid is open or shut. No
   documented source gives either in the advertisement, so ear detection stays
-  off and the case-open card closes by the messages stopping rather than by a
+  off and the card that opens with the case closes by the messages stopping rather than by a
   lid bit; whether the advertisement gives them at all is still an open
   question. The lid open counter is documented and is read.
 
@@ -1803,7 +1892,7 @@ One program, `Earshot.exe`, chosen by its first argument.
 | `Earshot.exe` | The tray application. `--startup` is the same thing, and is what the startup value passes. |
 | `Earshot.exe probe [audio\|topology\|nodes\|services\|task\|battery\|all] [--json] [--out <path>]` | Read-only diagnostics. Reads endpoints, walks the audio topology, reads the device nodes, lists the installed Bluetooth services, reads the scheduled tasks, and reports the battery answer described in [requirements.md](requirements.md). It changes nothing. On a machine where Earshot is not set up and no device is pinned it still writes a full report, and exits 78 to say so: the nodes and services targets had no device to read. So read the report rather than the exit code. |
 | `Earshot.exe probe icon --out <folder>` | Writes the tray icon to files, in each of its four states, at three screen scalings and in both inks, for checking how it looks. |
-| `Earshot.exe probe widget --out <folder> [--set design]` | Writes the taskbar gauge, the card and the case-open card to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. With `--set design` it writes the design set instead: every gauge state and order and the card's pages, light and dark, at 100% and 150% display scale. See [The AirPods widget](#the-airpods-widget). |
+| `Earshot.exe probe widget --out <folder> [--set design]` | Writes the taskbar gauge, the card and the compact cards to files, from fixed synthetic snapshots, at three DPIs and in both taskbar inks. With `--set design` it writes the design set instead: every gauge state and order and the card's pages, light and dark, at 100% and 150% display scale. See [The AirPods widget](#the-airpods-widget). |
 | `Earshot.exe install <userSid> <address> <containerGuid> [--principal user]` / `Earshot.exe uninstall` | The one-time setup and its removal. Both need an elevated administrator and refuse to run as SYSTEM. The menu runs `install` with those three arguments filled in; a bare `install` is refused, so it is not a command to type by hand. |
 | `Earshot.exe install-zip <zip> <sha256> <userSid> <address> <containerGuid>` | The elevated half of a first install by the install script, run from the verified download's own copy, never by hand. It refuses (exit code 26) when a usable install is already there. See [The install script](#the-install-script). |
 | `Earshot.exe probe setup-values [--out <path>]` | Read-only. Writes JSON with the signed-in user's SID, the AirPods' address and container, whether one device could be chosen, and the state and version of the installed copy. The install script reads it. |

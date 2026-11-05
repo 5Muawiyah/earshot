@@ -16,12 +16,13 @@ starts.
 
 **Case mark.** The small case picture the gauge shows in place of the earbud mark
 when the AirPods are not on this PC. The ring and number beside it are the case's
-last or estimated value, in grey.
+last reading, in grey.
 
-**Case-open card.** The card Earshot shows by itself when your linked pair's case
-opens near the PC, with left, right, case and the Connect or Disconnect button. It
-never takes focus and closes when the case closes, after a time you choose, or on
-its close button. See [overview.md](overview.md#the-airpods-widget).
+**Card, the.** Earshot's only popup. You open it with a click on the gauge or the
+card shortcut, and it opens by itself, small or full, when the case opens, when
+another device takes the AirPods, when a Connect fails with a next step, and for
+a low or fully charged notice that Windows could not show. It never takes focus
+when it opens by itself. See [overview.md](overview.md#the-airpods-widget).
 
 **Container / container GUID.** Windows groups the several device nodes that
 belong to one physical Bluetooth accessory (for instance, the AirPods'
@@ -35,10 +36,6 @@ that function at all, including at boot.
 **Elevated worker.** The part of Earshot that runs with administrator rights,
 started by a scheduled task rather than by the tray directly, to make the
 changes an ordinary user account cannot.
-
-**Estimate.** A figure that was not heard: a part that was charging at its last
-reading, shown rising at a learned rate until 100. It is marked `≈` with the age of
-the reading it grew from, never falls, and a newer reading replaces it.
 
 **Fast Startup.** A Windows setting that skips a full shutdown by hibernating
 the kernel session instead of ending it. Whether a persistent device-node
@@ -57,15 +54,13 @@ once at startup as a safety net. See [architecture.md](architecture.md).
 **Gauge.** The small readout the AirPods widget places on the taskbar: the
 earbud mark with a ring in the Windows accent colour and the lower bud's
 number, in one of six orders. When there is no free space for it, the ordinary
-tray icon takes over. See [overview.md](overview.md#the-airpods-widget).
+tray icon takes over. With the card closed, a Connect shows on it: the ring spins,
+then a tick or a cross. See [overview.md](overview.md#the-airpods-widget).
 
 **Hands-Free profile.** The narrow, mono, phone-call-quality Bluetooth audio
 profile Windows switches a headset to whenever a program opens a microphone.
 Earshot can turn this profile off for the AirPods so there is nothing to
 switch to. See also **Microphone off mode**.
-
-**High-water mark.** The highest estimate already shown for a reading. An estimate
-is never drawn below it, so a clock put back or a restart cannot make one fall.
 
 **History.** The live readings of your linked pair, one per part per minute, kept
 for seven days and drawn as a 24 hour chart of left, right and case. No address and
@@ -74,10 +69,6 @@ no name is kept.
 **Last reading.** The last value heard for a bud or the case of your linked pair,
 kept across a restart. It is shown greyed with its age, wherever the AirPods are,
 until a newer one is heard.
-
-**Learned rate.** How fast a part charges, worked out from two of your own live
-readings while it charged. Estimates use it, and there is no estimate for a part
-until one has been learned.
 
 **Link (broadcast selection).** How the AirPods widget finds the owner's AirPods
 in the Bluetooth broadcasts it hears, with no set-up beyond opening the case: the
@@ -92,6 +83,11 @@ link after two minutes without hearing it. A same-model pair that opens its case
 tests, a real phone and a real restart or shutdown, as opposed to the
 automated unit tests that run on every build. See
 [verification.md](verification.md).
+
+**Moved to.** A small card, "Moved to iPhone", with a take-back button, shown when
+another device seems to have taken the AirPods. It rests on the broadcast saying
+only that the pair is out of the case and near the PC, so it can be wrong. See
+[overview.md](overview.md#moved-to).
 
 **Microphone off mode.** An opt-in setting, off by default, that turns audio
 protection off. Its Open button opens Windows' sound settings at the AirPods'

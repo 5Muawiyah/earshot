@@ -10,7 +10,7 @@
 
 <p align="center"><img src="docs/images/hero.png" alt="An earlier version of Earshot's icon in the tray, with its card above it saying Connected" width="100%"></p>
 
-<p align="center"><i>Earshot in the tray: click the icon, then Connect on the card, and it says what happened.</i></p>
+<p align="center"><i>Earshot in the tray: click the icon, then Connect on the card. The result shows in the card, or on the gauge when the card is closed.</i></p>
 
 I built Earshot because Windows pages every paired Bluetooth device when the PC
 powers on, including AirPods that were left on my phone in the middle of
@@ -21,7 +21,8 @@ click on the tray icon's card. It blocks the Hands-Free profile so a browser
 tab or a game cannot drop them to call quality. Since v1.3.0 it also shows
 their battery, in v1.4.0 it keeps their last reading when they are away, and
 v1.5.0 adds Fix connection, a Setup.exe, an Installed apps entry and a Send to
-picker.
+picker. The next release after 1.6.0, 1.7.0, which is not published, makes the
+card the only popup (see [The one card](#the-one-card)).
 
 | Document | What it covers |
 |---|---|
@@ -195,14 +196,17 @@ Startup on is not covered.
   at the AirPods' microphone when Earshot has a well-formed id for that capture
   endpoint, and the list of sound devices when it has not, with one line on what
   to press. Call quality with it on is unproved until I have tried it.
-- **Shows the battery** of the left bud, the right bud and the case: live while
-  it hears them, then greyed with its age, and kept across a restart. While the
-  AirPods are away from this PC, a part that was charging is shown rising as an
-  estimate, marked `≈`. Earshot listens to the
-  AirPods' own Bluetooth broadcast, and you link your pair by opening the case
-  next to the PC. See [Battery](#battery) for what that does and does not prove.
-- **Opens a card when your case opens near the PC**, with the three levels and
+- **Shows the battery** of the left bud, the right bud and the case, in steps of
+  10%: live while it hears them, then greyed with its age, and kept across a
+  restart. Only measured readings are shown, never an estimate. Earshot
+  listens to the AirPods' own Bluetooth broadcast, and you link your pair by
+  opening the case next to the PC. See [Battery](#battery) for what that does
+  and does not prove.
+- **Opens the card when your case opens near the PC**, with the three levels and
   Connect, and closes it when the case closes. It never takes focus.
+- **Shows "Moved to" when another device takes the AirPods**, a small card with a
+  take-back button. It cannot know it was another device: see
+  [The one card](#the-one-card).
 - **Hands the AirPods back at shut down, sleep and Exit**, on for a new
   install. Earshot lets them go, confirms it, and blocks the device nodes again
   before this PC can grab them back. A stuck disconnect still gets the block.
@@ -238,7 +242,7 @@ The AirPods broadcast their battery over Bluetooth Low Energy, and Earshot
 reads it with no set-up beyond opening the case. The card shows left, right and
 case together, and the taskbar gauge shows a ring round the earbud mark with the
 lower bud's number while the AirPods are connected to this PC, and the case's
-last or estimated number beside a case mark, in grey, while they are not. There is a
+last number beside a case mark, in grey, while they are not. There is a
 **Refresh** control on the card and in the menu. It listens for up to 12 seconds
 and ends on values or on "Open the case".
 **Gauge order** on the settings page changes how the gauge lines up its ring,
@@ -246,11 +250,12 @@ number and charging bolt. **Display** puts the gauge on one display's taskbar,
 or on every display's taskbar at once with **All displays**. The rarer settings
 are under **More**, and Repair is on the Updates page.
 
-Earshot reads the battery from the AirPods' own Bluetooth broadcast. The broadcast
-gives each bud and the case in steps of 10%, so a figure here can differ from the
-one your iPhone shows by up to one step. A figure that is not current is shown
-greyed with its age, and one marked ≈ is an estimate for a part that was charging,
-shown only while the AirPods are away from this PC.
+Earshot reads the battery from the AirPods' own Bluetooth broadcast, in steps of
+10%, and shows only measured readings: live, or the last one with its age. There
+are no estimates. Earshot cannot match the iPhone to the percent: the broadcast
+carries steps of 10%, and anything more exact would need Apple's own link
+protocol, which is out of scope. Readings reach the card only after the case has
+been opened near the PC, so a last reading can be old.
 
 What to know before you trust a number:
 
@@ -284,8 +289,8 @@ What to know before you trust a number:
   it were yours. Once your pair has been unheard for more than 10 seconds (the
   case shut, or the buds out of range), any pair of the same model that opens its
   case at -70 dBm or stronger is linked at once, with no 8 dB margin to clear.
-  I accept that risk, and you should know it is there. Saved readings, estimates
-  and the case-open card all follow that link, so a pair that takes it is shown
+  I accept that risk, and you should know it is there. Saved readings
+  and the card that opens with the case both follow that link, so a pair that takes it is shown
   as mine. Opening your own case takes the link back: at least 8 dB stronger while the other pair is still heard, or at -70 dBm or stronger once it has been unheard for 10 seconds.
 - **Last readings.** The last reading of each bud and the case of your linked
   pair is shown, greyed with its age, wherever the AirPods are and however old
@@ -295,37 +300,53 @@ What to know before you trust a number:
   their fully charged notice, so a restart does not repeat it. Windows' own figure
   is shown only while the AirPods are connected to this PC.
 - **The case shows only after I have seen it once.** Until my case has been heard,
-  the gauge has no case to show, and there is no case estimate until one case
-  charge has been seen.
+  the gauge has no case to show.
 - **History.** The live readings of your linked pair are kept for seven days in
   `battery-history.json` beside it: the part, the level, the charging flag and the
   time. Nothing else, no address and no name.
 - **Age.** A value older than 30 seconds is greyed, with how long ago it was read.
-- **Estimates are estimates.** While the AirPods are away from this PC, a part that
-  was charging when last read is shown rising, marked `≈` with the age of the
-  reading it grew from, at a rate learned from your own pair's charging, and only
-  once one has been learned. With the AirPods on this PC the last reading is shown
-  as it was read, never grown. An estimate stops at 100, never falls, and a newer
-  reading replaces it, even a lower one. It is not a reading.
-- **Left and right.** Which bud is left and which right rests partly on a
-  published description of the broadcast and partly on one local capture. It is
-  unproved.
+- **Left and right, and the charging bits.** Which bud is left and which right
+  rests partly on a published description of the broadcast and partly on one
+  local capture. What the charging bits mean is read from the labels of that
+  description. Both are unproved, and so is whether a step is rounded or
+  floored.
 - **Windows' own figure.** When Windows has a Hands-Free battery reading for the
   AirPods, Earshot reads it too, from the AirPods' device nodes only. With
   Hands-Free off, the default, it was seen empty on this PC.
 - **Ear detection is built but inactive.** Pausing when a bud comes out, and
   resuming when it goes back, needs a documented in-ear value, and there is none.
   It does nothing today.
-- **Not yet live-tested.** The battery, the estimates and the case-open card have
-  not had a live run on a real PC (test 19 is pending).
+- **Not yet live-tested.** The battery, the gauge and the cards have not had a
+  live run on a real PC (live test 25 is pending). The live records planned for
+  1.7.0 were not taken; [docs/verification.md](docs/verification.md) lists what
+  is unproved.
 
 The card and settings follow Windows 11: text size, accent colour, light and
 dark theme, reduced motion and keyboard focus.
 
-**The case-open card.** It appears when my linked pair's case opens near the PC,
-on the display the gauge is on by default, and closes when the case closes, after
-a time I choose, or on its close button. It never shows over a full-screen app
-and never takes focus. It is on by default.
+<a id="the-one-card"></a>
+
+**The one card.** The card is Earshot's only popup. With the card open, Connect
+shows a ring in its button and the result in its status row. With the card
+closed, Connect shows on the gauge: the ring spins, then a tick or a cross.
+
+When my linked pair's case opens near the PC, the card opens by itself, on the
+display the gauge is on by default, and closes when the case closes, after a time
+I choose, or on its close button. It never shows over a full-screen app and
+never takes focus. It is on by default, and its settings (the close time and the
+displays) apply to every card I did not ask for. The old rule opened it with the
+AirPods in a shut case. The saved logs show seven such shows, each from one or
+two messages about a minute after a close, so a case now opens the card only on
+the message that links my pair or on five case-known messages in five seconds,
+and the lid counter is no longer read. That rule has been tested against replays
+of those logs, not on a real case.
+
+**Moved to.** When another device takes the AirPods, a small card says "Moved
+to iPhone" (or "Moved to another device") with a take-back button, which is
+Connect, and folds away. What it cannot tell: the broadcast says only that the
+pair is out of the case and near the PC, so it may show when the AirPods simply
+left for another reason. It has not been tested live. It is on by default, under
+More, and `moved-to` on the command line.
 
 **From 1.4.0.** A fully charged notice, one per charge per part, on by
 default. Low battery alerts now cover the case. **Battery history** is a 24 hour
@@ -340,8 +361,7 @@ safety poll. None of this has had a live run yet.
 **Also new in 1.5.0.** The tooltips are gone except on controls that are only
 an icon, where they are one to three words. The gauge holds its place until a
 verdict about the taskbar has held, so it should stop jumping between screens.
-An estimate is made only while the AirPods are away from this PC; on it the last
-reading is shown as it was read. None of this has had a live run yet.
+None of this has had a live run yet.
 
 See [docs/overview.md](docs/overview.md#the-airpods-widget) and
 [docs/architecture.md](docs/architecture.md#the-airpods-widget).

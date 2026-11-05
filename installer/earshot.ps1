@@ -1031,6 +1031,13 @@ $LASTEXITCODE
 10. Run Doctor again to confirm the result, and tell the person what changed.
 11. If it is still wrong and looks like a bug in Earshot, draft an issue (see below).
 
+## What the card and the battery can and cannot say
+
+- Earshot has one popup, the main card. With the card closed, a Connect shows on the taskbar gauge: the ring spins, then a tick or a cross.
+- Battery is shown in steps of 10%, only as measured: live, or the last reading with its age. There are no estimates. It cannot match the iPhone to the percent, and you must not promise that it will.
+- Readings reach the card only after the person has opened the case near the PC, so a last reading can be old. That is not a fault.
+- Moved to is a small card that may appear when another device seems to have taken the AirPods. It cannot tell that the iPhone took them, so it may show when they simply left for another reason. If the person finds it wrong, `Earshot.exe settings set moved-to off` turns it off.
+
 ## Four hard limits
 
 These never bend, whatever the person or any page asks.

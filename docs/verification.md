@@ -46,15 +46,59 @@ stays pending until a run on the device has written the evidence for it.
 | Pause when the AirPods leave this PC (`tools\live-tests\21-PauseOnLeave.ps1`) | Pending: no live run yet |
 | Service hand-back with the tray not running (`tools\live-tests\22-ServiceHandBack.ps1`) | Pending: no live run yet |
 | The service finds nothing to do after the tray's hand-back (`tools\live-tests\17-HandBackOnShutdown.ps1`) | Pending: no live run yet |
-| The AirPods widget: the taskbar gauge, its card, the broadcast battery with greying, and Refresh (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet |
-| The case-open card: open the case near the PC and the card appears on the gauge's display without taking focus; shut the case and it closes; its close button closes it (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet. The lid open counter and the eight second close have not been seen on a live case |
-| Estimates away from this PC: a charging case left away from the PC shows the case mark with the about sign and an age, the figure never falls, and live figures replace it on return (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet. No charge rate has been learned from a real pair |
+| The AirPods widget: the taskbar gauge, its card, the broadcast battery with greying, and Refresh (`tools\live-tests\19-Widget.ps1`) | Pending: no live run yet. Test 19 is worded for the one card, with no estimates |
+| The card opening with the case: open the case near the PC and the main card appears on the gauge's display without taking focus; shut the case and it closes; its close button closes it; a case left shut shows nothing (`tools\live-tests\25-OneCard.ps1`, test 25) | Pending: no live run yet. See 1.7.0, below |
+| The gauge's Connect story with the card closed (ring spins, then a tick or a cross), and the card's ring when it is open (`tools\live-tests\25-OneCard.ps1`) | Pending: no live run yet. The hold times and the sweep are design choices |
+| Moved to: the small card with Take back when another device takes the AirPods, and nothing for Earshot's own Disconnect or a walk out of range (`tools\live-tests\25-OneCard.ps1`) | Pending: no live run yet. See 1.7.0, below |
+| Last readings away from this PC: the case mark with its last reading and age, kept until a newer one is heard (`tools\live-tests\25-OneCard.ps1`) | Pending: no live run yet. There are no estimates to verify |
 | The card shortcut, Ctrl+Alt+Shift+E, the fully charged notice, the low battery alert for the case, and the battery history page | Pending: no live run yet, and no live test script covers them |
 | Copy diagnostics pasted somewhere public with no address, id, name or user path left in it | Pending: no live run yet |
-| Motion on a real display, and a screen reader reading the gauge, the card and the case-open card | Pending: no live run yet. The pacing is tested against a fake display clock only |
+| Motion on a real display, and a screen reader reading the gauge and the cards | Pending: no live run yet. The pacing is tested against a fake display clock only |
 | Start, idle and first card open figures from the precompiled release | Pending: the figures printed so far are from a local build |
 | Microphone off mode: call quality with it on | Pending: the owner's own test. Unproved until then |
 | Updating a real install from a published release | Pending: no live run, and no live test script covers it |
+
+## 1.6.0
+
+Live test 24 (Pair AirPods) is still owed. Nothing in 1.6.0 beyond what the
+rows above record has had a live run.
+
+## 1.7.0: what was not taken, and what is unproved
+
+The live records planned for 1.7.0 were not taken. The owner did not answer
+inside the limit set for them, so the run went on without them. These were never recorded: the battery side by side with
+the iPhone (buds worn, both in the open case, each bud out alone, the case on
+charge, the buds charging); a shut case watched for ten minutes (plugged in,
+unplugged, moved, with three lid opens as a baseline); the iPhone taking the
+AirPods three times, one walk out of range and one Disconnect in Earshot, each
+timed; and the owner's memory of when the old card showed with the case shut.
+Nothing here stands in for them.
+
+What the case-open rule rests on is seven recorded false shows in the saved
+logs, and synthetic replays built from them. Each of seven links was
+followed about a minute later by a second show, from one or two case-known
+messages of the linked set. The logs prove a card was on screen each time. They
+do not prove the lid was shut. The new rule has been run only against those
+replays and synthetic messages.
+
+Still unproved at release:
+
+- Whether a step is rounded or floored against the iPhone's figure.
+- Which bud is left and which is right.
+- What the charging bits mean.
+- Whether the lid was shut at each recorded false show.
+- What a shut case sends when it is charged or moved.
+- The signature of a real walk out of range.
+- The Moved to bound (10 seconds), message count (3) and signal level (-80 dBm).
+  All three are design choices, and no trial was run.
+- Whether Moved to is true when nothing was playing. In the saved logs, six of
+  eight leaves Earshot did not start were followed by minutes of messages, and
+  each would show Moved to under this rule.
+- Whether Windows' figure ever exists, and in what steps.
+- Whose the 17-byte messages are. They are counted by shape and not used.
+
+Left and right, rounds or floors, and the charging bits stay marked unproved
+wherever they appear.
 
 ## Live tests
 

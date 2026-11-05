@@ -6,7 +6,7 @@ namespace Earshot.Tests.Widget;
 
 // The README's battery section says what the code does. Finding the pair again with no case open is built and switched
 // off, so the text must say that, state its risk plainly, and not put the owner's acceptance on a thing he did not decide;
-// the broadcast gives steps of 10%, so the text says a figure can differ from the iPhone's by up to one step.
+// the broadcast gives steps of 10%, so the text says a figure cannot match the iPhone's to the percent, and that nothing is estimated.
 [TestClass]
 public sealed class ReadmeBatteryTextTests
 {
@@ -65,25 +65,39 @@ public sealed class ReadmeBatteryTextTests
     }
 
     [TestMethod]
-    public void TheBroadcastIsSaidToGiveStepsOfTenPercentAndTheFigureToDifferByUpToOneStep()
+    public void TheBroadcastIsSaidToGiveStepsOfTenPercentAndTheFigureNotToMatchTheIPhoneToThePercent()
     {
         string battery = Battery();
 
         StringAssert.Contains(battery, "steps of 10%");
-        StringAssert.Contains(battery, "can differ from the one your iPhone shows by up to one step");
+        StringAssert.Contains(battery, "Earshot cannot match the iPhone to the percent");
+        StringAssert.Contains(battery, "Apple's own link protocol, which is out of scope");
+        Assert.IsFalse(battery.Contains("up to one step", StringComparison.OrdinalIgnoreCase), "Rounding or flooring is unproved, so no claim about how far a figure is from the iPhone's.");
         Assert.IsFalse(Regex.IsMatch(battery, @"up to 9 points|9 points away", RegexOptions.IgnoreCase), "No claim about how far a figure is from the exact one.");
     }
 
     [TestMethod]
-    public void EstimatesAreSaidToBeForAPairAwayFromThisPcOnly()
+    public void OnlyMeasuredReadingsAreShownAndNoEstimateIsDescribedAsShown()
     {
         string text = Normalise(File.ReadAllText(Path.Combine(RepositoryRoot(), "README.md")));
         string battery = Battery();
 
-        StringAssert.Contains(text, "While the AirPods are away from this PC, a part that was charging is shown rising as an estimate");
-        StringAssert.Contains(battery, "shown only while the AirPods are away from this PC");
-        string estimates = Bullets(battery).Single(b => b.StartsWith("- **Estimates are estimates.**", StringComparison.Ordinal));
-        StringAssert.Contains(estimates, "With the AirPods on this PC the last reading is shown as it was read, never grown");
+        StringAssert.Contains(battery, "shows only measured readings: live, or the last one with its age");
+        StringAssert.Contains(battery, "There are no estimates");
+        StringAssert.Contains(battery, "Readings reach the card only after the case has been opened near the PC, so a last reading can be old");
+        Assert.IsFalse(text.Contains('≈'), "No approximate mark: nothing is estimated.");
+        Assert.IsFalse(Regex.IsMatch(text, @"status popup|case-open card", RegexOptions.IgnoreCase), "The popups it replaced are gone from the README.");
+    }
+
+    [TestMethod]
+    public void MovedToIsSaidToBeUntestedLiveAndToBeAbleToShowForAnotherReason()
+    {
+        string text = Normalise(File.ReadAllText(Path.Combine(RepositoryRoot(), "README.md")));
+
+        StringAssert.Contains(text, "it may show when the AirPods simply left for another reason");
+        StringAssert.Contains(text, "It has not been tested live");
+        StringAssert.Contains(text, "`moved-to` on the command line");
+        StringAssert.Contains(text, "The card is Earshot's only popup");
     }
 
     private static string RepositoryRoot()
