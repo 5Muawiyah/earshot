@@ -963,6 +963,10 @@ internal sealed partial class WidgetCard : Form
         }
     }
 
+    // The close button of a card nobody asked for, in the settings slot: the glyph and its size in epx at 96 dpi (design choice).
+    internal static char UnaskedCloseGlyph => FluentGlyphs.ChromeClose;
+    internal static int UnaskedCloseGlyphSizeAt96 => 10;
+
     // "AirPods" at 14 px semibold, and the gear when the view has one.
     private void DrawTitleRow(Graphics g, WidgetCardLayout.Layout layout)
     {
@@ -976,8 +980,8 @@ internal sealed partial class WidgetCard : Form
         DrawRefreshIcon(g, layout);
         if (_unasked)
         {
-            // The case-open card's close button: the Cancel glyph, or the clear button's own cross without the font.
-            if (!CardPaint.TryGlyph(g, FluentGlyphs.Cancel, layout.Gear, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
+            // The unasked card's close button: the thin system close, or the clear button's own cross without the font.
+            if (!CardPaint.TryGlyph(g, UnaskedCloseGlyph, layout.Gear, colours.Text, _dpi, UnaskedCloseGlyphSizeAt96, _look.TextScale))
             {
                 CardPaint.IconButton(g, layout.Gear, GlyphKind.Cross, enabled: true, colours, _dpi, focused: false, bordered: false);
             }

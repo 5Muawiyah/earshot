@@ -53,6 +53,7 @@ internal static class FluentGlyphs
     public const char MicOff = '\uEC54';
     public const char Keyboard = '\uE765';
     public const char Cancel = '\uE711';
+    public const char ChromeClose = '\uE8BB';
     public const char Sync = '\uE895';
     public const char Repair = '\uE90F';
     public const char Warning = '\uE7BA';

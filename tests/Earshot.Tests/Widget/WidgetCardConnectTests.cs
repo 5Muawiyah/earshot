@@ -177,6 +177,55 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // ---- Esc, the end of a disconnect, the close button
+
+    [TestMethod]
+    public void EscClosesTheAskedCardMidAttemptAndTheAttemptCarriesOn()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig();
+            rig.OpenAsked();
+            rig.Presenter.ToggleStarted(connect: true);
+
+            Phase5.TestWindows.Send(rig.Asked.Handle, 0x0100, (nint)Keys.Escape, 0);
+            Application.DoEvents();
+
+            Assert.IsFalse(rig.Presenter.IsShown, "Esc closes the card while the ring turns.");
+            Assert.AreEqual(CardButtonWork.Connecting, rig.Presenter.WorkForTest, "The attempt is not stopped; the gauge takes over.");
+        });
+    }
+
+    [TestMethod]
+    [DataRow(AirPodsWhere.NotInUse, "", "Not on this PC")]
+    [DataRow(AirPodsWhere.Elsewhere, "iPhone", "On your iPhone")]
+    [DataRow(AirPodsWhere.Elsewhere, "", "On another device")]
+    public void AfterADisconnectTheCardSaysWhereTheAirPodsAre(AirPodsWhere where, string label, string words)
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig(where: AirPodsWhere.ThisPc);
+            rig.Callbacks.OtherDeviceLabel = label;
+            rig.OpenAsked();
+            rig.Presenter.ToggleStarted(connect: false);
+
+            rig.Callbacks.Snapshot = Snapshot(where);
+            rig.Presenter.ToggleEnded(connect: false, ToggleOutcome.Succeeded);
+            rig.Presenter.Refresh();
+
+            Assert.AreEqual(CardButtonWork.None, rig.Asked.WorkShown);
+            Assert.AreEqual(words, rig.Asked.WhereLineText);
+            Assert.IsFalse(rig.Presenter.FailureActiveForTest);
+        });
+    }
+
+    [TestMethod]
+    public void TheCloseButtonOfAnUnaskedCardIsTheThinSystemCloseAtTenPixels()
+    {
+        Assert.AreEqual('', WidgetCard.UnaskedCloseGlyph);
+        Assert.AreEqual(10, WidgetCard.UnaskedCloseGlyphSizeAt96);
+    }
+
     // ---- The failure line
 
     // Every reason the connect table can give: each is said whole, in the status row, in its name and in its tooltip.
@@ -195,6 +244,15 @@ public sealed partial class WidgetCardUnaskedTests
     [DataRow(Earshot.Audio.Connect.ConnectMessages.CouldNotReadDevices)]
     [DataRow(Earshot.Audio.Connect.ConnectMessages.OutputTurnedOff)]
     [DataRow(Earshot.Audio.Connect.ConnectMessages.CouldNotReachDriver)]
+    [DataRow(Earshot.Audio.Connect.ConnectMessages.NotFound)]
+    [DataRow(Earshot.Audio.Connect.ConnectMessages.BootBlockNotSetUp)]
+    [DataRow(Earshot.Audio.Connect.ConnectMessages.WentAway)]
+    [DataRow(Earshot.Audio.Connect.ConnectMessages.DidNotDisconnect)]
+    [DataRow(Earshot.Audio.Connect.ConnectMessages.DriverBusy)]
+    [DataRow(Earshot.Bluetooth.RadioLines.Off)]
+    [DataRow(Earshot.Bluetooth.RadioLines.SwitchedOff)]
+    [DataRow(Earshot.Bluetooth.RadioLines.NoAdapter)]
+    [DataRow(Earshot.Bluetooth.RadioLines.NoClassic)]
     public void EveryReasonOfTheTableIsSaidWholeInTheOpenCard(string reason)
     {
         Phase5.CardDesktop.Run(() =>
