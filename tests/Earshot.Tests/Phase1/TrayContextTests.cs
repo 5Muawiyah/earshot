@@ -78,8 +78,9 @@ public sealed class TrayContextTests
             tray.PumpUntilIdle();
 
             Assert.HasCount(1, tray.Connection.Calls);
-            CollectionAssert.AreEqual(new[] { TrayStatus.CardConnecting, TrayStatus.CardConnected }, tray.Cards.Statuses);
-            Assert.IsTrue(tray.Cards.Shown.All(s => s.Anchor == CardAnchor.NearCursor && s.Content.Title == AirPodsName));
+            Assert.IsEmpty(tray.Cards.Shown, "A connect says its progress and its result on the gauge and the card, not on a popup.");
+            Assert.IsTrue(tray.Toggle.Started.Single());
+            Assert.AreEqual((true, ToggleOutcome.Succeeded), tray.Toggle.Ended.Single());
         });
     }
 
@@ -263,7 +264,8 @@ public sealed class TrayContextTests
 
             Assert.HasCount(1, tray.Connection.Calls);
             Assert.IsFalse(tray.Connection.Calls[0].Connect);
-            CollectionAssert.AreEqual(new[] { TrayStatus.CardDisconnected }, tray.Cards.Statuses);
+            Assert.IsEmpty(tray.Cards.Shown, "A disconnect says its result on the gauge and the card, not on a popup.");
+            Assert.AreEqual((false, ToggleOutcome.Succeeded), tray.Toggle.Ended.Single());
         });
     }
 
@@ -281,11 +283,12 @@ public sealed class TrayContextTests
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             tray.PumpUntilIdle();
 
-            // The reason, then the same card again with Connect in Windows under it.
-            CollectionAssert.AreEqual(
-                new[] { TrayStatus.CardConnecting, ConnectFailureClassifier.OpenTheCaseAndTryAgain, ConnectFailureClassifier.OpenTheCaseAndTryAgain },
-                tray.Cards.Statuses);
-            Assert.AreEqual(ConnectInWindowsOffer.ButtonLabel, tray.Cards.Shown[^1].Content.Action?.Label);
+            // The reason goes to the one card, with Connect in Windows as its next step; no popup says anything.
+            Assert.IsEmpty(tray.Cards.Shown);
+            FailureSaid said = tray.Toggle.Failures.Single();
+            Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, said.Reason);
+            Assert.AreEqual(ConnectInWindowsOffer.ButtonLabel, said.NextLabel);
+            Assert.AreEqual((true, ToggleOutcome.Failed), tray.Toggle.Ended.Single());
             Assert.IsTrue(tray.Log.Has(LogLevel.Warn, "connect: Failed. " + ConnectFailureClassifier.OpenTheCaseAndTryAgain));
         });
     }
@@ -739,10 +742,11 @@ public sealed class TrayContextTests
             Assert.IsEmpty(tray.Connection.Calls);
             Assert.IsEmpty(tray.Protection.Calls);
             Assert.IsEmpty(tray.Block.Calls);
-            // Four refusals: the start-up check, the click, the protection change and Block at boot. No card
-            // promises an action first.
+            // Four refusals: the start-up check, the protection change and Block at boot on popups, and the click on the one card. No
+            // card promises an action first.
             Assert.IsTrue(tray.Cards.Statuses.All(s => s == SafeDecorators.Message), string.Join(" | ", tray.Cards.Statuses));
-            Assert.HasCount(4, tray.Cards.Shown);
+            Assert.HasCount(3, tray.Cards.Shown);
+            Assert.AreEqual(SafeDecorators.Message, tray.Toggle.Failures.Single().Reason, "The click's refusal is a failure said on the one card.");
             Assert.AreEqual(CardAnchor.NearTray, tray.Cards.Shown[0].Anchor, "The start-up block is not a click.");
             Assert.IsFalse(tray.Settings.Current.ProtectAudioNoticeShown);
             Assert.AreEqual(0, tray.Startup.Writes);
@@ -1701,7 +1705,7 @@ internal sealed class TrayHarness : IDisposable
         // harness's own frozen ManualTime would never agree on when the budget has passed.
         Coordinator = new BlockCoordinator(Registry.Monitor, Registry.Connection, Registry.Block, Registry.Protection,
             Registry.Settings, Registry.Cards, Log, time ?? Time, new CoordinatorOptions(safeMode, StartedAtLogon: false), coordinatorServices);
-        Context = new TrayContext(Registry, Coordinator, options);
+        Context = new TrayContext(Registry, Coordinator, options) { ToggleCardForTest = Toggle };
         Coordinator.Start();
         PumpUntilIdle();
     }
@@ -1726,6 +1730,9 @@ internal sealed class TrayHarness : IDisposable
     public FakeAudioProtectionController Protection { get; } = new();
 
     public RecordingCards Cards { get; } = new();
+
+    // What the tray told the one card about connects, disconnects and their failures.
+    public RecordingToggleCard Toggle { get; } = new();
 
     public FakeStartupRegistry Startup { get; } = new();
 

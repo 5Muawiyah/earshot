@@ -14,11 +14,7 @@ public sealed class ConnectSequenceTests
     private static readonly string[] AllowThenBlock = ["allow", "block"];
     private static readonly string[] AllowThenBlockTwice = ["allow", "block", "block"];
     private static readonly string[] BlockOnly = ["block"];
-    private static readonly string[] ConnectingThenConnected = ["Connecting", "Connected"];
-    private static readonly string[] ConnectingAllowingConnected =
-        ["Connecting", BlockCoordinator.AllowingStatus, BlockCoordinator.WaitingStatus, "Connecting", "Connected"];
     private static readonly string[] SetDevice = ["set-device:" + Devices.Address];
-    private static readonly string[] SafeModeRefusal = ["Safe mode: no device actions."];
 
     [TestMethod]
     public void AConnectThatReachesActiveLeavesTheNodesAlone()
@@ -34,7 +30,7 @@ public sealed class ConnectSequenceTests
         Assert.AreEqual(ConnectMessages.Connected, report.UserMessage);
         Assert.HasCount(1, h.Connection.Calls);
         Assert.IsEmpty(h.Block.Calls, "Nothing was blocked or allowed for a connect that worked.");
-        CollectionAssert.AreEqual(ConnectingThenConnected, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
     }
 
     [TestMethod]
@@ -51,7 +47,7 @@ public sealed class ConnectSequenceTests
         Assert.AreEqual(OpStatus.Success, report.Status);
         CollectionAssert.AreEqual(Allow, h.Block.Calls);
         Assert.HasCount(2, h.Connection.Calls);
-        CollectionAssert.AreEqual(ConnectingAllowingConnected, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
         Assert.AreEqual(BlockState.Allowed, h.Coordinator.BlockStatus?.State);
     }
 
@@ -73,8 +69,7 @@ public sealed class ConnectSequenceTests
 
         // The nodes are disabled again, so nothing can still be connecting.
         Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, report.UserMessage);
-        Assert.AreEqual(ConnectFailureClassifier.OpenTheCaseAndTryAgain, h.Cards.Statuses[^1]);
-        CollectionAssert.DoesNotContain(h.Cards.Statuses, ConnectMessages.StillConnecting);
+        Assert.IsEmpty(h.Cards.Shown, "The tray says the reason on the one card.");
     }
 
     // config.json cannot be read when the clean-up reads the status again (a file in use, say). That is not Block at
@@ -138,7 +133,7 @@ public sealed class ConnectSequenceTests
         ToggleReport report = h.Toggle(connect: true);
 
         Assert.AreEqual(OpStatus.Success, report.Status);
-        Assert.AreEqual(ConnectMessages.Connected, h.Cards.Statuses[^1]);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
         CollectionAssert.AreEqual(Allow, h.Block.Calls, "The AirPods are in use, so the nodes stay enabled.");
     }
 
@@ -615,7 +610,7 @@ public sealed class ConnectSequenceTests
         ToggleReport report = h.Toggle(connect: true);
 
         Assert.AreEqual(OpStatus.Failed, report.Status);
-        CollectionAssert.AreEqual(SafeModeRefusal, h.Cards.Statuses, "Safe mode shows the refusal only, not a Connecting card.");
+        Assert.IsEmpty(h.Cards.Shown, "The refusal is said by the tray on the one card, and no Connecting card went up.");
     }
 
     [TestMethod]

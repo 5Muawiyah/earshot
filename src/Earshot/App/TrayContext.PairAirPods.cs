@@ -5,6 +5,7 @@ using Earshot.Diagnostics;
 using Earshot.Pairing;
 using Earshot.Repair;
 using Earshot.Tray;
+using Earshot.Widget;
 
 namespace Earshot.App;
 
@@ -657,7 +658,28 @@ internal sealed partial class TrayContext
             return;
         }
 
+        ShowCompactRadio(RadioCard(radio, place), place);
+    }
+
+    // The radio is the reason a connect failed: its line is the failure the one card says, with its button as the next step. Where no
+    // card can say it (none is open and there is no button to open one for), the line is a compact notice instead.
+    private async Task SayRadioFailureAsync(RadioCheckResult radio, CardPlace place)
+    {
+        if (_closing || _closed)
+        {
+            return;
+        }
+
         CardContent content = RadioCard(radio, place);
+        FailureNextStep? next = content.Action is { } action ? new FailureNextStep(action.Label, action.OnClick) : null;
+        if (await SayFailureAsync(content.Status, next) == FailureShown.NotShown && !_closing && !_closed)
+        {
+            ShowCompactRadio(content, place);
+        }
+    }
+
+    private void ShowCompactRadio(CardContent content, CardPlace place)
+    {
         if (place.ClickPoint is { } point)
         {
             _registry.Cards.Show(content, place.Anchor, point);

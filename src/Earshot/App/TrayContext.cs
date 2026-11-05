@@ -1053,11 +1053,11 @@ internal sealed partial class TrayContext : ApplicationContext
             if (!gaugeTold)
             {
                 gaugeTold = true;
-                TellGaugeToggleEnded(outcome);
+                TellToggleEnded(wanted, outcome);
             }
         }
 
-        TellGaugeToggleStarted(wanted, origin);
+        TellToggleStarted(wanted, origin);
         try
         {
             ToggleReport report = await _coordinator.ToggleAsync(
@@ -1080,35 +1080,40 @@ internal sealed partial class TrayContext : ApplicationContext
             RadioCheckResult? radio = wanted && !report.IsSuccess && !cancelled ? await ReadRadioAfterFailureAsync(cts.Token) : null;
             bool radioBlocks = radio is { BlocksRepair: true };
             bool fixOffered = !radioBlocks && FixOffer.ShouldOffer(FixOfferFacts.From(report), report.IsSuccess, cancelled, wanted);
-            if (radioBlocks)
-            {
-                // A read that answered as a new click superseded this connect shows nothing for it; the new request has its own.
-                if (!cts.IsCancellationRequested)
-                {
-                    ShowRadioCard(radio!, place);
-                }
-            }
-            else if (fixOffered)
-            {
-                // A pinned pair that is no longer paired cannot be fixed or connected: the person is told so and offered Pair AirPods.
-                if (await CheckPinnedPairAsync("connect failed", place, cts.Token) && !cts.IsCancellationRequested)
-                {
-                    ShowFixOffer(intent.DeviceName, report.UserMessage, place);
-                }
-            }
-            else if (!_registry.SafeMode && ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
-            {
-                if (await CheckPinnedPairAsync("connect failed", place, cts.Token) && !cts.IsCancellationRequested)
-                {
-                    ShowConnectInWindowsOffer(intent.Container, intent.DeviceName, report.UserMessage, place);
-                }
-            }
 
-            // A click sees the result on the icon; a hotkey has nothing else to show it, so it gets a
-            // card for the outcome, success included.
-            if (viaHotkey && report.IsSuccess && !cancelled)
+            // A failure is said on the one card, with the next step that can help: the radio's own line and button when the radio is at
+            // fault, Fix connection, Connect in Windows, or none. A success has no card of its own: the gauge's tick says it.
+            if (!report.IsSuccess && !cancelled)
             {
-                ShowCard(intent.DeviceName, report.UserMessage, place);
+                string reason = report.UserMessage;
+                FailureNextStep? next = null;
+                bool say = true;
+                if (radioBlocks)
+                {
+                    // The radio's own line and button, or a compact notice when no card can say them.
+                    say = false;
+                    if (!cts.IsCancellationRequested)
+                    {
+                        await SayRadioFailureAsync(radio!, place);
+                    }
+                }
+                else if (fixOffered)
+                {
+                    // A pinned pair that is no longer paired cannot be fixed or connected: the person is told so and offered Pair AirPods.
+                    say = await CheckPinnedPairAsync("connect failed", place, cts.Token);
+                    next = new FailureNextStep(FixOffer.ButtonLabel, StartFixConnection);
+                }
+                else if (!_registry.SafeMode && ConnectInWindowsOffer.ShouldOffer(report, cancelled, wanted, fixOffered))
+                {
+                    say = await CheckPinnedPairAsync("connect failed", place, cts.Token);
+                    next = new FailureNextStep(ConnectInWindowsOffer.ButtonLabel, () => _ = ConnectInWindowsAsync(intent.Container, intent.DeviceName, place));
+                }
+
+                // A read that answered as a new click superseded this attempt shows nothing for it; the new request has its own.
+                if (say && !cts.IsCancellationRequested)
+                {
+                    _ = await SayFailureAsync(reason, next);
+                }
             }
 
             // VoiceOver: announce on the transition itself, never on a poll and never a state the app

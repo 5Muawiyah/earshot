@@ -1043,10 +1043,10 @@ public sealed class PairAirPodsTests
                 ConnectOutcome.AttemptedTimedOut, "Still connecting. Check your AirPods.", [StepOutcomes.FromHResult("ks-reconnect:src", 0)]));
             tray.Context.OnIconMouseClick(null, new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
             tray.PumpUntilIdle();
-            CardAction connectInWindows = tray.Cards.Shown.Last(c => c.Content.Action?.Label == ConnectInWindowsOffer.ButtonLabel).Content.Action!;
+            Action connectInWindows = tray.Toggle.Failures.Last(f => f.NextLabel == ConnectInWindowsOffer.ButtonLabel).Press!;
             rig.Ui.OnPick = () => tray.Ui.Post(_ =>
             {
-                connectInWindows.OnClick();
+                connectInWindows();
                 done.TrySetResult();
             }, null);
 
@@ -1418,7 +1418,7 @@ public sealed class PairAirPodsTests
             tray.Context.OnIconMouseClick(null, Press(MouseButtons.Left));
             tray.PumpUntilIdle();
 
-            tray.Cards.Shown[^1].Content.Action!.OnClick();
+            tray.Toggle.Failures[^1].Press!();
             tray.PumpUntilIdle();
 
             Assert.AreEqual(1, paired.Reads);

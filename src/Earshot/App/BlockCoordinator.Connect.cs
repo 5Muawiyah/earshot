@@ -166,15 +166,6 @@ internal sealed partial class BlockCoordinator
         };
     }
 
-    private void Progress(ToggleRequest request, ConnectAttempt attempt, string status)
-    {
-        attempt.Progress.Add(status);
-        if (!_options.SafeMode)
-        {
-            ShowCard(request, status);
-        }
-    }
-
     // One request, waiting at most what is left of the limit for the endpoint to reach ACTIVE.
     private async Task<ConnectResult> ConnectOnceAsync(ToggleRequest request, ConnectAttempt attempt, List<StepOutcome> steps, SwitchPhase phase, CancellationToken linked)
     {
@@ -192,7 +183,7 @@ internal sealed partial class BlockCoordinator
     {
         // Shown once the connect is under way, not while it waits behind an operation it may never follow. Safe mode refuses
         // the connect, so no card promises it.
-        Progress(request, attempt, TrayStatus.CardConnecting);
+        attempt.Progress.Add(TrayStatus.CardConnecting);
 
         var steps = new List<StepOutcome>();
         var cleanup = new ConnectCleanup();
@@ -230,7 +221,7 @@ internal sealed partial class BlockCoordinator
             if (first.IsTemporary && !attempt.Retried && attempt.RoomToRetry)
             {
                 attempt.Retried = true;
-                Progress(request, attempt, TryingAgainStatus);
+                attempt.Progress.Add(TryingAgainStatus);
                 result = await ConnectOnceAsync(request, attempt, steps, SwitchPhase.Connect, linked);
                 if (result.Confirmed)
                 {
@@ -322,7 +313,7 @@ internal sealed partial class BlockCoordinator
         // before it.
         ct.ThrowIfCancellationRequested();
         cleanup.BlockAtBoot = status!.BlockAtBootKnown ? status.BlockAtBoot : null;
-        Progress(request, attempt, AllowingStatus);
+        attempt.Progress.Add(AllowingStatus);
         cleanup.AllowIssued = true;
         mark = request.Timeline?.Mark() ?? -1;
         ControllerResult allow = await SendAllowAsync("allow (connect)", steps, limitToken);
@@ -351,12 +342,12 @@ internal sealed partial class BlockCoordinator
         // The nodes are in the tree now, or on their way: from here the wait is for the endpoints, and it is cut by the limit.
         mark = request.Timeline?.Mark() ?? -1;
         await ReadBlockStatusAsync(linked);
-        Progress(request, attempt, WaitingStatus);
+        attempt.Progress.Add(WaitingStatus);
         bool endpointCame = await WaitForSnapshotAsync(request.Container, CoordinatorRules.RenderEndpointPresent, Shorter(EndpointWait, attempt.Remaining), ct);
         if (!endpointCame && attempt.RoomToRetry)
         {
             attempt.Retried = true;
-            Progress(request, attempt, TryingAgainStatus);
+            attempt.Progress.Add(TryingAgainStatus);
             endpointCame = await WaitForSnapshotAsync(request.Container, CoordinatorRules.RenderEndpointPresent, Shorter(EndpointWait, attempt.Remaining), ct);
         }
 
@@ -370,7 +361,7 @@ internal sealed partial class BlockCoordinator
             return (await FailAsync(request, attempt, cleanup, steps, failure, ct), null);
         }
 
-        Progress(request, attempt, TrayStatus.CardConnecting);
+        attempt.Progress.Add(TrayStatus.CardConnecting);
         ConnectResult result = await ConnectOnceAsync(request, attempt, steps, SwitchPhase.Connect, linked);
         return (null, result);
     }
@@ -448,7 +439,7 @@ internal sealed partial class BlockCoordinator
 
         if (status is null or { State: BlockState.NotSetUp or BlockState.NotFound or BlockState.Unknown })
         {
-            return Finish(request, OpStatus.Failed, CoordinatorRules.AllowFirstRefusal(status, request.Container) ?? NotAvailableMessage, steps);
+            return FinishWithNotice(request, OpStatus.Failed, CoordinatorRules.AllowFirstRefusal(status, request.Container) ?? NotAvailableMessage, steps);
         }
 
         if (status is { State: BlockState.Blocked or BlockState.Mixed })
@@ -456,17 +447,16 @@ internal sealed partial class BlockCoordinator
             if (PinMayMove)
             {
                 steps.Add(StepOutcomes.NotAttempted("connect-allow", "Not sent, because " + PinMayMoveReason + "."));
-                return Finish(request, OpStatus.Failed, ChangeStillRunningMessage, steps);
+                return FinishWithNotice(request, OpStatus.Failed, ChangeStillRunningMessage, steps);
             }
 
             string? refusal = CoordinatorRules.AllowFirstRefusal(status, request.Container);
             if (refusal is not null)
             {
-                return Finish(request, OpStatus.Failed, refusal, steps);
+                return FinishWithNotice(request, OpStatus.Failed, refusal, steps);
             }
 
             ct.ThrowIfCancellationRequested();
-            ShowCard(request, AllowingStatus);
             ControllerResult allow = await SendAllowAsync("allow (connect in windows)", steps, CancellationToken.None);
             if (IsSessionEndRefusal(allow))
             {
@@ -475,7 +465,7 @@ internal sealed partial class BlockCoordinator
 
             if (allow.Status is OpStatus.Failed or OpStatus.NotAttempted)
             {
-                return Finish(request, OpStatus.Failed, ConnectFailureClassifier.AllowFailed(allow).Reason, steps);
+                return FinishWithNotice(request, OpStatus.Failed, ConnectFailureClassifier.AllowFailed(allow).Reason, steps);
             }
 
             await ReadBlockStatusAsync(ct);
@@ -486,11 +476,11 @@ internal sealed partial class BlockCoordinator
         if (!opened.Ok)
         {
             _log.Warn("connect in windows: " + TrayReport.DescribeStep(opened));
-            return Finish(request, OpStatus.Failed, ConnectInWindowsFailedToOpenMessage, steps);
+            return FinishWithNotice(request, OpStatus.Failed, ConnectInWindowsFailedToOpenMessage, steps);
         }
 
         OpenWindowsConnectWindow();
-        return Finish(request, OpStatus.Success, ConnectInWindowsMessage, steps);
+        return FinishWithNotice(request, OpStatus.Success, ConnectInWindowsMessage, steps);
     }
 
     // Connect in Windows before Earshot is set up. With no AirPods paired the tray is told to start Pair AirPods (no card is shown
@@ -507,7 +497,7 @@ internal sealed partial class BlockCoordinator
         if (paired.NonePaired)
         {
             _log.Info("connect in windows: Earshot is not set up and no AirPods are paired, so Pair AirPods is offered instead.");
-            return Finish(request, OpStatus.Failed, NoAirPodsPairedMessage, steps, showCard: false) with { StartPairAirPods = true };
+            return Finish(request, OpStatus.Failed, NoAirPodsPairedMessage, steps) with { StartPairAirPods = true };
         }
 
         StepOutcome opened = _services.Launcher.OpenBluetoothSettings();
@@ -515,11 +505,11 @@ internal sealed partial class BlockCoordinator
         if (!opened.Ok)
         {
             _log.Warn("connect in windows: " + TrayReport.DescribeStep(opened));
-            return Finish(request, OpStatus.Failed, ConnectInWindowsFailedToOpenMessage, steps);
+            return FinishWithNotice(request, OpStatus.Failed, ConnectInWindowsFailedToOpenMessage, steps);
         }
 
         _log.Info("connect in windows: Earshot is not set up, so nothing was allowed and Windows' Bluetooth settings is open.");
-        return Finish(request, OpStatus.Success, BluetoothSettingsOpenMessage, steps);
+        return FinishWithNotice(request, OpStatus.Success, BluetoothSettingsOpenMessage, steps);
     }
 
     private void OpenWindowsConnectWindow()

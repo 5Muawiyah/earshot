@@ -19,7 +19,6 @@ public sealed class ProtectionSequenceTests
     private static readonly bool[] OnOnly = [true];
     private static readonly bool[] OffOnly = [false];
     private static readonly string[] BlockOnly = ["block"];
-    private static readonly string[] ConnectingTryingConnected = ["Connecting", BlockCoordinator.TryingAnotherWayMessage, "Connected"];
 
     // settingOn is the saved Protect audio quality intent, which the automatic checks act on. A menu click
     // passes the new value to SetProtectionAsync itself, so the tests of a click leave the setting off.
@@ -291,7 +290,7 @@ public sealed class ProtectionSequenceTests
 
         Assert.AreEqual(OpStatus.Success, report.Status);
         CollectionAssert.AreEqual(OffThenOn, h.Protection.Applies);
-        CollectionAssert.AreEqual(ConnectingTryingConnected, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
         Assert.AreEqual(AudioProtectionState.Protected, h.Protection.State);
         Assert.IsNull(h.Coordinator.PendingProtect);
         Assert.AreEqual(0, h.Cards.Statuses.Count(s => s == TrayStatus.MicrophoneNotice), "The notice is never shown again for this.");

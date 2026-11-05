@@ -1,5 +1,6 @@
 using Earshot.Contracts;
 using Earshot.Tray;
+using Earshot.Widget;
 
 namespace Earshot.App;
 
@@ -25,45 +26,21 @@ internal sealed partial class TrayContext
         StartFixConnectionNow();
     };
 
-    private void ShowFixOffer(string title, string reason, CardPlace place)
+    // Says a failed connect or disconnect on the one card: in the status row of the card that is open, else on a card that opens for the
+    // next step, else nowhere (the gauge's cross and tooltip say it). Completes with what became of it.
+    private async Task<FailureShown> SayFailureAsync(string reason, FailureNextStep? next)
     {
-        if (_closing || _closed)
+        if (_closing || _closed || ToggleCard is not { } card)
         {
-            return;
+            return FailureShown.NotShown;
         }
 
-        var content = new CardContent(title, reason, new CardAction(FixOffer.ButtonLabel, StartFixConnection));
-        if (place.ClickPoint is { } point)
-        {
-            _registry.Cards.Show(content, place.Anchor, point);
-        }
-        else
-        {
-            _registry.Cards.Show(content, place.Anchor);
-        }
+        return await card.ShowFailed(reason, next);
     }
 
-    // The failure card again, with the same words and Connect in Windows under them. Pressing it allows the AirPods and opens
-    // Windows' Bluetooth settings page; the coordinator shows its own card for the result and then leaves a connection made
-    // there alone. Not offered in safe mode, which refuses every device action, so the button could only be refused.
-    private void ShowConnectInWindowsOffer(Guid container, string title, string reason, CardPlace place)
-    {
-        if (_closing || _closed)
-        {
-            return;
-        }
-
-        var content = new CardContent(title, reason, new CardAction(ConnectInWindowsOffer.ButtonLabel, () => _ = ConnectInWindowsAsync(container, title, place)));
-        if (place.ClickPoint is { } point)
-        {
-            _registry.Cards.Show(content, place.Anchor, point);
-        }
-        else
-        {
-            _registry.Cards.Show(content, place.Anchor);
-        }
-    }
-
+    // Connect in Windows, from the failure line: it allows the AirPods and opens Windows' Bluetooth settings; the coordinator tells the
+    // result and then leaves a connection made there alone. Not offered in safe mode, which refuses every device action, so the button
+    // could only be refused.
     private async Task ConnectInWindowsAsync(Guid container, string title, CardPlace place)
     {
         if (_closing || RefusedWhilePairing("Connect in Windows", place))

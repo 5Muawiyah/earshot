@@ -2090,7 +2090,6 @@ internal sealed partial class BlockCoordinator : IDisposable
     // Hands-Free back, and Windows can turn it back on when the AirPods reconnect).
     private async Task<ToggleReport> ConnectedAsync(ToggleRequest request, List<StepOutcome> steps, bool allowed, CancellationToken ct)
     {
-        ShowCard(request, TrayStatus.CardConnected);
         ReArmIdleRule("the AirPods connected");
         request.Timeline?.MarkActive();
         long protectionMark = request.Timeline?.Mark() ?? -1;
@@ -2119,7 +2118,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         ShowNoticeIfOwed(request.Place);
-        return Finish(request, OpStatus.Success, TrayStatus.CardConnected, steps, showCard: false);
+        return Finish(request, OpStatus.Success, TrayStatus.CardConnected, steps);
     }
 
     // The A2DP filter turned the request down while protection is on, so the Hands-Free filter is not there to
@@ -2129,7 +2128,6 @@ internal sealed partial class BlockCoordinator : IDisposable
     {
         ct.ThrowIfCancellationRequested();
         attempt.Progress.Add(TryingAnotherWayMessage);
-        ShowCard(request, TryingAnotherWayMessage);
         cleanup.ProtectOffIssued = true;
         cleanup.ReblockAfterFallback = true;
         ControllerResult off = await SendProtectionAsync(false);
@@ -2157,7 +2155,6 @@ internal sealed partial class BlockCoordinator : IDisposable
             assisted.MarkActive();
         }
 
-        ShowCard(request, TrayStatus.CardConnected);
         cleanup.ProtectOffIssued = false;
         cleanup.ReblockAfterFallback = false;
         ReArmIdleRule("the AirPods connected");
@@ -2181,7 +2178,7 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         _pendingProtect = null;
-        return Finish(request, OpStatus.Success, TrayStatus.CardConnected, steps, showCard: false);
+        return Finish(request, OpStatus.Success, TrayStatus.CardConnected, steps);
     }
 
     // Puts back what a connect that did not reach ACTIVE changed: protection it turned off, then the nodes it
@@ -2366,11 +2363,6 @@ internal sealed partial class BlockCoordinator : IDisposable
         }
 
         NoteOwnLeaveEnded(result is { Confirmed: true } && !cancelled);
-        if (result is { Confirmed: true } && !cancelled)
-        {
-            ShowCard(request, TrayStatus.CardDisconnected);
-        }
-
         // Blocking is the at-rest action, so it follows whatever the request returned. It is not cancellable.
         long blockMark = request.Timeline?.Mark() ?? -1;
         BlockAttempt block = await BlockAfterDisconnectAsync(request, steps);
@@ -2404,7 +2396,7 @@ internal sealed partial class BlockCoordinator : IDisposable
             return Finish(request, OpStatus.Partial, block.Message, steps);
         }
 
-        return Finish(request, OpStatus.Success, TrayStatus.CardDisconnected, steps, showCard: result is not { Confirmed: true });
+        return Finish(request, OpStatus.Success, TrayStatus.CardDisconnected, steps);
     }
 
     private async Task<BlockAttempt> BlockAfterDisconnectAsync(ToggleRequest request, List<StepOutcome> steps)
@@ -3891,13 +3883,22 @@ internal sealed partial class BlockCoordinator : IDisposable
             CancelledBecause = _currentStoppedForSessionEnd ? "the session is ending" : _closing ? "Earshot is closing" : null,
         };
 
-    private ToggleReport Finish(ToggleRequest request, OpStatus status, string message, List<StepOutcome> steps, bool showCard = true)
+    // The end of a connect or a disconnect. Its result is said by the tray on the one card and the gauge (IToggleCard, GaugeStory), so
+    // nothing is shown here, except a part-way result: it is a notice with a next step of its own, not a verdict on the attempt.
+    private ToggleReport Finish(ToggleRequest request, OpStatus status, string message, List<StepOutcome> steps)
     {
-        if (showCard)
+        if (status == OpStatus.Partial)
         {
             ShowCard(request, message);
         }
 
+        return new ToggleReport(request.Connect, status, message, steps, Cancelled: false);
+    }
+
+    // The end of an operation that is no toggle, Connect in Windows and the Bluetooth settings step: a compact notice says it.
+    private ToggleReport FinishWithNotice(ToggleRequest request, OpStatus status, string message, List<StepOutcome> steps)
+    {
+        ShowCard(request, message);
         return new ToggleReport(request.Connect, status, message, steps, Cancelled: false);
     }
 

@@ -91,6 +91,41 @@ public sealed partial class WidgetCardUnaskedTests
     }
 
     [TestMethod]
+    public void PressingConnectOnTheAskedCardAsksOnceAndTheCardStaysOpen()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig();
+            rig.Callbacks.Intent = new ToggleIntent(true, Guid.NewGuid(), "AirPods");
+            rig.OpenAsked();
+
+            rig.Asked.CurrentControls()[0].Activate();
+            Application.DoEvents();
+
+            Assert.HasCount(1, rig.Callbacks.ToggleCalls);
+            Assert.IsTrue(rig.Presenter.IsShown, "No card closes on Connect.");
+        });
+    }
+
+    [TestMethod]
+    public void PressingConnectOnTheCaseCardAsksOnceAndTheCardStaysOpen()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig(asked: false);
+            rig.Callbacks.Intent = new ToggleIntent(true, Guid.NewGuid(), "AirPods");
+            rig.Presenter.CaseOpened(AGauge);
+            Application.DoEvents();
+
+            rig.Unasked.CurrentControls()[0].Activate();
+            Application.DoEvents();
+
+            Assert.HasCount(1, rig.Callbacks.ToggleCalls);
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown, "No card closes on Connect.");
+        });
+    }
+
+    [TestMethod]
     public void ADisconnectRunsTheSameRing()
     {
         Phase5.CardDesktop.Run(() =>

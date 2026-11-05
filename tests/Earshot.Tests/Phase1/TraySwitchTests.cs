@@ -5,6 +5,7 @@ using Earshot.Hotkeys;
 using Earshot.Tests.Hotkeys;
 using Earshot.Tests.TestWindow;
 using Earshot.Tray;
+using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
 
@@ -46,7 +47,8 @@ public sealed class TraySwitchTests
             Assert.HasCount(1, tray.Connection.Calls);
             Assert.IsTrue(tray.Connection.Calls[0].Connect);
             Assert.IsTrue(tray.Log.Has(LogLevel.Info, "Switch to-pc: active after 0 ms (trigger shortcut-to-pc,"), "The measured line was not written.");
-            Assert.AreEqual(CardAnchor.NearTray, tray.Cards.Shown[^1].Anchor, "A shortcut has no click point, so its card goes near the tray.");
+            Assert.IsEmpty(tray.Cards.Shown, "A shortcut's connect is told by the gauge's tick and the card, not by a popup.");
+            Assert.AreEqual((true, ToggleOutcome.Succeeded), tray.Toggle.Ended.Single());
         });
     }
 
@@ -63,7 +65,8 @@ public sealed class TraySwitchTests
 
             Assert.HasCount(1, tray.Connection.Calls);
             Assert.IsTrue(tray.Connection.Calls[0].Connect, "A stated direction must not flip like a toggle.");
-            Assert.AreEqual("Connected", tray.Cards.Shown[^1].Content.Status);
+            Assert.IsEmpty(tray.Cards.Shown, "A shortcut's connect is told by the gauge's tick and the card, not by a popup.");
+            Assert.AreEqual((true, ToggleOutcome.Succeeded), tray.Toggle.Ended.Single());
         });
     }
 

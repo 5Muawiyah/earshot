@@ -504,20 +504,33 @@ internal sealed partial class TrayContext
         return host;
     }
 
-    // Every connect or disconnect goes through RunToggleAsync, which tells the story here and nowhere else.
-    private void TellGaugeToggleStarted(bool wanted, ToggleOrigin origin)
+    // The one card's side of a toggle: the button's ring and the failure line. The presenter, unless a test hands in its own.
+    private IToggleCard? _toggleCardOverride;
+
+    private IToggleCard? ToggleCard => _toggleCardOverride ?? _widgetCardPresenter;
+
+    // For tests: what the toggle tells instead of the presenter.
+    internal IToggleCard? ToggleCardForTest
+    {
+        set => _toggleCardOverride = value;
+    }
+
+    // Every connect or disconnect goes through RunToggleAsync, which tells the story and the card here and nowhere else.
+    private void TellToggleStarted(bool wanted, ToggleOrigin origin)
     {
         if (!_closing)
         {
             GaugeStory.ToggleStarted(wanted, origin);
+            ToggleCard?.ToggleStarted(wanted);
         }
     }
 
-    private void TellGaugeToggleEnded(ToggleOutcome outcome)
+    private void TellToggleEnded(bool wanted, ToggleOutcome outcome)
     {
         if (!_closing)
         {
             GaugeStory.ToggleEnded(outcome);
+            ToggleCard?.ToggleEnded(wanted, outcome);
         }
     }
 

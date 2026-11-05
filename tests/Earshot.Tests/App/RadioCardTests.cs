@@ -156,7 +156,7 @@ public sealed class RadioCardTests
             tray.PumpUntilIdle();
 
             Assert.AreEqual(2, tray.Connection.Calls.Count(c => c.Connect), string.Join(", ", tray.Connection.Calls));
-            Assert.AreEqual(1, tray.Cards.Shown.Count(c => c.Content.Status == RadioLines.Off), string.Join(" | ", tray.Cards.Statuses));
+            Assert.AreEqual(1, tray.Toggle.Failures.Count(f => f.Reason == RadioLines.Off), string.Join(" | ", tray.Toggle.Failures.Select(f => f.Reason)));
         });
     }
 
@@ -174,18 +174,18 @@ public sealed class RadioCardTests
 
             FailTheConnect(tray);
 
-            CardContent card = tray.Cards.Shown[^1].Content;
-            Assert.AreEqual(line, card.Status);
-            Assert.AreEqual(RadioLines.BluetoothSettingsButton, card.Action?.Label);
+            FailureSaid card = tray.Toggle.Failures[^1];
+            Assert.AreEqual(line, card.Reason);
+            Assert.AreEqual(RadioLines.BluetoothSettingsButton, card.NextLabel);
             if ((RadioCheckState)radioState == RadioCheckState.Off)
             {
                 LiveTests.LiveTest24Lines.AssertLogged(tray.Log, LiveTests.LiveTest24Lines.RadioOffAfterConnect);
             }
 
-            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Action?.Label is "Fix connection" or "Connect in Windows"), "Nothing that cannot help is offered.");
-            StringAssert.DoesNotMatch(card.Status, new System.Text.RegularExpressions.Regex("reset|Reset|Apple|setup button", System.Text.RegularExpressions.RegexOptions.CultureInvariant));
+            Assert.IsFalse(tray.Toggle.Failures.Any(f => f.NextLabel is "Fix connection" or "Connect in Windows"), "Nothing that cannot help is offered.");
+            StringAssert.DoesNotMatch(card.Reason, new System.Text.RegularExpressions.Regex("reset|Reset|Apple|setup button", System.Text.RegularExpressions.RegexOptions.CultureInvariant));
 
-            card.Action!.OnClick();
+            card.Press!();
             tray.PumpUntilIdle();
 
             Assert.HasCount(1, launcher.Opened);
@@ -208,8 +208,8 @@ public sealed class RadioCardTests
 
             FailTheConnect(tray);
 
-            Assert.AreEqual(RadioLines.Off, tray.Cards.Shown[^1].Content.Status);
-            Assert.AreEqual(RadioLines.BluetoothSettingsButton, tray.Cards.Shown[^1].Content.Action?.Label);
+            Assert.AreEqual(RadioLines.Off, tray.Toggle.Failures[^1].Reason);
+            Assert.AreEqual(RadioLines.BluetoothSettingsButton, tray.Toggle.Failures[^1].NextLabel);
         });
     }
 
@@ -225,9 +225,9 @@ public sealed class RadioCardTests
 
             FailTheConnect(tray);
 
-            Assert.AreEqual(RadioLines.NoClassic, tray.Cards.Shown[^1].Content.Status);
-            Assert.IsNull(tray.Cards.Shown[^1].Content.Action);
-            Assert.IsFalse(tray.Cards.Shown.Any(c => c.Content.Action?.Label is "Fix connection" or "Connect in Windows"));
+            Assert.AreEqual(RadioLines.NoClassic, tray.Toggle.Failures[^1].Reason);
+            Assert.IsNull(tray.Toggle.Failures[^1].NextLabel);
+            Assert.IsFalse(tray.Toggle.Failures.Any(f => f.NextLabel is "Fix connection" or "Connect in Windows"));
         });
     }
 
@@ -241,7 +241,7 @@ public sealed class RadioCardTests
 
             FailTheConnect(tray);
 
-            Assert.AreEqual("Bluetooth on this PC isn't working. Windows reports problem code 10.", tray.Cards.Shown[^1].Content.Status);
+            Assert.AreEqual("Bluetooth on this PC isn't working. Windows reports problem code 10.", tray.Toggle.Failures[^1].Reason);
         });
     }
 
@@ -255,7 +255,7 @@ public sealed class RadioCardTests
 
             FailTheConnect(tray);
 
-            Assert.AreEqual(ConnectInWindowsOffer.ButtonLabel, tray.Cards.Shown[^1].Content.Action?.Label);
+            Assert.AreEqual(ConnectInWindowsOffer.ButtonLabel, tray.Toggle.Failures[^1].NextLabel);
         });
     }
 

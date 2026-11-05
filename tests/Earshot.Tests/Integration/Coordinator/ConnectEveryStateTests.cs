@@ -143,7 +143,7 @@ public sealed class ConnectEveryStateTests
         Assert.HasCount(2, h.Connection.Calls);
         Assert.IsTrue(report.Retried);
         Assert.Contains("Trying again", report.Progress);
-        Assert.Contains("Trying again", h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A retry is a step of the attempt on the gauge, not a popup.");
     }
 
     [TestMethod]
@@ -588,8 +588,8 @@ public sealed class ConnectEveryStateTests
 
         ToggleReport report = Await(h, h.Coordinator.ToggleAsync(CoordinatorHarness.Request(true)), out _);
 
-        Assert.AreEqual("Windows refused the change.", h.Cards.Statuses[^1]);
-        Assert.AreEqual(report.UserMessage, h.Cards.Statuses[^1]);
+        Assert.AreEqual("Windows refused the change.", report.UserMessage);
+        Assert.IsEmpty(h.Cards.Shown, "The tray says the reason on the one card.");
         Assert.IsTrue(report.OfferConnectInWindows);
     }
 }

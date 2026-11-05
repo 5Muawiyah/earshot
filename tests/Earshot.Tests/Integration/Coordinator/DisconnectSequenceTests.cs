@@ -11,8 +11,6 @@ namespace Earshot.Tests.Integration.Coordinator;
 public sealed class DisconnectSequenceTests
 {
     private static readonly string[] BlockOnly = ["block"];
-    private static readonly string[] Disconnected = ["Disconnected"];
-    private static readonly string[] DidNotDisconnect = [ConnectMessages.DidNotDisconnect];
 
     private static CoordinatorHarness Connected(bool blockAtBoot = true)
     {
@@ -33,7 +31,7 @@ public sealed class DisconnectSequenceTests
         Assert.AreEqual(OpStatus.Success, report.Status);
         Assert.AreEqual("Disconnected", report.UserMessage);
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
-        CollectionAssert.AreEqual(Disconnected, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
         Assert.AreEqual(BlockState.Blocked, h.Coordinator.BlockStatus?.State);
     }
 
@@ -50,7 +48,7 @@ public sealed class DisconnectSequenceTests
 
         CollectionAssert.AreEqual(BlockOnly, h.Block.Calls);
         Assert.AreEqual(OpStatus.Success, report.Status, "The block dropped the link, which the endpoints showed.");
-        CollectionAssert.AreEqual(Disconnected, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
         h.AssertAtRest();
     }
 
@@ -102,7 +100,7 @@ public sealed class DisconnectSequenceTests
         ToggleReport report = h.Toggle(connect: false);
 
         Assert.AreEqual(OpStatus.Success, report.Status);
-        CollectionAssert.AreEqual(Disconnected, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
     }
 
     [TestMethod]
@@ -119,7 +117,7 @@ public sealed class DisconnectSequenceTests
 
         Assert.AreEqual(OpStatus.Failed, report.Status);
         Assert.AreEqual(ConnectMessages.DidNotDisconnect, report.UserMessage);
-        CollectionAssert.AreEqual(DidNotDisconnect, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "The tray says the reason on the one card.");
     }
 
     [TestMethod]
@@ -161,7 +159,7 @@ public sealed class DisconnectSequenceTests
 
         Assert.AreEqual(OpStatus.Success, report.Status);
         Assert.IsEmpty(h.Block.Calls);
-        CollectionAssert.AreEqual(Disconnected, h.Cards.Statuses);
+        Assert.IsEmpty(h.Cards.Shown, "A connect or a disconnect says its progress and its result on the gauge and the card, through the tray, not on a popup.");
     }
 
     [TestMethod]
