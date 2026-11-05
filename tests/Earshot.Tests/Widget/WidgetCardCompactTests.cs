@@ -628,6 +628,37 @@ public sealed class WidgetCardCompactTests
     }
 
     [TestMethod]
+    public void TheFullCardsButtonCrossfadesToTheRingTurnsOnceASecondAndCrossfadesBack()
+    {
+        CardDesktop.Run(() =>
+        {
+            WidgetCardModel idle = Full();
+            Driven d = Present(animations: true, Charged, idle);
+            using WidgetCard card = d.Card;
+
+            card.Render(idle with { Work = CardButtonWork.Connecting }, 96);
+            Assert.AreEqual(CardButtonWork.Connecting, card.WorkShown);
+            Assert.AreEqual(0.0, card.WorkFadeProgress, "The label starts to give way.");
+            d.Advance(40);
+            Assert.IsTrue(card.WorkFadeProgress is > 0.1 and < 0.9, "Part way across: " + card.WorkFadeProgress);
+            d.Advance(60);
+            Assert.AreEqual(1.0, card.WorkFadeProgress, "Over by 83 ms.");
+
+            d.Advance(400);
+            Assert.IsTrue(card.WorkRingAngleForTest is > 170f and < 190f, "Half a turn 500 ms after it began: " + card.WorkRingAngleForTest);
+            d.Advance(500);
+            Assert.IsTrue(card.WorkRingAngleForTest is < 20f or > 340f, "A whole turn after a second: " + card.WorkRingAngleForTest);
+
+            card.Render(idle, 96);
+            Assert.AreEqual(CardButtonWork.None, card.WorkShown);
+            Assert.AreEqual(0.0, card.WorkFadeProgress, "The ring gives way to the label.");
+            d.Advance(100);
+            Assert.AreEqual(1.0, card.WorkFadeProgress);
+            Assert.AreEqual(0f, card.WorkRingAngleForTest, "The ring stopped.");
+        });
+    }
+
+    [TestMethod]
     public void TheRingTurnsOnceEverySecondWhileItsWorkRunsAndStopsWhenItEnds()
     {
         CardDesktop.Run(() =>
