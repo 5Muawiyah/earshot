@@ -46,7 +46,7 @@ public sealed class LastReadingStoreTests : IDisposable
 
     // The broadcast gives steps of ten, so a saved figure off a step did not come from it.
     [TestMethod]
-    public void AValueNotInStepsOfTenReadsAsNoReading()
+    public void AValueNotInStepsOfTenReadsAsNoReadingAndSaysSoInTheLog()
     {
         WriteRaw("""
             { "SchemaVersion": 1,
@@ -58,21 +58,28 @@ public sealed class LastReadingStoreTests : IDisposable
 
         Assert.IsNull(loaded.Left);
         Assert.AreEqual(70, loaded.Right!.Percent);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "Widget: the saved left reading is not in steps of ten, so it counts as no reading."), string.Join(" | ", _log.Entries.Select(e => e.Message)));
+        Assert.IsFalse(_log.Entries.Any(e => e.Message.Contains("73", StringComparison.Ordinal)), "The figure itself is not logged.");
     }
 
-    // A time ahead of the clock would make the other bud look too old to stand beside it.
+    // A time ahead of the clock cannot be told from a reading just made, so it counts as no reading. Only that part: the other bud,
+    // read at a time that makes sense, stays.
     [TestMethod]
-    public void AReadTimeInTheFutureIsBroughtBackToNow()
+    public void AReadTimeInTheFutureReadsAsNoReadingAndDoesNotDropTheOtherBud()
     {
         var clock = new Streaming.TestTimeProvider();
+        clock.Advance(ReadAt + TimeSpan.FromHours(1) - clock.GetUtcNow());
         WriteRaw("""
             { "SchemaVersion": 1,
-              "Left": { "Percent": 70, "Charging": false, "ReadAt": "2999-01-01T09:00:00+00:00", "Model": 8231 } }
+              "Left": { "Percent": 70, "Charging": false, "ReadAt": "2999-01-01T09:00:00+00:00", "Model": 8231 },
+              "Right": { "Percent": 60, "Charging": false, "ReadAt": "2026-10-02T09:00:00+00:00", "Model": 8231 } }
             """);
 
         LastReadingBook loaded = new LastReadingStore(FilePath, _log, clock).Load();
 
-        Assert.AreEqual(clock.GetUtcNow(), loaded.Left!.ReadAt);
+        Assert.IsNull(loaded.Left, "A figure of unknown age is not shown as just measured.");
+        Assert.AreEqual(new SavedReading(60, false, ReadAt, Model), loaded.Right, "The other bud stays, with its own time.");
+        Assert.IsTrue(_log.Has(LogLevel.Info, "Widget: the saved left reading is dated ahead of the clock, so it counts as no reading."), string.Join(" | ", _log.Entries.Select(e => e.Message)));
     }
 
     [TestMethod]

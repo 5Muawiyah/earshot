@@ -186,7 +186,7 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
         }
 
         _spent = spent;
-        return new LastReadingBook(ToReading(data.Left), ToReading(data.Right), ToReading(data.Case));
+        return new LastReadingBook(ToReading(data.Left, PartLeft), ToReading(data.Right, PartRight), ToReading(data.Case, PartCase));
     }
 
     public IReadOnlyList<SpentMark> LoadSpent()
@@ -336,16 +336,29 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
     }
 
     // A figure off the broadcast's steps of ten did not come from it, so it is no reading. A read time ahead of the clock (a clock put
-    // back, a file edited) is brought back to now, or the other bud would look too old to stand beside this one.
-    private SavedReading? ToReading(SavedReadingData? data)
+    // back, a file edited) cannot be told from a reading just made, and bringing it back to now would show a figure of unknown age as
+    // fresh, so it is no reading either. Only that part goes: the other bud, with a time that makes sense, stays. Each drop is logged
+    // once per load, with the part and nothing else (no address, no name, no figure).
+    private SavedReading? ToReading(SavedReadingData? data, string part)
     {
-        if (data is null || data.Percent is < 0 or > 100 || data.Percent % 10 != 0 || data.Model is <= 0 or > ushort.MaxValue)
+        if (data is null || data.Percent is < 0 or > 100 || data.Model is <= 0 or > ushort.MaxValue)
         {
             return null;
         }
 
-        DateTimeOffset now = _time.GetUtcNow();
-        return new SavedReading(data.Percent, data.Charging, data.ReadAt > now ? now : data.ReadAt, (ushort)data.Model);
+        if (data.Percent % 10 != 0)
+        {
+            _log.Info("Widget: the saved " + part + " reading is not in steps of ten, so it counts as no reading.");
+            return null;
+        }
+
+        if (data.ReadAt > _time.GetUtcNow())
+        {
+            _log.Info("Widget: the saved " + part + " reading is dated ahead of the clock, so it counts as no reading.");
+            return null;
+        }
+
+        return new SavedReading(data.Percent, data.Charging, data.ReadAt, (ushort)data.Model);
     }
 
     private static SavedReadingData? ToData(SavedReading? reading) =>
