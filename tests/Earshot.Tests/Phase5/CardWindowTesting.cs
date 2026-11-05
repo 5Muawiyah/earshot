@@ -78,6 +78,12 @@ internal static class CardDesktop
     // https://learn.microsoft.com/en-us/windows/win32/winstation/desktop-security-and-access-rights
     private const uint DesktopAccess = 0x0001 | 0x0002 | 0x0004 | 0x0080;
 
+    private static long _guardClock;
+
+    // A clock that is a second later at every read: a click in a test is never inside the double-click guard of a card that has only
+    // just appeared unless the test gave the card its own clock to say so.
+    private static long PastTheGuard() => Interlocked.Add(ref _guardClock, 1000);
+
     public static void Run(Action work) => Run(_ => work());
 
     // Binds the calling thread to desktop, for a second thread that needs to see the same windows as the
@@ -122,6 +128,7 @@ internal static class CardDesktop
                     }
 
                     Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException, threadScope: true);
+                    Earshot.Widget.WidgetCard.DefaultPressClock = PastTheGuard;
                     work(desktop);
                 }
                 catch (Exception ex)

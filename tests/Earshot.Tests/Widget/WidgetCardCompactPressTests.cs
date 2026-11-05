@@ -41,6 +41,9 @@ public sealed class WidgetCardCompactPressTests
         card.Render(Compact(content), 96);
         card.Show();
         Application.DoEvents();
+
+        // A fresh show is guarded like a change of form, so these tests start past it.
+        time.Ms = 100_000;
         return (card, counts, time);
     }
 
@@ -210,6 +213,37 @@ public sealed class WidgetCardCompactPressTests
                 time.Ms = 100_000 + DoubleClick;
                 CardKit.Click(card, card.CurrentCompactLayout!.Action);
                 Assert.AreEqual(1, counts.Action);
+            }
+        });
+    }
+
+    // A promoted Moved to row appears where his first click of a double click was: with animation effects off it is there at once, and
+    // its Take back must not take the second press.
+    [TestMethod]
+    public void AFreshlyShownRowIgnoresAPressWithinTheDoubleClickTimeOfShowingWithAnimationEffectsOff()
+    {
+        CardDesktop.Run(() =>
+        {
+            var time = new Steady { Ms = 100_000 };
+            WidgetCard card = DesignPixels.NewCard(DesignTheme.Light, 1.0, notice: true);
+            using (card)
+            {
+                var counts = new Counts();
+                card.PressClock = time.Now;
+                card.CompactActionRequested += (_, _) => counts.Action++;
+                card.AttachMotion(new FakeVBlankClock(60), () => false);
+                card.Render(Compact(MovedTo("Moved to iPhone")), 96);
+                card.Show();
+                Application.DoEvents();
+                WidgetCardLayout.CompactLayout layout = card.CurrentCompactLayout!;
+
+                time.Ms = 100_000 + DoubleClick - 1;
+                CardKit.Click(card, layout.Action);
+                Assert.AreEqual(0, counts.Action, "The second press of a double click is not Take back");
+
+                time.Ms = 100_000 + DoubleClick;
+                CardKit.Click(card, layout.Action);
+                Assert.AreEqual(1, counts.Action, "A press the double-click time after the show is a choice");
             }
         });
     }

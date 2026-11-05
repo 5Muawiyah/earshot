@@ -390,7 +390,11 @@ internal sealed partial class WidgetCard
     internal Func<long> HoldClock = static () => Environment.TickCount64;
 
     // The clock the double-click guard counts on, in milliseconds. A test hands in its own.
-    internal Func<long> PressClock = static () => Environment.TickCount64;
+    internal Func<long> PressClock = static () => DefaultPressClock();
+
+    // What a card's PressClock reads until a test gives it one. The suite's card windows start it past the guard, so a click on a card
+    // that has only just appeared is one the guard has let through; a test of the guard sets the card's own clock.
+    internal static Func<long> DefaultPressClock = static () => Environment.TickCount64;
 
     // When the form on show, or the compact row on show, last changed under the pointer. A growing row puts the full card's Connect
     // where the row was, so the second press of a double-click on the row would otherwise press it: for the system's own double-click
@@ -560,6 +564,14 @@ internal sealed partial class WidgetCard
         }
         else
         {
+            // A card nobody asked for appears where his pointer may be (the card he clicked has just gone): a press within the double-click
+            // time of it is the second half of that click, not a choice on this card, as for a change of form. With animation effects off
+            // it is there at once. The card he asks for appears away from his pointer, at the gauge, so it takes a press at once.
+            if (_unasked)
+            {
+                _shownChangedAt = PressClock();
+            }
+
             if (_actionShown == CompactActionState.Progress)
             {
                 StartSpin();
