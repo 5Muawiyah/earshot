@@ -30,6 +30,7 @@ internal static class SettingsRows
         SettingsRowId.SoundSettings => new(FluentGlyphs.Volume, WidgetCopy.TipSoundSettings, WidgetCopy.NameSoundSettings),
         SettingsRowId.CaseCard => new(FluentGlyphs.Preview, WidgetCopy.TipCaseCard, WidgetCopy.NameCaseCard),
         SettingsRowId.FullyCharged => new(FluentGlyphs.Bolt, WidgetCopy.TipFullyCharged, WidgetCopy.NameFullyCharged),
+        SettingsRowId.MovedTo => new(FluentGlyphs.CellPhone, WidgetCopy.TipMovedTo, WidgetCopy.NameMovedTo),
         SettingsRowId.History => new(FluentGlyphs.History, WidgetCopy.TipHistory, WidgetCopy.NameHistory),
         SettingsRowId.CopyDiagnostics => new(FluentGlyphs.Copy, WidgetCopy.TipCopyDiagnostics, WidgetCopy.NameCopyDiagnostics),
         SettingsRowId.More => new(FluentGlyphs.More, WidgetCopy.TipMore, WidgetCopy.NameMore),

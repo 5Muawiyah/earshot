@@ -51,6 +51,7 @@ internal static class SettingsCatalog
             Switch("fully-charged-notice", s => s.Widget.FullyChargedNotice, (s, on) => s.Widget = (s.Widget with { FullyChargedNotice = on }).WithWatcherRecomputed()),
             Switch("left-click-connects", s => s.Widget.LeftClickConnects, (s, on) => s.Widget = s.Widget with { LeftClickConnects = on }),
             Switch("case-open-card", s => s.Widget.CaseOpenCardOn, (s, on) => s.Widget = (s.Widget with { CaseOpenCardOn = on }).WithWatcherRecomputed()),
+            Switch("moved-to", s => s.Widget.MovedToOn, (s, on) => s.Widget = (s.Widget with { MovedToOn = on }).WithWatcherRecomputed()),
             new("case-open-card-close",
                 UntilCaseCloses + ", " + string.Join(", ", CaseOpenCardClose.Choices.Where(c => c != CaseOpenCardClose.UntilCaseCloses).Select(c => c.ToString(CultureInfo.InvariantCulture))) + " (seconds)",
                 s => s.Widget.CaseOpenCardCloseSeconds == CaseOpenCardClose.UntilCaseCloses ? UntilCaseCloses : s.Widget.CaseOpenCardCloseSeconds.ToString(CultureInfo.InvariantCulture),

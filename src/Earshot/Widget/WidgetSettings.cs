@@ -21,8 +21,8 @@ public sealed record WidgetSettings
     public const int MaxOtherDeviceLabelLength = 40;
 
     // The data pipeline: the BLE watcher, and everything that reads from it (the gauge, the card, the low
-    // battery alert, the fully charged notice, the case-open card, auto-pause). Not written directly by the "Show on the taskbar" menu
-    // item any more: it is the OR of ShowOnTaskbar and the other four consumer settings below, kept in sync
+    // battery alert, the fully charged notice, the case-open card, auto-pause, the moved-to card). Not written directly by the "Show on the taskbar" menu
+    // item any more: it is the OR of ShowOnTaskbar and the other five consumer settings below, kept in sync
     // by WithWatcherRecomputed wherever any of them is written, so
     // turning the gauge off while the low battery alert, the fully charged notice, the case-open card or auto-pause is still wanted
     // never stops the watcher those depend on. An older settings file with no Widget member reads as
@@ -112,11 +112,13 @@ public sealed record WidgetSettings
 
     public static WidgetSettings Default => new();
 
-    // Recomputes Enabled from the five consumers (ShowOnTaskbar, LowBatteryAlert, AutoPause, CaseOpenCardOn, FullyChargedNotice):
+    // Recomputes Enabled from the six consumers (ShowOnTaskbar, LowBatteryAlert, AutoPause, CaseOpenCardOn, FullyChargedNotice, MovedToOn).
+    // Moved to counts because it watches the advertisement for the AirPods leaving; that read is passive and pages nothing.
+    //
     // called after any write to one of them, so Enabled - the flag the watcher itself reads - always tells
     // the truth about whether something still needs it, never just mirroring whichever one was last touched.
     public WidgetSettings WithWatcherRecomputed() =>
-        this with { Enabled = ShowOnTaskbar || LowBatteryAlert || AutoPause || CaseOpenCardOn || FullyChargedNotice };
+        this with { Enabled = ShowOnTaskbar || LowBatteryAlert || AutoPause || CaseOpenCardOn || FullyChargedNotice || MovedToOn };
 
     // A threshold that is not a multiple of 10 or is outside 10 to 90 (the same list the menu itself
     // offers) becomes the default and is recorded; the label has its control, format and separator

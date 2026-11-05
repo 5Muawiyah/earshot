@@ -204,7 +204,7 @@ public sealed class WidgetRuntimeToggleTests
         {
             var notices = new CompactNoticePresenter(new CapturingLog());
             using var tray = new TrayHarness(snapshot: Target(ConnectionState.Disconnected),
-                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCardOn = false, LowBatteryAlert = false, FullyChargedNotice = false, AutoPause = false }).WithWatcherRecomputed(),
+                settings: s => s.Widget = (s.Widget with { ShowOnTaskbar = false, CaseOpenCardOn = false, LowBatteryAlert = false, FullyChargedNotice = false, MovedToOn = false, AutoPause = false }).WithWatcherRecomputed(),
                 notices: notices);
             tray.PumpUntilIdle();
 

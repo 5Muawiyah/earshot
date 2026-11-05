@@ -95,6 +95,9 @@ internal sealed record CardSettingsValues(
     // Whether a notice that a full charge was reached is wanted (WidgetSettings.FullyChargedNotice, on by default).
     public bool FullyChargedNotice { get; init; } = true;
 
+    // Whether the compact "Moved to" card may show (WidgetSettings.MovedToOn, on by default).
+    public bool MovedToOn { get; init; } = true;
+
     public bool CaseOpenCardShownOnDisplay(int index) =>
         index >= 0 && index < CaseOpenCardDisplayOptions.Count &&
         CaseOpenCardShownOn.Contains(CaseOpenCardDisplayOptions[index].Id, StringComparer.OrdinalIgnoreCase);
@@ -161,6 +164,9 @@ internal interface IWidgetCardHost
 
     // Sets the fully charged notice (WidgetSettings.FullyChargedNotice).
     void SetFullyChargedNotice(bool on, CardPlace place);
+
+    // Sets the Moved to card (WidgetSettings.MovedToOn).
+    void SetMovedTo(bool on, CardPlace place);
 
     // The Send to row on the card, and the Send to item in the gauge's menu: each on or off by itself.
     void SetSendToOnCard(bool on, CardPlace place);
@@ -258,6 +264,7 @@ internal enum SettingsRowId
     CaseCardDisplay,   // in the expander, with more than one display: one box per display, Index the display's place
     More,              // the one expander that holds the rarely changed rows
     FullyCharged,      // in More: the fully charged notice's switch
+    MovedTo,           // in More: the Moved to card's switch
     History,           // in More: the row that opens the battery history page
     CopyDiagnostics,   // in More: the Copy button
     About,             // the row that opens the updates page
@@ -858,6 +865,7 @@ internal static class SettingsPageLayout
                 SettingsPart.Minus, SettingsPart.Plus);
 
             ToggleRow(SettingsRowId.FullyCharged, WidgetCopy.SettingsFullyCharged, null);
+            ToggleRow(SettingsRowId.MovedTo, WidgetCopy.SettingsMovedTo, null);
             ToggleRow(SettingsRowId.LeftClick, WidgetCopy.SettingsLeftClick, null);
             ToggleRow(SettingsRowId.SendToCard, SendToCopy.SettingCardRow, null);
             ToggleRow(SettingsRowId.SendToGauge, SendToCopy.SettingGaugeMenu, null);

@@ -31,7 +31,7 @@ public sealed class SettingsPageDesignLayoutTests
         ["GaugeDisplay", "GaugeOrder", "CaseCard", "HandBack", "MicrophoneOff", "Connect", "Disconnect", "OpenCard", "SendTo", "About", "More"];
 
     private static readonly string[] MoreRows =
-        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "LeftClick", "SendToCard", "SendToGauge", "History", "CopyDiagnostics"];
+        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "MovedTo", "LeftClick", "SendToCard", "SendToGauge", "History", "CopyDiagnostics"];
 
     [TestMethod]
     public void TheGroupsAreTheOwnersAndMoreIsOneRowAfterThem()
@@ -63,6 +63,23 @@ public sealed class SettingsPageDesignLayoutTests
         Assert.AreEqual("Fully charged notice", row.Label);
         Assert.IsTrue(l.Targets.Contains(new SettingsTarget(SettingsRowId.FullyCharged, SettingsPart.Toggle)));
         Assert.AreEqual(new Size(40, 20), row.A.Size, "A toggle is 40 by 20.");
+    }
+
+    [TestMethod]
+    public void TheMovedToRowIsASwitchInMoreBoundToItsOwnRow()
+    {
+        SettingsLayout l = Layout();
+        SettingsItem row = Row(l, SettingsRowId.MovedTo);
+        Assert.AreEqual("Moved to", row.Label);
+        Assert.IsTrue(l.Targets.Contains(new SettingsTarget(SettingsRowId.MovedTo, SettingsPart.Toggle)));
+        Assert.AreEqual(new Size(40, 20), row.A.Size, "A toggle is 40 by 20.");
+        Assert.IsFalse(Layout(more: false).Items.Any(i => i.Row == SettingsRowId.MovedTo), "It sits under More.");
+    }
+
+    [TestMethod]
+    public void TheCaseOpenRowReadsOpenWhenTheCaseOpens()
+    {
+        Assert.AreEqual("Open when the case opens", Row(Layout(more: false), SettingsRowId.CaseCard).Label);
     }
 
     // 100% display, 100% text: a single line 48, a line with a caption 56, the gauge order header 56.

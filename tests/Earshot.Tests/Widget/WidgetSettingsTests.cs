@@ -37,14 +37,14 @@ public sealed class WidgetSettingsTests : IDisposable
     }
 
     // Enabled - the flag WidgetStatusService itself reads to start or stop the BLE
-    // watcher - is the OR of the five consumers, so turning the gauge off alone never stops the watcher
+    // watcher - is the OR of the six consumers, so turning the gauge off alone never stops the watcher
     // another consumer still wants.
     [TestMethod]
-    public void WithWatcherRecomputedIsTheOrOfTheFiveConsumers()
+    public void WithWatcherRecomputedIsTheOrOfTheSixConsumers()
     {
         WidgetSettings allOff = WidgetSettings.Default with
         {
-            ShowOnTaskbar = false, LowBatteryAlert = false, CaseOpenCard = false, CaseOpenCardOn = false, AutoPause = false, FullyChargedNotice = false,
+            ShowOnTaskbar = false, LowBatteryAlert = false, CaseOpenCard = false, CaseOpenCardOn = false, AutoPause = false, FullyChargedNotice = false, MovedToOn = false,
         };
         Assert.IsFalse(allOff.WithWatcherRecomputed().Enabled, "Nothing wants the watcher.");
 
@@ -54,6 +54,7 @@ public sealed class WidgetSettingsTests : IDisposable
         Assert.IsFalse((allOff with { CaseOpenCard = true }).WithWatcherRecomputed().Enabled, "The old member is read by nothing.");
         Assert.IsTrue((allOff with { AutoPause = true }).WithWatcherRecomputed().Enabled);
         Assert.IsTrue((allOff with { FullyChargedNotice = true }).WithWatcherRecomputed().Enabled, "The fully charged notice needs the passive listener.");
+        Assert.IsTrue((allOff with { MovedToOn = true }).WithWatcherRecomputed().Enabled, "Moved to reads the advertisement on its own.");
 
         // The gauge going off while another consumer is still on must not turn the watcher off with it.
         WidgetSettings gaugeAndAlert = allOff with { ShowOnTaskbar = true, LowBatteryAlert = true };
@@ -100,7 +101,7 @@ public sealed class WidgetSettingsTests : IDisposable
         File.WriteAllText(
             SettingsPath,
             "{ \"SchemaVersion\": 1, \"Widget\": { \"Enabled\": false, \"ShowOnTaskbar\": false, \"AutoPause\": false, \"LowBatteryAlert\": false, " +
-            "\"CaseOpenCardOn\": false, \"FullyChargedNotice\": false, \"SomeFutureMember\": 42 } }");
+            "\"CaseOpenCardOn\": false, \"FullyChargedNotice\": false, \"MovedToOn\": false, \"SomeFutureMember\": 42 } }");
 
         var store = new JsonSettingsStore(SettingsPath, _log);
 
@@ -359,7 +360,7 @@ public sealed class WidgetSettingsTests : IDisposable
     {
         var store = new JsonSettingsStore(SettingsPath, _log);
         // Every consumer off, so Enabled (recomputed from them at load) reads false again.
-        store.Update(s => s.Widget = s.Widget with { Enabled = false, ShowOnTaskbar = false, AutoPause = false, LowBatteryAlert = false, CaseOpenCardOn = false, FullyChargedNotice = false });
+        store.Update(s => s.Widget = s.Widget with { Enabled = false, ShowOnTaskbar = false, AutoPause = false, LowBatteryAlert = false, CaseOpenCardOn = false, FullyChargedNotice = false, MovedToOn = false });
 
         string json = File.ReadAllText(SettingsPath);
         using JsonDocument document = JsonDocument.Parse(json);

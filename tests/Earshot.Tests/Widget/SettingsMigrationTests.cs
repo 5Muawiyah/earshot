@@ -142,7 +142,7 @@ public sealed class SettingsMigrationTests : IDisposable
 
     // With the card and the fully charged notice chosen off as well, nothing needs the watcher and Enabled stays false.
     [TestMethod]
-    public void AFileWithEveryConsumerOffIncludingTheCaseOpenCardKeepsTheWatcherOff()
+    public void AFileWithEveryConsumerOffIncludingTheCaseOpenCardAndMovedToKeepsTheWatcherOff()
     {
         new JsonSettingsStore(SettingsPath, _log).Update(s => s.Widget = s.Widget with { Enabled = true });
         JsonNode root = JsonNode.Parse(File.ReadAllText(SettingsPath))!;
@@ -153,6 +153,7 @@ public sealed class SettingsMigrationTests : IDisposable
         widget["LowBatteryAlert"] = false;
         widget["CaseOpenCardOn"] = false;
         widget["FullyChargedNotice"] = false;
+        widget["MovedToOn"] = false;
         File.WriteAllText(SettingsPath, root.ToJsonString());
 
         Assert.IsFalse(new JsonSettingsStore(SettingsPath, _log).Current.Widget.Enabled);

@@ -33,7 +33,7 @@ public sealed class WidgetCardSettingsTests
             ];
             CollectionAssert.AreEqual(expectedClosed, closed);
 
-            // Open: the eleven rows of More follow it, in the owner's order.
+            // Open: the twelve rows of More follow it, in the owner's order.
             CardKit.RenderSettings(card, CardKit.SettingsModel(FakeCardHost.Defaults()), 96, more: true);
             string[] expectedOpen = expectedClosed.Concat(MoreRows).ToArray();
             CollectionAssert.AreEqual(expectedOpen, Shape(card));
@@ -41,9 +41,9 @@ public sealed class WidgetCardSettingsTests
             string[] labels = card.CurrentSettingsLayout!.Items.Where(i => i.Kind == SettingsItemKind.Row).Select(i => i.Label).ToArray();
             string[] expectedLabels =
             [
-                "Display", "Gauge order", "Case-open card", "Hand back", "Microphone off", "Connect", "Disconnect", "Card", "Send to", "Updates", "More",
+                "Display", "Gauge order", "Open when the case opens", "Hand back", "Microphone off", "Connect", "Disconnect", "Card", "Send to", "Updates", "More",
                 "Gauge position", "Other device name", "Pause when a bud comes out", "Pause when AirPods leave", "Low battery alerts",
-                "Fully charged notice", "Left click connects", "Send to row", "Send to menu", "Battery history", "Copy diagnostics",
+                "Fully charged notice", "Moved to", "Left click connects", "Send to row", "Send to menu", "Battery history", "Copy diagnostics",
             ];
             CollectionAssert.AreEqual(expectedLabels, labels);
             Assert.IsFalse(card.CurrentSettingsLayout.Items.Any(i => i.Row is SettingsRowId.Repair or SettingsRowId.CheckAutomatically), "Repair and Check automatically are on the updates page.");
@@ -51,7 +51,7 @@ public sealed class WidgetCardSettingsTests
     }
 
     private static readonly string[] MoreRows =
-        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "LeftClick", "SendToCard", "SendToGauge", "History", "CopyDiagnostics"];
+        ["GaugePosition", "OtherDevice", "PauseBud", "PauseLeave", "LowBattery", "FullyCharged", "MovedTo", "LeftClick", "SendToCard", "SendToGauge", "History", "CopyDiagnostics"];
 
     private static readonly int[] WithoutRepair = [0, 1, 3, 4, 5];
 
@@ -450,6 +450,7 @@ public sealed class WidgetCardSettingsTests
     [DataRow("LeftClick", "leftClick:True")]
     [DataRow("HandBack", "handBack:False")]
     [DataRow("FullyCharged", "fullyCharged:False")]
+    [DataRow("MovedTo", "movedTo:False")]
     [DataRow("CaseCard", "caseCard:False")]
     public void EachToggleFlipsItsOwnSettingAndNothingElse(string rowName, string expected)
     {

@@ -1549,6 +1549,7 @@ internal sealed class TrayHarness : IDisposable
                 CaseOpenCard = false,
                 CaseOpenCardOn = false,
                 FullyChargedNotice = false,
+                MovedToOn = false,
                 AutoPause = false,
                 LeftClickConnects = true,
             };

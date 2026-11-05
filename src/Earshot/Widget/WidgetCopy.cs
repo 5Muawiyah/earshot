@@ -195,7 +195,8 @@ internal static class WidgetCopy
     }
 
     // The case-open card's row on the settings page, the choices in its expander, and its close button.
-    public const string SettingsCaseCard = "Case-open card";
+    public const string SettingsCaseCard = "Open when the case opens";
+    public const string SettingsMovedTo = "Moved to";
     public const string SettingsCaseCardClose = "Close";
     public const string SettingsCaseCardDisplays = "Displays";
     public const string CaseCardUntilCaseCloses = "Until the case closes";
@@ -206,7 +207,9 @@ internal static class WidgetCopy
     public const string TipCaseCardClose = "When the card closes by itself. It also closes when the case closes.";
     public const string TipCaseCardDisplays = "Which displays show the card";
     public const string TipCaseCardDisplay = "Show the card on this display";
-    public const string NameCaseCard = "Case-open card";
+    public const string NameCaseCard = "Open when the case opens";
+    public const string TipMovedTo = "Say when the AirPods move to another device";
+    public const string NameMovedTo = "Moved to";
     public const string NameCaseCardClose = "When the case-open card closes";
     public const string NameCaseCardDisplays = "Displays for the case-open card";
     public const string NameCaseCardMore = "More case-open card settings";

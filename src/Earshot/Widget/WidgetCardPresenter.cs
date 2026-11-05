@@ -645,6 +645,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
             case SettingsRowId.CaseCard:
                 _host!.SetCaseOpenCard(toggle.On, place);
                 break;
+            case SettingsRowId.MovedTo:
+                _host!.SetMovedTo(toggle.On, place);
+                break;
             case SettingsRowId.FullyCharged:
                 _host!.SetFullyChargedNotice(toggle.On, place);
                 break;

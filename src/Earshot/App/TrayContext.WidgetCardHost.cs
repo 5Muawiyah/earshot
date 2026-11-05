@@ -92,6 +92,7 @@ internal sealed partial class TrayContext
                 HandsFreeMicrophoneOff = HandsFreeMicrophoneMode.IsOn(settings),
                 MicrophoneState = HandsFreeMicrophoneMode.Describe(_tray._snapshot).State,
                 FullyChargedNotice = widget.FullyChargedNotice,
+                MovedToOn = widget.MovedToOn,
                 GaugeDisplayId = widget.GaugeDisplay,
                 GaugeDisplayOptions = displayOptions,
                 GaugeDisplayNote = displayNote,
@@ -210,6 +211,9 @@ internal sealed partial class TrayContext
 
         public void SetFullyChargedNotice(bool on, CardPlace place) =>
             Write("fully charged notice (card)", s => s.Widget = s.Widget with { FullyChargedNotice = on }, place);
+
+        public void SetMovedTo(bool on, CardPlace place) =>
+            Write("moved to (card)", s => s.Widget = (s.Widget with { MovedToOn = on }).WithWatcherRecomputed(), place);
 
         public void SetSendToOnCard(bool on, CardPlace place) =>
             Write("send to on the card (card)", s => s.Widget = s.Widget with { SendToOnCard = on }, place);

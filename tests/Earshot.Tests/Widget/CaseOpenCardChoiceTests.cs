@@ -225,7 +225,7 @@ public sealed class CaseOpenCardChoiceTests
         SettingsLayout closed = SettingsPageLayout.Compute(Values(expanded: false, displays: 3), 96, new CountingMeasure());
         SettingsItem row = closed.Items.Single(i => i.Row == SettingsRowId.CaseCard);
         Assert.AreEqual(FluentGlyphs.Preview, row.Glyph, "The Preview icon, E8A0.");
-        Assert.AreEqual("Case-open card", row.Label);
+        Assert.AreEqual("Open when the case opens", row.Label);
         Assert.IsTrue(closed.Targets.Contains(new SettingsTarget(SettingsRowId.CaseCard, SettingsPart.Toggle)));
         Assert.IsTrue(closed.Targets.Contains(new SettingsTarget(SettingsRowId.CaseCard, SettingsPart.Expand)));
         Assert.IsTrue(row.A.Right <= row.B.Left, "The switch, then the chevron.");

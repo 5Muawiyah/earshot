@@ -22,7 +22,7 @@ public sealed class WidgetCardAccessibilityTests
     // pictures are named separately (PictureNames). Repair and Check for updates automatically are on the Updates page.
     private static readonly string[] SettingsNames =
     [
-        "Gauge display", "Gauge order", "Case-open card", "More case-open card settings", "Hand back on shut down, sleep and Exit",
+        "Gauge display", "Gauge order", "Open when the case opens", "More case-open card settings", "Hand back on shut down, sleep and Exit",
         "Microphone off mode", "Connect shortcut", "Clear connect shortcut", "Disconnect shortcut", "Clear disconnect shortcut", "Card shortcut",
         "Updates", "More settings", "Gauge position", "Other device name", "Pause when a bud comes out", "Pause when AirPods leave this PC",
         "Lower the low battery level", "Raise the low battery level", "Fully charged notice", "Left click connects", "Battery history",

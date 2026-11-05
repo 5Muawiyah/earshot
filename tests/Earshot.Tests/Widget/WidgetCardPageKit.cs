@@ -119,6 +119,12 @@ internal sealed class FakeCardHost : IWidgetCardHost
         Values = Values with { FullyChargedNotice = on };
     }
 
+    public void SetMovedTo(bool on, CardPlace place)
+    {
+        Calls.Add("movedTo:" + on);
+        Values = Values with { MovedToOn = on };
+    }
+
     public void SetSendToOnCard(bool on, CardPlace place)
     {
         Calls.Add("sendToCard:" + on);

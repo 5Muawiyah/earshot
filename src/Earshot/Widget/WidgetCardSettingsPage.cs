@@ -465,6 +465,7 @@ internal sealed partial class WidgetCard
         SettingsRowId.MicrophoneOff => values.HandsFreeMicrophoneOff,
         SettingsRowId.CaseCard => values.CaseOpenCardOn,
         SettingsRowId.FullyCharged => values.FullyChargedNotice,
+        SettingsRowId.MovedTo => values.MovedToOn,
         SettingsRowId.SendToCard => values.SendToOnCard,
         SettingsRowId.SendToGauge => values.SendToOnGauge,
         _ => false,

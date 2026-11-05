@@ -62,6 +62,7 @@ public sealed class SettingsCommandTests
         ("left-click-connects", "on", "on"),
         ("case-open-card", "off", "off"),
         ("case-open-card-close", "30", "30"),
+        ("moved-to", "off", "off"),
         ("check-automatically", "on", "on"),
         ("shortcut-connect", "Ctrl+Alt+Shift+Q", "Ctrl+Alt+Shift+Q"),
         ("shortcut-disconnect", "none", "none"),
@@ -106,6 +107,30 @@ public sealed class SettingsCommandTests
         Assert.IsTrue(store.Current.Widget.ShowOnTaskbar);
 
         Run(store, "set", "case-open-card", "on");
+        Assert.IsTrue(store.Current.Widget.Enabled);
+    }
+
+    [TestMethod]
+    public void MovedToAloneKeepsTheWatcherOnAndTurningItOffStopsTheWatcher()
+    {
+        using var temp = new TempFolder();
+        var store = NewStore(temp);
+        foreach (string name in new[] { "show-on-taskbar", "case-open-card", "fully-charged-notice", "low-battery-alerts", "pause-when-bud-out" })
+        {
+            if (SettingsCatalog.All.Any(d => d.Name == name))
+            {
+                Run(store, "set", name, "off");
+            }
+        }
+
+        store.Update(s => s.Widget = (s.Widget with { ShowOnTaskbar = false }).WithWatcherRecomputed());
+        Assert.IsTrue(store.Current.Widget.MovedToOn, "On by default.");
+        Assert.IsTrue(store.Current.Widget.Enabled, "Moved to alone keeps the watcher on.");
+
+        Run(store, "set", "moved-to", "off");
+        Assert.IsFalse(store.Current.Widget.Enabled, "With Moved to off too, nothing needs the watcher.");
+
+        Run(store, "set", "moved-to", "on");
         Assert.IsTrue(store.Current.Widget.Enabled);
     }
 
