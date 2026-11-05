@@ -62,6 +62,31 @@ public sealed class LastReadingStoreTests : IDisposable
         Assert.IsFalse(_log.Entries.Any(e => e.Message.Contains("73", StringComparison.Ordinal)), "The figure itself is not logged.");
     }
 
+    // A clock stepped back a little must not throw away a real reading: within the allowance it is read as made now.
+    [TestMethod]
+    public void AReadTimeAFewMinutesAheadIsTakenAsNow()
+    {
+        var clock = new Streaming.TestTimeProvider();
+        string ahead = (clock.GetUtcNow() + TimeSpan.FromMinutes(2)).ToString("o", System.Globalization.CultureInfo.InvariantCulture);
+        WriteRaw("{ \"SchemaVersion\": 1, \"Left\": { \"Percent\": 70, \"Charging\": false, \"ReadAt\": \"" + ahead + "\", \"Model\": 8231 } }");
+
+        LastReadingBook loaded = new LastReadingStore(FilePath, _log, clock).Load();
+
+        Assert.AreEqual(clock.GetUtcNow(), loaded.Left!.ReadAt);
+    }
+
+    [TestMethod]
+    public void AReadingOutOfRangeIsLoggedWithItsPartOnly()
+    {
+        WriteRaw("""
+            { "SchemaVersion": 1,
+              "Left": { "Percent": 110, "Charging": false, "ReadAt": "2026-10-02T09:00:00+00:00", "Model": 8231 } }
+            """);
+
+        Assert.IsNull(NewStore().Load().Left);
+        Assert.IsTrue(_log.Has(LogLevel.Info, "Widget: the saved left reading is out of range, so it counts as no reading."), string.Join(" | ", _log.Entries.Select(e => e.Message)));
+    }
+
     // A time ahead of the clock cannot be told from a reading just made, so it counts as no reading. Only that part: the other bud,
     // read at a time that makes sense, stays.
     [TestMethod]

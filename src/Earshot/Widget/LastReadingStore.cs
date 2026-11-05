@@ -58,6 +58,9 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
 
     private readonly TimeProvider _time;
 
+    // How far ahead of the clock a saved read time may be and still be read, as made now. A design choice, not a measurement.
+    internal static readonly TimeSpan FutureAllowance = TimeSpan.FromMinutes(5);
+
     private readonly ILog _log;
     private readonly Lock _gate = new();
     private bool _newerSchema;
@@ -341,8 +344,14 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
     // once per load, with the part and nothing else (no address, no name, no figure).
     private SavedReading? ToReading(SavedReadingData? data, string part)
     {
-        if (data is null || data.Percent is < 0 or > 100 || data.Model is <= 0 or > ushort.MaxValue)
+        if (data is null)
         {
+            return null;
+        }
+
+        if (data.Percent is < 0 or > 100 || data.Model is <= 0 or > ushort.MaxValue)
+        {
+            _log.Info("Widget: the saved " + part + " reading is out of range, so it counts as no reading.");
             return null;
         }
 
@@ -352,7 +361,14 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
             return null;
         }
 
-        if (data.ReadAt > _time.GetUtcNow())
+        // A clock stepped back a little (a time sync) must not throw a real reading away: within FutureAllowance it is read as made now.
+        DateTimeOffset now = _time.GetUtcNow();
+        if (data.ReadAt > now && data.ReadAt - now <= FutureAllowance)
+        {
+            return new SavedReading(data.Percent, data.Charging, now, (ushort)data.Model);
+        }
+
+        if (data.ReadAt > now)
         {
             _log.Info("Widget: the saved " + part + " reading is dated ahead of the clock, so it counts as no reading.");
             return null;
