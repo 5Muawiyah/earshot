@@ -419,6 +419,12 @@ internal sealed partial class WidgetCardPresenter
         {
             StopUnaskedCloseTimer();
         }
+
+        // The recheck hid the last card by itself, so a failure it said is over with it, as when any other way closes the card.
+        if (!UnaskedOpenCards().Any())
+        {
+            EndShownFailure();
+        }
     }
 
     private IEnumerable<(string Id, WidgetCard Card, DisplayInfo? Display)> UnaskedOpenCards() =>

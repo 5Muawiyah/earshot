@@ -770,6 +770,8 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
 
     private void OnCardClosed(object? sender, WidgetCardCloseReason reason)
     {
+        // However the asked card closed (click away, Esc, the page's own close), a failure it said is over with it.
+        EndShownFailure();
         if (reason == WidgetCardCloseReason.Deactivated)
         {
             _closedByDeactivateAtTimestamp = _time.GetTimestamp();
