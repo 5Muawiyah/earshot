@@ -10,7 +10,7 @@ internal static class WidgetCopy
     public const string DefaultOtherDeviceLabel = "On another device";
     public const string NotSeenYet = "Not seen yet";
     public const string OnThisPc = "On this PC";
-    public const string NotInUse = "Not in use";
+    public const string NotInUse = "Not on this PC";
     public const string BatteryNotReadYet = "Battery not read yet";
     public const string Connect = "Connect";
     public const string Disconnect = "Disconnect";

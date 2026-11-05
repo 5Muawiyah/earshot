@@ -64,7 +64,7 @@ internal sealed partial class WidgetCard
         var list = new List<CardControl>
         {
             new(
-                _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, CardControlRole.PushButton, layout.Button, null, false, false,
+                ButtonName, CardControlRole.PushButton, layout.Button, null, false, false,
                 focus && _focus == WidgetCardFocus.Button, ButtonUsable, () => Press(WidgetCardFocus.Button)),
         };
         if (!layout.SendTo.IsEmpty)
@@ -112,8 +112,7 @@ internal sealed partial class WidgetCard
         {
             if (Carried is { } notice)
             {
-                list.Add(new CardControl(
-                    notice.Text, CardControlRole.StaticText, layout.WhereLine, null, false, false, false, true, static () => { }));
+                list.Add(FailureOrNoticeText(notice, layout));
                 if (notice.Action is { } action)
                 {
                     list.Add(new CardControl(
@@ -154,6 +153,14 @@ internal sealed partial class WidgetCard
         }
     }
 
+    // The words of the status row when it carries something: the whole reason is the name and, for a failure, the tooltip, since the
+    // row wraps at three lines and a longer reason would be cut.
+    private CardControl FailureOrNoticeText(CompactContent notice, WidgetCardLayout.Layout layout) =>
+        new(notice.Text, CardControlRole.StaticText, layout.WhereLine, null, false, false, false, true, static () => { })
+        {
+            Tooltip = ShowsFailure ? notice.Text : null,
+        };
+
     // The case-open card's two buttons, for a screen reader. Never focused: the card is never activated (WS_EX_NOACTIVATE)
     // and takes no keys, so a screen reader reaches them by its own navigation and presses them through DoDefaultAction.
     private List<CardControl> NoticeControls()
@@ -162,9 +169,18 @@ internal sealed partial class WidgetCard
         var list = new List<CardControl>
         {
             new(
-                _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, CardControlRole.PushButton, layout.Button, null, false, false,
+                ButtonName, CardControlRole.PushButton, layout.Button, null, false, false,
                 false, ButtonUsable, () => Press(WidgetCardFocus.Button)),
         };
+        if (Carried is { } failure && NoticeOnStatusRow)
+        {
+            list.Add(FailureOrNoticeText(failure, layout));
+            if (failure.Action is { } next)
+            {
+                list.Add(new CardControl(next.Label, CardControlRole.PushButton, NoticeActionRect(), null, false, false, false, true, () => Press(WidgetCardFocus.Status)));
+            }
+        }
+
         if (!layout.Gear.IsEmpty)
         {
             list.Add(new CardControl(
@@ -389,7 +405,12 @@ internal sealed partial class WidgetCard
 
         if (_unasked)
         {
-            return;
+            // An unasked card has no hover fills or tooltips, except the failed one: its pointer stops the hold, and its reason has a tooltip.
+            NotePointer(true);
+            if (!ShowsFailure)
+            {
+                return;
+            }
         }
 
         // A bar being dragged is the pointer's business, and it widens while the pointer is near it.

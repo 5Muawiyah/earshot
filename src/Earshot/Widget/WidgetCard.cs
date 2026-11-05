@@ -76,6 +76,13 @@ internal sealed record WidgetCardModel(
 
     // How far the compact row's button has got: its glyph, a ring while the work runs, a tick when it is done.
     public CompactActionState CompactState { get; init; } = CompactActionState.Idle;
+
+    // What the Connect button is doing: a ring while a connect or a disconnect runs, else its label.
+    public CardButtonWork Work { get; init; } = CardButtonWork.None;
+
+    // The failure of the last connect or disconnect, said in the status row: its glyph, the reason whole, and the next step as a
+    // text button at the right of the last line. Its Hold is how long an unasked card showing it stays (null: until it is closed).
+    public CompactContent? Failure { get; init; }
 }
 
 // The dedicated three-column card: Left, Right, Case battery (each greyed when its value is not fresh), where
@@ -340,9 +347,19 @@ internal sealed partial class WidgetCard : Form
         RenderView(model, dpi);
         NotePageChange(before, _shownView);
         EndFormChange(formChange);
+        NoteWork(model.Work);
         if (restartHold)
         {
             StartHold();
+        }
+        else if (_hold.Active && !HoldApplies)
+        {
+            // The failure that held the card is gone (a new attempt began): nothing closes it now but the owner.
+            StopHold();
+        }
+        else if (Visible && HoldApplies && !_hold.Active)
+        {
+            ArmHold();
         }
     }
 
@@ -458,6 +475,16 @@ internal sealed partial class WidgetCard : Form
         if (_focus == WidgetCardFocus.SendTo && _mainLayout.SendTo.IsEmpty)
         {
             _focus = WidgetCardFocus.Button;
+        }
+
+        if (_unasked && _model.Failure is not null)
+        {
+            // A card opened for a failure is about the AirPods, not the case.
+            AccessibleName = TrayStatus.AppName + ": AirPods";
+        }
+        else if (_unasked && AccessibleName != _baseAccessibleName && _shownForm == CardForm.Full)
+        {
+            AccessibleName = _baseAccessibleName;
         }
 
         SizeTo(new Size(layout.Width, layout.Height));
@@ -1585,8 +1612,8 @@ internal sealed partial class WidgetCard : Form
     private void DrawButton(Graphics g, Rectangle rect)
     {
         CardColours colours = Colours;
-        bool connect = _model.ConnectIntent;
-        bool enabled = ButtonUsable;
+        bool connect = _model.ConnectIntent && !Working;
+        bool enabled = ButtonUsable || Working;
         Color fill = !enabled ? colours.ControlFillDisabled : connect ? colours.Accent : colours.ControlFill;
         Color stroke = !enabled ? colours.ControlStroke : connect ? colours.Accent : colours.ControlStroke;
         Color text = !enabled ? colours.TextDisabled : connect ? colours.OnAccent : colours.Text;
@@ -1608,7 +1635,7 @@ internal sealed partial class WidgetCard : Form
             g.DrawLine(bottom, rect.Left + radius, rect.Bottom - 1, rect.Right - radius - 1, rect.Bottom - 1);
         }
 
-        DrawText(g, rect, connect ? WidgetCopy.Connect : WidgetCopy.Disconnect, text, TypeRole.Body, StringAlignment.Center);
+        DrawButtonFace(g, rect, _model.ConnectIntent ? WidgetCopy.Connect : WidgetCopy.Disconnect, text, colours);
         if (!_unasked && _focus == WidgetCardFocus.Button && FocusShown)
         {
             CardPaint.Focus(g, rect, radius, colours, _dpi);
@@ -1616,7 +1643,7 @@ internal sealed partial class WidgetCard : Form
     }
 
     // Whether Connect and Disconnect can be pressed: the model says so, and Bluetooth is not off.
-    internal bool ButtonUsable => _model.ButtonEnabled && !BluetoothOff;
+    internal bool ButtonUsable => _model.ButtonEnabled && !BluetoothOff && _model.Work == CardButtonWork.None;
 
     // A line of text with its icon at the left, in the primary ink; with no icon font the words alone.
     private void DrawIconLine(Graphics g, Rectangle bounds, char glyph, string text, TypeRole role = TypeRole.Body)

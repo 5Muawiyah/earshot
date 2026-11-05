@@ -14,14 +14,19 @@ internal sealed partial class WidgetCard
     // The notice's button was pressed, genuinely: a left down and up on it, or the keyboard or a screen reader.
     public event EventHandler? NoticeActionRequested;
 
-    private CompactContent? Carried => _unasked ? null : _model.Notice;
+    // What the status row carries in place of its own words: the failure of the last attempt (an unasked card carries it too, since
+    // the failed card is one), else the notice the asked card was handed.
+    private CompactContent? Carried => _model.Failure ?? (_unasked ? null : _model.Notice);
+
+    // The status row is a failure line.
+    internal bool ShowsFailure => _model.Failure is not null && _model.Form == CardForm.Full;
 
     internal bool NoticeOnStatusRow => Carried is not null && EffectiveView == WidgetCardView.Main;
 
     internal bool NoticeOnStrip => Carried is not null && EffectiveView != WidgetCardView.Main;
 
     // The status row does something when pressed: a carried notice's button, or the way to Bluetooth settings when it is off.
-    internal bool StatusIsAButton => !_unasked && (NoticeOnStatusRow ? Carried?.Action is not null : BluetoothOff);
+    internal bool StatusIsAButton => NoticeOnStatusRow ? Carried?.Action is not null : !_unasked && BluetoothOff;
 
     // The strip under a sub-page, for tests; null when the page carries none.
     internal WidgetCardLayout.CompactLayout? CurrentStripLayout => _stripLayout;

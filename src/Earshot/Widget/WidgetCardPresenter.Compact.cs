@@ -37,7 +37,9 @@ internal sealed partial class WidgetCardPresenter
     private WidgetCardModel UnaskedModel(CompactContent? compact)
     {
         WidgetCardModel model = BuildModel(_callbacks, _time);
-        return compact is null ? model : model with { Form = CardForm.Compact, Compact = compact, CompactState = CompactActionState.Idle };
+        return compact is null
+            ? model with { Work = _work, Failure = FailureContent() }
+            : model with { Form = CardForm.Compact, Compact = compact, CompactState = CompactActionState.Idle };
     }
 
     // The notice the asked card carries now, for tests; null when none.
@@ -186,6 +188,12 @@ internal sealed partial class WidgetCardPresenter
     // The carried notice's button: the notice goes and then what the button does runs; a failure of it is logged.
     private void OnNoticeActionRequested(object? sender, EventArgs e)
     {
+        if (_failure is { Displayed: true })
+        {
+            PressFailureNextStep(unasked: false);
+            return;
+        }
+
         CompactRequest? request = _askedNotice?.Request;
         string label = request?.Content.Action?.Label ?? string.Empty;
         _log.Write(LogLevel.Debug, "Card: button pressed" + (request?.OnAction is null ? ", but it has no action." : " (" + label + ")."));

@@ -251,7 +251,13 @@ internal sealed partial class WidgetCardPresenter
         _unaskedShownAt = _time.GetTimestamp();
         AnnounceUnasked(shown[0], model);
         string closes;
-        if (request is null)
+        if (request is null && kind == UnaskedKind.ConnectFailed)
+        {
+            // The card the failure opened holds by itself (WidgetCard), whatever the case card's close time is.
+            StopUnaskedCloseTimer();
+            closes = "holds " + ((long)OneCardArbiter.ActionHold.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + " ms.";
+        }
+        else if (request is null)
         {
             StartUnaskedCloseTimer(options.CloseSeconds, generation);
             closes = CaseOpenCardClose.After(options.CloseSeconds) is null
@@ -338,7 +344,7 @@ internal sealed partial class WidgetCardPresenter
         _announcements++;
         string text = model.Form == CardForm.Compact && model.Compact is { } row
             ? row.Text
-            : WidgetCopy.CaseOpenAnnouncement(model.ShownParts, model.Now);
+            : model.Failure is { } failure ? failure.Text : WidgetCopy.CaseOpenAnnouncement(model.ShownParts, model.Now);
         if (!card.Announce(text))
         {
             _log.Write(LogLevel.Debug, "Card: the screen reader notification was not raised.");
@@ -477,10 +483,16 @@ internal sealed partial class WidgetCardPresenter
 
         if (any)
         {
+            EndShownFailure();
             long ms = (long)_time.GetElapsedTime(_unaskedShownAt).TotalMilliseconds;
             _log.Write(LogLevel.Debug, "Card: closed (" + KindName(_unaskedKind) + "), " + why + ", after " + ms.ToString(CultureInfo.InvariantCulture) + " ms.");
             _unaskedCompact = null;
             _unaskedRequest = null;
+        }
+
+        if (why == AskedOpenedWhy)
+        {
+            ShowHeldFailure();
         }
 
         if (promoteWaiting)
@@ -511,6 +523,7 @@ internal sealed partial class WidgetCardPresenter
         card.CloseRequested += OnUnaskedCardClosed;
         card.CompactActionRequested += OnCompactActionRequested;
         card.CompactBodyClicked += OnCompactBodyClicked;
+        card.NoticeActionRequested += OnUnaskedNoticeActionRequested;
         card.ToggleRequested += OnUnaskedToggleRequested;
         card.AutoPauseChanged += OnUnaskedAutoPauseChanged;
         _unaskedCards[id] = (card, display);
@@ -522,6 +535,7 @@ internal sealed partial class WidgetCardPresenter
         card.CloseRequested -= OnUnaskedCardClosed;
         card.CompactActionRequested -= OnCompactActionRequested;
         card.CompactBodyClicked -= OnCompactBodyClicked;
+        card.NoticeActionRequested -= OnUnaskedNoticeActionRequested;
         card.ToggleRequested -= OnUnaskedToggleRequested;
         card.AutoPauseChanged -= OnUnaskedAutoPauseChanged;
     }
@@ -533,7 +547,10 @@ internal sealed partial class WidgetCardPresenter
 
     // One card closed itself (its close button or a click past its buttons): the opening is over, so every display's card
     // closes with it.
-    private void OnUnaskedCardClosed(object? sender, WidgetCardCloseReason reason) =>
+    private void OnUnaskedCardClosed(object? sender, WidgetCardCloseReason reason)
+    {
+        // The card hid itself before telling the presenter, so what it said is over whether or not it still shows as visible.
+        EndShownFailure();
         CloseUnasked(
             reason switch
             {
@@ -543,6 +560,7 @@ internal sealed partial class WidgetCardPresenter
                 _ => "it was clicked",
             },
             promoteWaiting: true);
+    }
 
     // The timer's callback may already be queued when the card is shown again, so it carries the generation of the opening it was
     // started for and does nothing once a newer one was asked for.

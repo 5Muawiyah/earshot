@@ -183,7 +183,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
     // Re-renders the card with the latest snapshot, if it is on screen. IWidgetStatus.Changed is documented
     // as already raised on the UI thread, but this still posts, so a test or a future caller on another
     // thread is safe too.
-    public void Refresh() => _uiPost(() => { RefreshOnUiThread(); RefreshUnasked(); });
+    public void Refresh() => _uiPost(() => { EndFailureOnStateChange(); RefreshOnUiThread(); RefreshUnasked(); });
 
     // The displays changed (a monitor added or removed, a scale changed): the open card reads its scale again, and keeps its
     // bottom edge as it grows or shrinks. The only time an open card's scale is read after the show.
@@ -206,6 +206,7 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
         StopSpinnerTimer();
         EndBatteryRefresh();
         DisposeUnasked();
+        StopFailureTimer();
         ForgetAskedNotice();
         if (_card is not null)
         {
@@ -317,6 +318,11 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
 
     private void HideOnUiThread()
     {
+        if (_card is { IsDisposed: false, Visible: true })
+        {
+            EndShownFailure();
+        }
+
         ForgetAskedNotice();
         _view = WidgetCardView.Main;
         _shortcutNote = null;
@@ -379,6 +385,8 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
             Settings = _view == WidgetCardView.Settings ? ReadSettings() : null,
             Refresh = RefreshViewForModel(),
             Notice = _askedNotice?.Request.Content,
+            Work = _work,
+            Failure = FailureContent(),
         };
     }
 

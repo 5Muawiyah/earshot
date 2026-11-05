@@ -170,7 +170,7 @@ public sealed class WidgetCardLayoutTests
         Assert.AreEqual("On this PC", WidgetCopy.Where(AirPodsWhere.ThisPc, ""));
         Assert.AreEqual("On another device", WidgetCopy.Where(AirPodsWhere.Elsewhere, ""));
         Assert.AreEqual("On your Jonathan's iPhone", WidgetCopy.Where(AirPodsWhere.Elsewhere, "Jonathan's iPhone"));
-        Assert.AreEqual("Not in use", WidgetCopy.Where(AirPodsWhere.NotInUse, ""));
+        Assert.AreEqual("Not on this PC", WidgetCopy.Where(AirPodsWhere.NotInUse, ""));
     }
 
     [TestMethod]

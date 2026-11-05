@@ -137,7 +137,7 @@ internal sealed partial class WidgetCard
         switch (state)
         {
             case CompactActionState.Progress:
-                DrawRing(g, bounds, WithOpacity(colours.Accent, opacity));
+                DrawRing(g, bounds, WithOpacity(colours.Accent, opacity), _spinAngle);
                 break;
             case CompactActionState.Done:
                 _ = CardPaint.TryGlyph(g, FluentGlyphs.CheckMark, bounds, WithOpacity(colours.HighContrast ? colours.Text : colours.Accent, opacity), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
@@ -149,7 +149,7 @@ internal sealed partial class WidgetCard
     }
 
     // The 16 px ring: a 2 px accent arc of 90 degrees, centred at 12 o'clock when still, turning once every 1000 ms while it runs.
-    private void DrawRing(Graphics g, Rectangle bounds, Color colour)
+    private void DrawRing(Graphics g, Rectangle bounds, Color colour, float angle)
     {
         int box = TextFit.Grow(WidgetCardLayout.CompactGlyphAt96, _dpi, _look.TextScale);
         float stroke = Math.Max(1f, 2f * _dpi / 96f);
@@ -157,7 +157,7 @@ internal sealed partial class WidgetCard
         var ring = new RectangleF(
             bounds.X + ((bounds.Width - box) / 2f) + inset, bounds.Y + ((bounds.Height - box) / 2f) + inset, box - stroke, box - stroke);
         using var pen = new Pen(colour, stroke) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        g.DrawArc(pen, ring, -135f + _spinAngle, 90f);
+        g.DrawArc(pen, ring, -135f + angle, 90f);
     }
 
     // ---- The button's state: glyph, ring, tick
@@ -388,13 +388,19 @@ internal sealed partial class WidgetCard
 
     internal TimeSpan? HoldRemaining => _hold.RemainingAt(HoldClock());
 
+    // The card holds and a pointer over it stops the clock: the compact row, and the full card an unasked failure opened (a failure
+    // that carries a hold). Any other card stays until it is closed.
+    private bool HoldApplies => IsCompactShown || (_unasked && _shownForm == CardForm.Full && _model.Failure?.Hold is not null);
+
+    private TimeSpan? HoldLength => IsCompactShown ? _model.Compact?.Hold : HoldApplies ? _model.Failure?.Hold : null;
+
     // Starts the hold of the row on show (or of hold when given): from now. A row with no hold stays until it is closed.
     internal void StartHold(TimeSpan? hold = null)
     {
         _holdArmed = false;
-        TimeSpan? length = hold ?? (IsCompactShown ? _model.Compact?.Hold : null);
+        TimeSpan? length = hold ?? HoldLength;
         long now = HoldClock();
-        _hold.Start(IsCompactShown ? length : null, now);
+        _hold.Start(HoldApplies ? length : null, now);
         if (_pointerOver)
         {
             _hold.Pause(now);
@@ -406,7 +412,7 @@ internal sealed partial class WidgetCard
     // The card has finished coming in: the hold starts now. Called when the entrance ends, or at once when there is none.
     private void ArmHold()
     {
-        if (!IsCompactShown)
+        if (!HoldApplies)
         {
             return;
         }
@@ -424,7 +430,7 @@ internal sealed partial class WidgetCard
     // (the hold then starts when it has).
     internal void RestartHold()
     {
-        if (Visible && IsCompactShown && _animator is not { Running: true })
+        if (Visible && HoldApplies && _animator is not { Running: true })
         {
             StartHold();
         }
@@ -486,7 +492,7 @@ internal sealed partial class WidgetCard
         }
 
         _pointerOver = over;
-        if (!IsCompactShown)
+        if (!HoldApplies)
         {
             return;
         }
@@ -525,6 +531,7 @@ internal sealed partial class WidgetCard
         {
             StopHold();
             StopSpin();
+            StopWorkSpin();
             FinishFormFade();
             _pointerOver = false;
         }
@@ -533,6 +540,11 @@ internal sealed partial class WidgetCard
             if (_actionShown == CompactActionState.Progress)
             {
                 StartSpin();
+            }
+
+            if (Working)
+            {
+                StartWorkSpin();
             }
 
             // Shown: the hold starts once the entrance is over (at once when there is none).
