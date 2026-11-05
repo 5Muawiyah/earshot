@@ -7,15 +7,15 @@ namespace Earshot.Widget;
 // The compact "Moved to" card: another device took the AirPods. WidgetStatusService decides it (MovedToRule) and Where reads
 // Elsewhere; this shows the one-row card, subject to the same gates as any card nobody asked for, and only while it is still true.
 //
-// Take back is Connect, reached only by a genuine click on the card's button (WidgetCard.CompactActionRequested), through the same
-// RequestToggle path the card's Connect button uses. Nothing else here calls it: no timer, no fold, no verdict. A press shows a
-// ring in the button; the connect ending shows a tick for 800 ms and the card folds; a failure grows the card to the full one in
-// its failed state, which says why. The compact row never shows an error itself.
+// Take back is Connect, never a toggle, so it cannot disconnect AirPods that came back another way. It is reached only by a genuine
+// click on the card's button (WidgetCard.CompactActionRequested). Nothing else here calls it: no timer, no fold, no verdict. A press
+// shows a ring in the button; the connect ending shows a tick for 800 ms and the card folds; a failure grows the card to the full
+// one in its failed state, which says why. The compact row never shows an error itself.
 internal sealed partial class WidgetCardPresenter
 {
     // How long a pressed Take back waits for the tray to start the connect before the ring stops. The tray may refuse the click
-    // (safe mode, a menu action in flight) and then no start ever comes, so the ring must not turn for ever. A design choice: the
-    // tray starts a connect it accepts within a few milliseconds, and a connect that waits for one in flight is told first.
+    // (safe mode, a menu action in flight) and then no start ever comes, so the ring must not turn for ever. A design choice, not a
+    // measurement of how long the tray takes to start a connect.
     internal static readonly TimeSpan TakeBackStartLimit = TimeSpan.FromSeconds(5);
 
     private enum TakeBackState { None, Progress, Done }
@@ -78,7 +78,7 @@ internal sealed partial class WidgetCardPresenter
     // ---- Take back
 
     // A genuine left down and up on the compact card's button (or a screen reader's default action on it): the owner asked for
-    // the AirPods back. The only place the compact card asks for a toggle.
+    // the AirPods back. The only place the compact card asks for a connect.
     private void OnTakeBackPressed()
     {
         CardDecision decision = OneCardArbiter.Decide(CurrentCardState(), new CardEvent(CardEventKind.ConnectOwnButton));
@@ -94,7 +94,7 @@ internal sealed partial class WidgetCardPresenter
         StopTakeBackTimer();
         _takeBackTimer = _time.CreateTimer(_ => _uiPost(() => TakeBackNotStarted(token)), null, TakeBackStartLimit, Timeout.InfiniteTimeSpan);
         RefreshUnasked();
-        _callbacks.RequestToggle(CardPlace.NearTray);
+        _callbacks.RequestConnect?.Invoke(CardPlace.NearTray);
     }
 
     // The tray started a toggle. While Take back waits for it, a connect is its own; anything else that starts means it is not

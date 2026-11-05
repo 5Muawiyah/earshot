@@ -5,7 +5,7 @@ namespace Earshot.Widget;
 // What the rule makes of a leave Earshot did not start.
 internal enum MovedVerdictKind
 {
-    // The pair kept sending, out of the case and near: another device has them.
+    // The pair kept sending, out of the case and near. That is all it knows: another device may have them, or they are out and idle.
     Moved,
 
     // A case-known message of the pair near the leave: they went into the case.
@@ -62,7 +62,8 @@ internal sealed record MovedVerdict(MovedVerdictKind Kind, MovedSummary Summary,
 
 // Whether the AirPods were taken by another device, read from the broadcast of the owner's pair alone. The documented message has
 // no in-ear bit, so "moved" is the pair still sending, out of the case and near, after a leave Earshot did not start. It cannot
-// tell an iPhone from earbuds that are out and idle; the card says "Moved to" and the owner's own answer is what live test 25 records.
+// tell an iPhone from earbuds that are out and idle, so the service acts on it only when this PC was playing at the leave; the card
+// says "Moved to" and the owner's own answer is what live test 25 records.
 //
 // Pure: it is handed the messages (Observe), the leave (Left) and the time (Check), and keeps no clock. Not thread safe; the
 // service calls it under its own lock.

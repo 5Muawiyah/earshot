@@ -29,7 +29,8 @@ internal sealed record WidgetCardPresenterCallbacks(
     Action? OpenSendTo = null,        // the Send to row was pressed: the picker opens
     Func<int>? LowBatteryThreshold = null,   // the Low battery alerts level; a live reading at or under it is drawn in caution
     Func<bool>? MovedToOn = null,            // whether the compact "Moved to" card may show (WidgetSettings.MovedToOn); on when null
-    Func<CardRadio>? Radio = null)           // this PC's Bluetooth and pairing from the radio check's last result; Ok when null
+    Func<CardRadio>? Radio = null,           // this PC's Bluetooth and pairing from the radio check's last result; Ok when null
+    Action<CardPlace>? RequestConnect = null)   // Take back: asks for a connect, never a toggle; nothing happens when null
 {
     public GaugePosition CurrentGaugePosition => GaugePosition?.Invoke() ?? Earshot.Widget.GaugePosition.RightEnd;
 }

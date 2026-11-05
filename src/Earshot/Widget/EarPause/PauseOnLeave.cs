@@ -57,11 +57,12 @@ internal sealed class PauseOnLeave : IDisposable
     private sealed record Sample(RenderActivityState State, DateTimeOffset At, long Episode);
 
     // A leave Earshot did not start and that no Earshot change was running for: the phone took the AirPods, or they went out
-    // of range or into their case. Raised with the time the change was seen, just before the decision to pause, and whether or
-    // not pause on leave is on, so turning the pause off leaves whoever listens (the moved-to rule) alone. It is raised on
-    // the thread OnRender was called on, a listener must not block, and one that throws is logged and does not stop the
-    // pause. An own leave (BeforeOwnLeaveAsync), a leave during a change and a leave already decided never raise it.
-    public event Action<DateTimeOffset>? LeftByOther;
+    // of range or into their case. Raised with the time the change was seen and whether this PC was playing to them at the last
+    // reading still fresh enough to say, just before the decision to pause, and whether or not pause on leave is on, so turning
+    // the pause off leaves whoever listens (the moved-to rule) alone. It is raised on the thread OnRender was called on, a
+    // listener must not block, and one that throws is logged and does not stop the pause. An own leave (BeforeOwnLeaveAsync), a
+    // leave during a change and a leave already decided never raise it.
+    public event Action<DateTimeOffset, bool>? LeftByOther;
 
     public PauseOnLeave(IMediaSessions sessions, IRenderActivity activity, Func<bool> enabled, TimeProvider time, ILog log)
     {
@@ -145,7 +146,7 @@ internal sealed class PauseOnLeave : IDisposable
         if (changeInFlight is null)
         {
             _log.Info("Move: leave seen, not started by Earshot, playing=" + PlayingAt(seenAt, sample) + ".");
-            RaiseLeftByOther(seenAt);
+            RaiseLeftByOther(seenAt, sample);
         }
 
         return LeftAsync(seenAt, sample, changeInFlight);
@@ -156,11 +157,11 @@ internal sealed class PauseOnLeave : IDisposable
     private static string PlayingAt(DateTimeOffset seenAt, Sample? sample) =>
         sample is not null && seenAt - sample.At <= SampleFreshness ? sample.State.ToString() : RenderActivityState.Unknown.ToString();
 
-    private void RaiseLeftByOther(DateTimeOffset seenAt)
+    private void RaiseLeftByOther(DateTimeOffset seenAt, Sample? sample)
     {
         try
         {
-            LeftByOther?.Invoke(seenAt);
+            LeftByOther?.Invoke(seenAt, sample is not null && seenAt - sample.At <= SampleFreshness && sample.State == RenderActivityState.Playing);
         }
         catch (Exception ex)
         {
@@ -228,7 +229,8 @@ internal sealed class PauseOnLeave : IDisposable
         RenderActivityReading reading;
         try
         {
-            if (!_enabled())
+            // With the pause off the readings are still taken while someone listens: the moved-to rule rests on them.
+            if (!_enabled() && LeftByOther is null)
             {
                 return;
             }

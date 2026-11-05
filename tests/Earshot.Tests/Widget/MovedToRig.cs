@@ -82,7 +82,7 @@ internal sealed class MovedToRig : IDisposable
     }
 
     // The AirPods leave this PC without Earshot having asked.
-    public void LeaveByOther() => Service.NoteLeftByOther(Clock.GetUtcNow());
+    public void LeaveByOther(bool playing = true) => Service.NoteLeftByOther(Clock.GetUtcNow(), playing);
 
     public void ThisPc(bool active)
     {
@@ -98,9 +98,9 @@ internal sealed class MovedToRig : IDisposable
     public bool LogHas(string fragment) => Log.Has(LogLevel.Info, fragment);
 
     // The leave, then the pair heard near for four seconds: the shape that is moved.
-    public void LeaveAndBeHeardNear()
+    public void LeaveAndBeHeardNear(bool playing = true)
     {
-        LeaveByOther();
+        LeaveByOther(playing);
         double t = Now;
         Hear(t + 0.9);
         Hear(t + 2.4);

@@ -63,7 +63,6 @@ public sealed partial class WidgetCardUnaskedTests
     [
         "WidgetCardPresenter.cs:OnToggleRequested",
         "WidgetCardPresenter.Unasked.cs:OnUnaskedToggleRequested",
-        "WidgetCardPresenter.MovedTo.cs:OnTakeBackPressed",
     ];
 
     private const string TakeBackFailure = "The AirPods did not answer this PC. They may need pairing again.";
@@ -91,7 +90,7 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.AreEqual(1, rig.Presenter.AnnouncementsForTest);
             Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: shown unasked (moved to), on 1 display"), Lines(rig.Log));
             LiveTests.LiveTest25Lines.AssertLogged(rig.Log, LiveTests.LiveTest25Lines.MovedCardShown);
-            Assert.IsEmpty(rig.Callbacks.ToggleCalls, "Showing it asked for nothing.");
+            Assert.IsEmpty(rig.Callbacks.ConnectCalls, "Showing it asked for nothing.");
         });
     }
 
@@ -144,6 +143,58 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.IsFalse(rig.Presenter.IsUnaskedShown);
             Assert.AreEqual(0, rig.Presenter.WaitingForTest);
             Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: not shown (moved to), its setting is off."), Lines(rig.Log));
+        });
+    }
+
+    // Take back is Connect: it asks for a connect and never for a toggle, so it cannot disconnect AirPods that came back another way.
+    [TestMethod]
+    public void TakeBackAsksForAConnectAndNeverAToggle()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new MovedRig();
+            rig.Show();
+
+            rig.ClickTakeBack();
+
+            Assert.HasCount(1, rig.Callbacks.ConnectCalls);
+            Assert.IsEmpty(rig.Callbacks.ToggleCalls);
+        });
+    }
+
+    // The row outlives nothing: once they are not on another device it folds at the next refresh, whatever the pointer is doing.
+    [TestMethod]
+    public void RefreshFoldsTheRowWhenThePairIsNoLongerElsewhere()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new MovedRig();
+            rig.Show();
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown);
+
+            rig.Callbacks.Snapshot = Snapshot(AirPodsWhere.ThisPc);
+            rig.Presenter.Refresh();
+            Application.DoEvents();
+
+            Assert.IsFalse(rig.Presenter.IsUnaskedShown, Lines(rig.Log));
+        });
+    }
+
+    // While Take back runs the AirPods coming back is its own success: the ring and then the tick stay.
+    [TestMethod]
+    public void RefreshLeavesTheRowWhileTakeBackRuns()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new MovedRig();
+            rig.Show();
+            rig.ClickTakeBack();
+
+            rig.Callbacks.Snapshot = Snapshot(AirPodsWhere.ThisPc);
+            rig.Presenter.Refresh();
+            Application.DoEvents();
+
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown, Lines(rig.Log));
         });
     }
 
@@ -337,7 +388,7 @@ public sealed partial class WidgetCardUnaskedTests
             card.CheckHold();
 
             Assert.IsFalse(rig.Presenter.IsUnaskedShown);
-            Assert.IsEmpty(rig.Callbacks.ToggleCalls, "Folding away asked for nothing.");
+            Assert.IsEmpty(rig.Callbacks.ConnectCalls, "Folding away asked for nothing.");
         });
     }
 
@@ -357,7 +408,7 @@ public sealed partial class WidgetCardUnaskedTests
 
             Assert.IsFalse(card.IsCompactShown);
             Assert.IsTrue(rig.Presenter.IsUnaskedShown, "No timer closes the full card.");
-            Assert.IsEmpty(rig.Callbacks.ToggleCalls);
+            Assert.IsEmpty(rig.Callbacks.ConnectCalls);
         });
     }
 
@@ -374,8 +425,8 @@ public sealed partial class WidgetCardUnaskedTests
 
             rig.ClickTakeBack();
 
-            Assert.HasCount(1, rig.Callbacks.ToggleCalls);
-            Assert.AreEqual(CardPlace.NearTray, rig.Callbacks.ToggleCalls[0]);
+            Assert.HasCount(1, rig.Callbacks.ConnectCalls);
+            Assert.AreEqual(CardPlace.NearTray, rig.Callbacks.ConnectCalls[0]);
             Assert.AreEqual(CompactActionState.Progress, card.ActionStateShown);
             Assert.IsFalse(card.HoldActive, "It does not fold while the work runs.");
             Assert.IsTrue(rig.Presenter.IsUnaskedShown);
@@ -384,7 +435,7 @@ public sealed partial class WidgetCardUnaskedTests
 
             // A press on the ring starts nothing more.
             card.CurrentControls().First(c => c.Role == CardControlRole.PushButton).Activate();
-            Assert.HasCount(1, rig.Callbacks.ToggleCalls);
+            Assert.HasCount(1, rig.Callbacks.ConnectCalls);
         });
     }
 
@@ -411,7 +462,7 @@ public sealed partial class WidgetCardUnaskedTests
             card.CheckHold();
 
             Assert.IsFalse(rig.Presenter.IsUnaskedShown, "Then the card folds away.");
-            Assert.HasCount(1, rig.Callbacks.ToggleCalls);
+            Assert.HasCount(1, rig.Callbacks.ConnectCalls);
         });
     }
 
@@ -553,7 +604,7 @@ public sealed partial class WidgetCardUnaskedTests
             rig.Presenter.ToggleStarted(connect: true);
 
             Assert.IsFalse(rig.Presenter.IsUnaskedShown);
-            Assert.IsEmpty(rig.Callbacks.ToggleCalls, "The connect came from elsewhere: the card asked for nothing.");
+            Assert.IsEmpty(rig.Callbacks.ConnectCalls, "The connect came from elsewhere: the card asked for nothing.");
         });
     }
 
@@ -613,13 +664,13 @@ public sealed partial class WidgetCardUnaskedTests
             rig.Presenter.HideUnasked();
             Application.DoEvents();
 
-            Assert.IsEmpty(rig.Callbacks.ToggleCalls, "Nothing but a click may ask for a connect.");
+            Assert.IsEmpty(rig.Callbacks.ConnectCalls, "Nothing but a click may ask for a connect.");
             Assert.IsEmpty(rig.Callbacks.AutoPauseCalls);
 
             rig.Show();
             rig.ClickTakeBack();
 
-            Assert.HasCount(1, rig.Callbacks.ToggleCalls, "One genuine click asked once.");
+            Assert.HasCount(1, rig.Callbacks.ConnectCalls, "One genuine click asked once.");
         });
     }
 

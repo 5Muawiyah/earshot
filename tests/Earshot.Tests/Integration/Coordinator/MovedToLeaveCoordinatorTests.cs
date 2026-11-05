@@ -23,7 +23,7 @@ public sealed class MovedToLeaveCoordinatorTests
             Sessions = new TracingMediaSessions { Trace = Harness.Trace, Sessions = { TracingMediaSessions.Playing("player.exe") } };
             Activity = new FakeRenderActivity { Trace = Harness.Trace };
             Pause = new PauseOnLeave(Sessions, Activity, () => true, Harness.Time, Harness.Log);
-            Pause.LeftByOther += at => Told.Add(at);
+            Pause.LeftByOther += (at, _) => Told.Add(at);
             Harness.Coordinator.LeavePause = Pause;
             Harness.Monitor.Set(Devices.Active(0));
             Harness.Start();

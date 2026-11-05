@@ -65,6 +65,65 @@ public sealed class MovedToServiceTests
         Assert.HasCount(1, rig.Moved);
     }
 
+    // ---- A leave with nothing playing shows nothing, and still says what it would have given
+
+    [TestMethod]
+    public void ASilentLeaveLatchesNothingRaisesNothingAndStillLogsItsVerdict()
+    {
+        using var rig = new MovedToRig();
+
+        rig.LeaveAndBeHeardNear(playing: false);
+
+        Assert.AreNotEqual(AirPodsWhere.Elsewhere, rig.Where);
+        Assert.IsEmpty(rig.Moved);
+        Assert.IsTrue(rig.LogHas("Move: 3 messages by +3800 ms, first +900 ms, median -62 dBm, case-known 0: moved."));
+        Assert.IsTrue(rig.LogHas("Move: nothing was playing to the AirPods at the leave, so nothing is shown."));
+    }
+
+    [TestMethod]
+    public void ASilentLeaveAfterAPlayingOneShowsNothingEither()
+    {
+        using var rig = new MovedToRig();
+        rig.LeaveAndBeHeardNear();
+        Assert.AreEqual(AirPodsWhere.Elsewhere, rig.Where);
+        rig.ThisPc(active: true);
+        rig.ThisPc(active: false);
+        rig.AdvanceTo(rig.Now + 1);
+
+        rig.LeaveAndBeHeardNear(playing: false);
+
+        Assert.AreNotEqual(AirPodsWhere.Elsewhere, rig.Where);
+        Assert.HasCount(1, rig.Moved);
+    }
+
+    // ---- This PC has them: a message or the bound gives back on this PC, not moved
+
+    [TestMethod]
+    public void AMessageWhileThisPcHasThemAgainIsNotMoved()
+    {
+        using var rig = new MovedToRig();
+        rig.ThisPc(active: true);
+
+        rig.LeaveAndBeHeardNear();
+
+        Assert.AreNotEqual(AirPodsWhere.Elsewhere, rig.Where);
+        Assert.IsEmpty(rig.Moved);
+        Assert.IsTrue(rig.LogHas(": back on this PC."));
+    }
+
+    [TestMethod]
+    public void TheBoundPassingWhileThisPcHasThemAgainIsNotMoved()
+    {
+        using var rig = new MovedToRig();
+        rig.ThisPc(active: true);
+        rig.LeaveByOther();
+
+        rig.AdvanceTo(rig.Now + MovedToRule.MovedBound.TotalSeconds + 1);
+
+        Assert.IsTrue(rig.LogHas(": back on this PC."));
+        Assert.IsFalse(rig.LogHas(": not heard."));
+    }
+
     // ---- The other verdicts show nothing
 
     [TestMethod]

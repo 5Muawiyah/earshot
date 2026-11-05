@@ -437,6 +437,14 @@ internal sealed partial class WidgetCardPresenter
 
     private void RefreshUnasked()
     {
+        // The Moved to row says something that has stopped being true: it folds now, under the pointer too. While Take back runs the
+        // AirPods coming back is its own success, and its ring and tick stay.
+        if (_unaskedCompact is { Kind: UnaskedKind.MovedTo } && _takeBack == TakeBackState.None && _callbacks.CurrentSnapshot().Where != AirPodsWhere.Elsewhere)
+        {
+            CloseUnasked("the AirPods are no longer on another device");
+            return;
+        }
+
         foreach ((_, WidgetCard card, DisplayInfo? display) in UnaskedOpenCards().ToList())
         {
             RenderUnaskedKeepingBottom(card, display);

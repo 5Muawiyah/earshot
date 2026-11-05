@@ -14,6 +14,8 @@ public sealed class PauseOnLeaveLeftByOtherTests
     private static readonly Guid Container = Devices.Container;
     private static readonly string[] EventThenPause = ["left-by-other", "pause"];
     private static readonly string[] PlayerOnly = ["player.exe"];
+    private static readonly bool[] ToldPlaying = [true];
+    private static readonly bool[] ToldNotPlaying = [false];
 
     private sealed class Rig : IDisposable
     {
@@ -31,15 +33,18 @@ public sealed class PauseOnLeaveLeftByOtherTests
 
         public List<DateTimeOffset> Raised { get; } = new();
 
+        public List<bool> RaisedPlaying { get; } = new();
+
         public PauseOnLeave Pause { get; }
 
         public Rig()
         {
             Sessions = new TracingMediaSessions { Sessions = { TracingMediaSessions.Playing("player.exe") }, Trace = Trace };
             Pause = new PauseOnLeave(Sessions, Activity, () => Enabled, Time, Log);
-            Pause.LeftByOther += at =>
+            Pause.LeftByOther += (at, playing) =>
             {
                 Raised.Add(at);
+                RaisedPlaying.Add(playing);
                 Trace.Add("left-by-other");
             };
         }
@@ -156,7 +161,7 @@ public sealed class PauseOnLeaveLeftByOtherTests
     public async Task AListenerThatThrowsDoesNotStopThePause()
     {
         using var rig = new Rig();
-        rig.Pause.LeftByOther += _ => throw new InvalidOperationException("listener failed");
+        rig.Pause.LeftByOther += (_, _) => throw new InvalidOperationException("listener failed");
         await rig.Active();
         rig.Time.Advance(TimeSpan.FromMilliseconds(600));
 
@@ -164,6 +169,65 @@ public sealed class PauseOnLeaveLeftByOtherTests
 
         CollectionAssert.AreEqual(PlayerOnly, rig.Sessions.PauseCalls);
         Assert.IsTrue(rig.Log.Has(LogLevel.Error, "Pause on leave: telling the leave to its listener failed"));
+    }
+
+    // ---- Whether this PC was playing to them, which is what Moved to rests on
+
+    [TestMethod]
+    public async Task AForeignLeaveIsToldPlayingWhenTheLastReadingSaysPlaying()
+    {
+        using var rig = new Rig();
+        rig.Activity.State = RenderActivityState.Playing;
+        await rig.Active();
+        rig.Time.Advance(TimeSpan.FromMilliseconds(600));
+
+        await rig.Left();
+
+        CollectionAssert.AreEqual(ToldPlaying, rig.RaisedPlaying);
+    }
+
+    [TestMethod]
+    public async Task AForeignLeaveIsToldNotPlayingWhenTheLastReadingSaysSilent()
+    {
+        using var rig = new Rig();
+        rig.Activity.State = RenderActivityState.Silent;
+        await rig.Active();
+        rig.Time.Advance(TimeSpan.FromMilliseconds(600));
+
+        await rig.Left();
+
+        CollectionAssert.AreEqual(ToldNotPlaying, rig.RaisedPlaying);
+    }
+
+    // A reading too old to say is not "playing".
+    [TestMethod]
+    public async Task AForeignLeaveIsToldNotPlayingWhenTheReadingIsTooOld()
+    {
+        using var rig = new Rig();
+        rig.Activity.State = RenderActivityState.Playing;
+        await rig.Active();
+        rig.Time.Advance(TimeSpan.FromMilliseconds(600));
+        rig.Activity.OnRead = (_, _) => throw new InvalidOperationException("no reading");
+        rig.Time.Advance(PauseOnLeave.SampleFreshness + TimeSpan.FromSeconds(30));
+
+        await rig.Left();
+
+        CollectionAssert.AreEqual(ToldNotPlaying, rig.RaisedPlaying);
+    }
+
+    // The pause being off must not blind Moved to: with someone listening the readings are still taken, and nothing is paused.
+    [TestMethod]
+    public async Task WithPauseOnLeaveOffTheReadingsAreStillTakenForWhoeverListens()
+    {
+        using var rig = new Rig { Enabled = false };
+        rig.Activity.State = RenderActivityState.Playing;
+        await rig.Active();
+        rig.Time.Advance(TimeSpan.FromMilliseconds(600));
+
+        await rig.Left();
+
+        CollectionAssert.AreEqual(ToldPlaying, rig.RaisedPlaying);
+        Assert.IsEmpty(rig.Sessions.PauseCalls, "Pause on leave was off but something was paused.");
     }
 
     // ---- The lines the morning reads

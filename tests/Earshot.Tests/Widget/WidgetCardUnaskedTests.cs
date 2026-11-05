@@ -981,6 +981,8 @@ public sealed partial class WidgetCardUnaskedTests
 
         public List<CardPlace> ToggleCalls { get; } = new();
 
+        public List<CardPlace> ConnectCalls { get; } = new();
+
         public List<(bool On, CardPlace Place)> AutoPauseCalls { get; } = new();
 
         public WidgetCardPresenterCallbacks Build() => new(
@@ -994,6 +996,7 @@ public sealed partial class WidgetCardUnaskedTests
             OtherDeviceLabel: () => OtherDeviceLabel,
             RequestToggle: place => ToggleCalls.Add(place),
             SetAutoPause: (on, place) => AutoPauseCalls.Add((on, place)),
-            MovedToOn: () => MovedToOnValue);
+            MovedToOn: () => MovedToOnValue,
+            RequestConnect: place => ConnectCalls.Add(place));
     }
 }

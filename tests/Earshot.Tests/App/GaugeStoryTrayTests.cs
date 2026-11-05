@@ -207,6 +207,31 @@ public sealed class GaugeStoryTrayTests
         });
     }
 
+    // Take back with the AirPods already back another way: a toggle would disconnect them, a connect never does. The toggle below is
+    // the control that the fixture would have disconnected.
+    [TestMethod]
+    public void TakeBackWithTheAirPodsAlreadyHereNeverDisconnectsThoughAToggleWould()
+    {
+        StaThread.Run(() =>
+        {
+            int disconnects = 0;
+            using var tray = new TrayHarness(snapshot: Target(ConnectionState.Connected), time: new TestTimeProvider());
+            tray.Connection.OnDisconnect = _ =>
+            {
+                disconnects++;
+                return Task.FromResult(Confirmed("Disconnected"));
+            };
+
+            tray.Context.StartConnectFromWidget(CardPlace.NearTray);
+            tray.PumpUntilIdle();
+            Assert.AreEqual(0, disconnects, "Take back disconnected the AirPods.");
+
+            tray.Context.StartToggleFromWidget(CardPlace.NearTray);
+            tray.PumpUntilIdle();
+            Assert.AreEqual(1, disconnects, "The control: a toggle with them here disconnects.");
+        });
+    }
+
     // A connect that took but whose protection did not (BlockCoordinator.ConnectedNotProtectedMessage) is told as Partial, not as a
     // failure: the gauge shows no cross and the card does not grow to the failed card.
     [TestMethod]

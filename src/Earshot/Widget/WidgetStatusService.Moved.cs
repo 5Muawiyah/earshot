@@ -2,8 +2,8 @@ using Earshot.Contracts;
 
 namespace Earshot.Widget;
 
-// A verdict of "moved": the pair kept sending, out of the case and near, after a leave Earshot did not start. The card's compact
-// "Moved to" row is shown from this; Where already reads Elsewhere by then.
+// A verdict of "moved" on a leave with this PC playing: the pair kept sending, out of the case and near, after a leave Earshot did
+// not start. The card's compact "Moved to" row is shown from this; Where already reads Elsewhere by then.
 internal sealed class MovedToEventArgs(MovedVerdict verdict, DateTimeOffset at) : EventArgs
 {
     public MovedVerdict Verdict { get; } = verdict;
@@ -12,22 +12,29 @@ internal sealed class MovedToEventArgs(MovedVerdict verdict, DateTimeOffset at) 
 }
 
 // The service's side of Moved to. The rule (MovedToRule) is fed every message of the paired model, and of the remembered colour
-// when one is remembered, linked or not: it shows no figure, so it needs no link. A verdict of moved latches, and while the
-// latch holds Where reads Elsewhere, which is what makes "On your iPhone" and "On another device" appear. The latch clears three
-// ways: this PC has the AirPods again, any case-known message of the paired model, and BroadcastRules.LostLimit with no message
-// of the paired model. The latch runs whatever the Moved to setting says; only the compact card obeys it.
+// when one is remembered, linked or not: it shows no figure, so it needs no link. A verdict of moved latches only when this PC was
+// playing to the AirPods at the leave, and while the latch holds Where reads Elsewhere, which is what makes "On your iPhone" and
+// "On another device" appear. The latch clears three ways: this PC has the AirPods again, any case-known message of the paired
+// model, and BroadcastRules.LostLimit with no message of the paired model. The latch runs whatever the Moved to setting says; only
+// the compact card obeys it.
+//
+// Why playing: of the 8 leaves in the logs of 2 to 4 November, 6 kept sending for minutes, and 7 had nothing playing. Earbuds out and
+// idle look the same as an iPhone taking them, so the wider rule would often say Moved to falsely. So a move from a silent PC is not
+// shown. That is a choice made without a live trial. A silent leave still writes its Move: lines with the verdict it would have
+// given, so the rule can be widened on evidence.
 internal sealed partial class WidgetStatusService
 {
     private readonly MovedToRule _moved = new();
     private bool _movedElsewhere;
+    private bool _leavePlaying;
     private DateTimeOffset _lastPairedMessageAt;
     private ITimer? _movedTimer;
     private DateTimeOffset? _movedTimerDue;
 
     public event EventHandler<MovedToEventArgs>? MovedTo;
 
-    // A leave Earshot did not start (PauseOnLeave.LeftByOther). Any thread.
-    public void NoteLeftByOther(DateTimeOffset at)
+    // A leave Earshot did not start (PauseOnLeave.LeftByOther), and whether this PC was playing to the AirPods then. Any thread.
+    public void NoteLeftByOther(DateTimeOffset at, bool playing)
     {
         MovedVerdict? raise;
         lock (_gate)
@@ -38,6 +45,7 @@ internal sealed partial class WidgetStatusService
             }
 
             _moved.Left(at);
+            _leavePlaying = playing;
             raise = ApplyMovedVerdictLocked(_moved.Check(at, backOnThisPc: false));
             RescheduleMovedTimerLocked();
         }
@@ -68,7 +76,7 @@ internal sealed partial class WidgetStatusService
             ClearMovedLocked("a case-known message of the pair came");
         }
 
-        MovedVerdict? verdict = _moved.Check(at, backOnThisPc: false);
+        MovedVerdict? verdict = _moved.Check(at, _thisPcActive);
         if (verdict is null)
         {
             return null;
@@ -79,7 +87,7 @@ internal sealed partial class WidgetStatusService
         return raise;
     }
 
-    // Must be called holding _gate. Writes the verdict's line, and latches on moved.
+    // Must be called holding _gate. Writes the verdict's line, and latches on moved when this PC was playing at the leave.
     private MovedVerdict? ApplyMovedVerdictLocked(MovedVerdict? verdict)
     {
         if (verdict is null)
@@ -90,6 +98,12 @@ internal sealed partial class WidgetStatusService
         _log.Info(verdict.Line());
         if (verdict.Kind != MovedVerdictKind.Moved)
         {
+            return null;
+        }
+
+        if (!_leavePlaying)
+        {
+            _log.Info("Move: nothing was playing to the AirPods at the leave, so nothing is shown.");
             return null;
         }
 
@@ -188,7 +202,7 @@ internal sealed partial class WidgetStatusService
 
                 now = _timeProvider.GetUtcNow();
                 _movedTimerDue = null;
-                raise = ApplyMovedVerdictLocked(_moved.Check(now, backOnThisPc: false));
+                raise = ApplyMovedVerdictLocked(_moved.Check(now, _thisPcActive));
                 if (_moved.TakeLongSummary(now) is { } held)
                 {
                     _log.Info(MovedVerdict.LongLine(held));

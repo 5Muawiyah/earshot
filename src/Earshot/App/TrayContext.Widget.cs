@@ -185,7 +185,8 @@ internal sealed partial class TrayContext
                 OpenSendTo: () => OpenSendTo(openedByKeyboard: false),
                 LowBatteryThreshold: () => _registry.Settings.Current.Widget.LowBatteryThresholdPercent,
                 MovedToOn: () => _registry.Settings.Current.Widget.MovedToOn,
-                Radio: () => CardRadioNow);
+                Radio: () => CardRadioNow,
+                RequestConnect: StartConnectFromWidget);
 
             // The one presenter opens the asked card and the unasked ones: built here, with the data pipeline, so a case opening
             // is shown with no gauge on the taskbar.
@@ -499,6 +500,14 @@ internal sealed partial class TrayContext
     {
         long clickedAt = _tickCount();
         Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey: false, origin: ToggleOrigin.Card), place);
+    }
+
+    // Take back on the Moved to card: the same path, always a connect. A toggle here could disconnect AirPods that came back another
+    // way between the row showing and the press.
+    internal void StartConnectFromWidget(CardPlace place)
+    {
+        long clickedAt = _tickCount();
+        Launch("toggle", () => ToggleAsync(place, clickedAt, viaHotkey: false, wanted: true, origin: ToggleOrigin.Card), place);
     }
 
     private GaugeStoryHost GaugeStory => _gaugeStory ??= CreateGaugeStory();
@@ -850,7 +859,7 @@ internal sealed partial class TrayContext
     }
 
     // A leave Earshot did not start (PauseOnLeave.LeftByOther), told to the widget's moved-to rule once it exists.
-    private void OnLeftByOther(DateTimeOffset at) => _widgetStatus?.NoteLeftByOther(at);
+    private void OnLeftByOther(DateTimeOffset at, bool playing) => _widgetStatus?.NoteLeftByOther(at, playing);
 
     // IWidgetStatus.CaseClosed, on the UI thread: the linked pair's case-known messages stopped, so the case-open card
     // closes on every display, whatever its own close time says.
