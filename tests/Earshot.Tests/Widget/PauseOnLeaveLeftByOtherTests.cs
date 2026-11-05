@@ -165,4 +165,46 @@ public sealed class PauseOnLeaveLeftByOtherTests
         CollectionAssert.AreEqual(PlayerOnly, rig.Sessions.PauseCalls);
         Assert.IsTrue(rig.Log.Has(LogLevel.Error, "Pause on leave: telling the leave to its listener failed"));
     }
+
+    // ---- The lines the morning reads
+
+    [TestMethod]
+    public async Task AForeignLeaveSaysWhatThisPcWasPlaying()
+    {
+        using var rig = new Rig();
+        rig.Activity.State = RenderActivityState.Silent;
+        await rig.Active();
+        rig.Time.Advance(TimeSpan.FromMilliseconds(600));
+
+        await rig.Left();
+
+        Assert.IsTrue(rig.Log.Has(LogLevel.Info, "Move: leave seen, not started by Earshot, playing=Silent."));
+    }
+
+    [TestMethod]
+    public async Task AForeignLeaveWithNoRecentReadingSaysUnknown()
+    {
+        using var rig = new Rig();
+        await rig.Active();
+        rig.Time.Advance(TimeSpan.FromSeconds(30));
+        rig.Activity.OnRead = (_, _) => throw new InvalidOperationException("no reading");
+        rig.Time.Advance(TimeSpan.FromSeconds(5));
+
+        await rig.Left();
+
+        Assert.IsTrue(rig.Log.Has(LogLevel.Info, "Move: leave seen, not started by Earshot, playing=Unknown."));
+    }
+
+    [TestMethod]
+    public async Task AnOwnLeaveSaysItWasOwnAndShowsNothing()
+    {
+        using var rig = new Rig();
+        await rig.Active();
+
+        await rig.Pause.BeforeOwnLeaveAsync("Disconnect", Container, TimeSpan.FromMilliseconds(400), CancellationToken.None);
+        await rig.Left();
+
+        Assert.IsTrue(rig.Log.Has(LogLevel.Info, "Move: own leave (Disconnect), nothing shown."));
+        Assert.IsFalse(rig.Log.Has(LogLevel.Info, "Move: leave seen"));
+    }
 }

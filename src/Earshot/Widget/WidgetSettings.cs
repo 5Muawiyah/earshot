@@ -62,6 +62,11 @@ public sealed record WidgetSettings
     // file written before v1.4, reads as on, whatever the old member says.
     public bool CaseOpenCardOn { get; set; } = true;
 
+    // The compact "Moved to" card when another device takes the AirPods: on by default, for a new install and an existing one alike,
+    // so a file that never held it reads as on. Only the card obeys it: Where still reads Elsewhere and the gauge still shows the
+    // other device with it off.
+    public bool MovedToOn { get; set; } = true;
+
     // When the case-open card closes by itself: 0 for when the case closes (the default), or after 5, 10, 30 or 60
     // seconds. The case closing, the card's close button and a click on its Connect button close it whatever this says.
     public int CaseOpenCardCloseSeconds { get; set; } = CaseOpenCardClose.UntilCaseCloses;

@@ -144,11 +144,17 @@ internal sealed class PauseOnLeave : IDisposable
 
         if (changeInFlight is null)
         {
+            _log.Info("Move: leave seen, not started by Earshot, playing=" + PlayingAt(seenAt, sample) + ".");
             RaiseLeftByOther(seenAt);
         }
 
         return LeftAsync(seenAt, sample, changeInFlight);
     }
+
+    // What this PC was playing to the AirPods at the last reading before the change, for the log: Unknown when there was none or
+    // it is too old to say.
+    private static string PlayingAt(DateTimeOffset seenAt, Sample? sample) =>
+        sample is not null && seenAt - sample.At <= SampleFreshness ? sample.State.ToString() : RenderActivityState.Unknown.ToString();
 
     private void RaiseLeftByOther(DateTimeOffset seenAt)
     {
@@ -179,6 +185,7 @@ internal sealed class PauseOnLeave : IDisposable
             _handledEpisode = _episode;
         }
 
+        _log.Info("Move: own leave (" + why + "), nothing shown.");
         Task work = OwnLeaveAsync(why, container, ct);
         return WaitBoundedAsync(work, why, cap);
     }

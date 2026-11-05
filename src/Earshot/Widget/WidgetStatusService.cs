@@ -23,7 +23,7 @@ namespace Earshot.Widget;
 // Start, Suspend, Resume and Close are not on IWidgetStatus: they are called directly by whatever wires the
 // widget into the tray (out of scope here), the way the device monitor's own Start is called once and its
 // suspend/resume handling sits in the tray's power-event plumbing.
-internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
+internal sealed partial class WidgetStatusService : IWidgetStatus, IMovedToSource, IDisposable
 {
     private readonly Func<IAdvertisementSource> _sourceFactory;
     private readonly ISettingsStore _settings;
@@ -434,6 +434,8 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             _linkTimer = null;
             _caseCloseTimer?.Dispose();
             _caseCloseTimer = null;
+            _movedTimer?.Dispose();
+            _movedTimer = null;
 
             _deviceMonitor.SnapshotChanged -= OnDeviceSnapshotChanged;
             sourceToStop = BeginStopLocked();
@@ -740,7 +742,12 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
     {
         Guid watched = CoordinatorRules.WatchedContainer(_blockStatus(), _settings.Current, snapshot);
         _watchedContainer = watched;
+        bool wasThisPc = _thisPcActive;
         _thisPcActive = CoordinatorRules.RenderOf(snapshot, watched) == RenderState.Active;
+        if (_thisPcActive && !wasThisPc)
+        {
+            NoteThisPcBackLocked();
+        }
     }
 
     // ---- Battery refresh
@@ -1227,6 +1234,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         RefreshState? heard = null;
         LastReadingBook? toSave = null;
         MemorySave memoryToSave = default;
+        MovedVerdict? movedToRaise = null;
 
         lock (_gate)
         {
@@ -1249,6 +1257,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             }
 
             SelectionObservation seen = _selector.Observe(message, tag, rssi, at);
+            movedToRaise = FeedMovedLocked(message, rssi, at);
             if (seen.SetsInRange > 0)
             {
                 _setsInRange = seen.SetsInRange;
@@ -1365,6 +1374,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         if (heard is not null)
         {
             CompleteRefresh(heard, BatteryRefreshOutcome.Heard);
+        }
+
+        if (movedToRaise is not null)
+        {
+            RaiseMovedTo(movedToRaise, at);
         }
 
         if (caseOpenedEdge)
@@ -1571,6 +1585,7 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
             }
 
             ResetReadingsLocked();
+            ForgetMovedLocked();
             _selector.ForgetLink();
             _setsInRange = 0;
             _book = _book with { Left = null, Right = null, Case = null };
@@ -2110,6 +2125,11 @@ internal sealed class WidgetStatusService : IWidgetStatus, IDisposable
         if (_thisPcActive)
         {
             return AirPodsWhere.ThisPc;
+        }
+
+        if (_movedElsewhere)
+        {
+            return AirPodsWhere.Elsewhere;
         }
 
         if (!fresh || (_lastLeftInEar is null && _lastRightInEar is null))
