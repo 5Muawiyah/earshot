@@ -515,11 +515,6 @@ internal sealed partial class WidgetCardPresenter
             _unaskedRequest = null;
         }
 
-        if (why == AskedOpenedWhy)
-        {
-            ShowHeldFailure();
-        }
-
         if (promoteWaiting)
         {
             ShowWaiting();

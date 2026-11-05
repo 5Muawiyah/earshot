@@ -295,6 +295,9 @@ internal sealed partial class WidgetCardPresenter : IDisposable, ICompactNoticeT
     private void ShowAt(Rectangle? gaugeBounds, Point fallbackPoint, bool openedByKeyboard = false, int? dpi = null)
     {
         CloseUnasked(AskedOpenedWhy);
+
+        // Only here, once a card is really opening: a click that opens none (the second half of a double click) says no failure.
+        ShowHeldFailure();
         _log.Write(LogLevel.Debug, "Card: shown asked (" + (openedByKeyboard ? "keyboard" : gaugeBounds is null ? "tray icon" : "gauge") + ").");
         _dpiLatch.FixAtShow(dpi, _callbacks.Dpi);
         Rectangle anchor = gaugeBounds ?? new Rectangle(fallbackPoint, Size.Empty);

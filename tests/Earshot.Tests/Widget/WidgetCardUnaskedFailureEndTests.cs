@@ -105,6 +105,34 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // The asked card closed by losing focus, and the second click of the volume-icon gesture does not reopen it: that click opened
+    // no card, so it must not mark a failure still waiting for the cross as said.
+    [TestMethod]
+    public void AClickThatReopensNoCardDoesNotMarkAWaitingFailureAsSaid()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig();
+            rig.OpenAsked();
+            using var other = new Form { StartPosition = FormStartPosition.Manual, Location = new Point(400, 50), ClientSize = new Size(50, 50), ShowInTaskbar = false };
+            other.Show();
+            other.Activate();
+            Application.DoEvents();
+            Assert.IsTrue(rig.Presenter.HasPendingToggleCloseWindow, "Sanity: losing focus closed the asked card.");
+
+            Assert.AreEqual(FailureShown.Pending, rig.Fail(AReason, "Connect in Windows"));
+            rig.Presenter.RequestShow(AGauge, AGauge.Location);
+            Application.DoEvents();
+
+            Assert.IsFalse(rig.Presenter.IsShown, "Sanity: the click was taken as the second half of the gesture.");
+            Assert.IsFalse(rig.Presenter.FailureActiveForTest, "No card said the failure.");
+            rig.PassTheCross();
+            Application.DoEvents();
+            Assert.IsTrue(rig.Presenter.IsUnaskedShown, "The failure still gets its card when the cross has had its time.");
+            Assert.AreEqual(AReason, rig.Unasked.StatusRow.Text);
+        });
+    }
+
     [TestMethod]
     public void TheLogClaimsTheGaugesCrossOnlyForAToggleThatEndedFailed()
     {
