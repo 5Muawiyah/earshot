@@ -538,20 +538,6 @@ internal sealed partial class WidgetCard
         }
     }
 
-    // A fold on its way is cancelled and the card comes back in from where it is (a Connect began from the row's own button).
-    internal bool CancelFold()
-    {
-        if (!_exiting || _animator is null)
-        {
-            return false;
-        }
-
-        _exiting = false;
-        RaiseOnScreenChanged();
-        _animator.Enter(_rest, _travel);
-        return true;
-    }
-
     // The card was shown or hidden (called from OnVisibleChanged): hidden, nothing keeps running; shown, the hold and a ring begin.
     private void NoteCompactVisibility()
     {

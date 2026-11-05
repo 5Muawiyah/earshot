@@ -1,6 +1,8 @@
 namespace Earshot.Widget;
 
-// What is on screen, as the arbiter sees it.
+// What is on screen, as the arbiter sees it. A card on its way out is not on screen: it answers no press (WidgetCard ignores a
+// mouse or key press, and the compact button's screen reader press, while it fades), so nothing can happen to it, and a new card opens
+// as if none were showing.
 internal enum CardShowing
 {
     Nothing,
@@ -8,7 +10,6 @@ internal enum CardShowing
     AskedSubPage,
     UnaskedFull,
     CompactHolding,
-    CompactFolding,
 }
 
 // Kind is what an unasked or compact card is about; null for the asked card and for nothing.
@@ -59,8 +60,6 @@ internal enum CardDoes
     TakeBack,
     FoldNow,
     StayToHold,
-    CancelFoldShowProgress,
-    FoldFinishes,
     ReplaceInPlace,
 
     // Held in the one slot of its kind; shown after the current card only if it is still true then.
@@ -106,10 +105,7 @@ internal static class OneCardArbiter
                 return OnUnaskedFull(state, ev);
 
             case CardShowing.CompactHolding:
-                return OnCompact(state, ev, folding: false);
-
-            case CardShowing.CompactFolding:
-                return OnCompact(state, ev, folding: true);
+                return OnCompact(state, ev);
 
             default:
                 return new CardDecision(CardDoes.Nothing);
@@ -156,7 +152,7 @@ internal static class OneCardArbiter
             : new CardDecision(CardDoes.WaitInSlot);
     }
 
-    private static CardDecision OnCompact(CardState state, CardEvent ev, bool folding)
+    private static CardDecision OnCompact(CardState state, CardEvent ev)
     {
         UnaskedKind current = state.Kind ?? UnaskedKind.Notice;
         switch (ev.Kind)
@@ -170,34 +166,23 @@ internal static class OneCardArbiter
                     return new CardDecision(CardDoes.MorphToFull);
                 }
 
-                if (folding)
-                {
-                    // A card that is folding away is gone: the new one opens, it does not revive the old.
-                    return new CardDecision(CardDoes.Open, HoldFor(ev));
-                }
-
                 return OutranksOrEquals(about, current)
                     ? new CardDecision(CardDoes.ReplaceInPlace, HoldFor(ev))
                     : new CardDecision(CardDoes.WaitInSlot);
 
-            case CardEventKind.BodyClick when !folding:
+            case CardEventKind.BodyClick:
                 return new CardDecision(CardDoes.GrowToFull);
 
-            case CardEventKind.PointerOver when !folding:
+            case CardEventKind.PointerOver:
                 return new CardDecision(CardDoes.PauseHold);
 
-            case CardEventKind.PointerLeave when !folding:
+            case CardEventKind.PointerLeave:
                 return new CardDecision(CardDoes.ResumeHold);
 
             case CardEventKind.ConnectOwnButton:
-                return new CardDecision(folding ? CardDoes.CancelFoldShowProgress : CardDoes.TakeBack);
+                return new CardDecision(CardDoes.TakeBack);
 
             case CardEventKind.ConnectElsewhere:
-                if (folding)
-                {
-                    return new CardDecision(CardDoes.FoldFinishes);
-                }
-
                 // Moved to is no longer true once the AirPods are back on this PC; the others stay to their hold.
                 return new CardDecision(current == UnaskedKind.MovedTo ? CardDoes.FoldNow : CardDoes.StayToHold);
 

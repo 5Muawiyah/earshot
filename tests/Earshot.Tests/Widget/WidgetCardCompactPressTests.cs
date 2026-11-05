@@ -241,4 +241,42 @@ public sealed class WidgetCardCompactPressTests
             });
         }
     }
+
+    // ---- A card that is fading out answers no press
+
+    [TestMethod]
+    public void ACardFadingOutAnswersNoPressOnItsButtonItsBodyOrItsControls()
+    {
+        CardDesktop.Run(() =>
+        {
+            var time = new Steady();
+            var clock = new FakeVBlankClock(60);
+            WidgetCard card = DesignPixels.NewCard(DesignTheme.Light, 1.0, notice: true);
+            using (card)
+            {
+                var counts = new Counts();
+                card.CompactActionRequested += (_, _) => counts.Action++;
+                card.CompactBodyClicked += (_, _) => counts.Body++;
+                card.PressClock = time.Now;
+                card.AttachMotion(clock, () => true);
+                card.Render(Compact(MovedTo("Moved to iPhone")), 96);
+                Size size = card.ClientSize;
+                card.PresentAnimated(new Rectangle(200, 900 - size.Height, size.Width, size.Height), 40);
+                Application.DoEvents();
+                clock.RunUntil(clock.Now + TimeSpan.FromMilliseconds(300));
+                time.Ms = 100_000;
+
+                card.HideAnimated();
+                clock.RunUntil(clock.Now + TimeSpan.FromMilliseconds(40));
+                Assert.IsTrue(card.IsExiting, "Sanity: the card is fading out.");
+                WidgetCardLayout.CompactLayout layout = card.CurrentCompactLayout!;
+
+                CardKit.Click(card, layout.Action);
+                CardKit.Click(card, layout.Text);
+                card.CurrentControls().First(c => c.Role == CardControlRole.PushButton).Activate();
+
+                Assert.AreEqual((0, 0), (counts.Action, counts.Body), "A press on a card that is leaving is not answered, so no fold can be cancelled by one.");
+            }
+        });
+    }
 }

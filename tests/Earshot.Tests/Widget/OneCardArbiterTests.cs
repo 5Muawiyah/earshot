@@ -77,7 +77,6 @@ public sealed class OneCardArbiterTests
     [TestMethod]
     [DataRow("UnaskedFull")]
     [DataRow("CompactHolding")]
-    [DataRow("CompactFolding")]
     public void Row05AnAskedOpeningClosesAnyUnaskedCardAndOpensTheAskedOne(string showingName)
     {
         CardShowing showing = Enum.Parse<CardShowing>(showingName);
@@ -89,7 +88,6 @@ public sealed class OneCardArbiterTests
     // Row 6: the compact card and the case opens: it morphs in place into the full case opened card.
     [TestMethod]
     [DataRow("CompactHolding")]
-    [DataRow("CompactFolding")]
     public void Row06TheCaseOpeningMorphsACompactCardInPlaceIntoTheFullOne(string showingName)
     {
         CardShowing showing = Enum.Parse<CardShowing>(showingName);
@@ -141,20 +139,6 @@ public sealed class OneCardArbiterTests
     {
         UnaskedKind kind = Enum.Parse<UnaskedKind>(kindName);
         Assert.AreEqual(CardDoes.StayToHold, Decide(State(CardShowing.CompactHolding, kind), new CardEvent(CardEventKind.ConnectElsewhere)).Does);
-    }
-
-    // Row 12: a compact card folding away, and a Connect from its own button: the fold is cancelled and the button shows progress.
-    [TestMethod]
-    public void Row12AConnectFromTheOwnButtonOfAFoldingCardCancelsTheFold()
-    {
-        Assert.AreEqual(CardDoes.CancelFoldShowProgress, Decide(State(CardShowing.CompactFolding, UnaskedKind.MovedTo), new CardEvent(CardEventKind.ConnectOwnButton)).Does);
-    }
-
-    // Row 13: a compact card folding away, and a Connect from elsewhere: the fold finishes and the gauge tells the story.
-    [TestMethod]
-    public void Row13AConnectFromElsewhereLetsAFoldingCardFinishFolding()
-    {
-        Assert.AreEqual(CardDoes.FoldFinishes, Decide(State(CardShowing.CompactFolding, UnaskedKind.MovedTo), new CardEvent(CardEventKind.ConnectElsewhere)).Does);
     }
 
     // Row 14: a compact card of lower or equal priority, and a new compact of equal or higher: the content is replaced in place and
@@ -250,17 +234,6 @@ public sealed class OneCardArbiterTests
         Assert.AreEqual(Twelve, Decide(State(CardShowing.Nothing), CardEvent.Opens(UnaskedKind.Notice, hasAction: true)).Hold);
         Assert.IsNull(Decide(State(CardShowing.Nothing), CardEvent.Opens(UnaskedKind.Notice, staysUp: true)).Hold);
         Assert.IsNull(Decide(State(CardShowing.Nothing), CardEvent.Opens(UnaskedKind.CaseOpened)).Hold, "The case opened card closes with the case, not on a timer here.");
-    }
-
-    // A card on its way out is dismissed and stays dismissed: only a Connect from its own button, or the case opening, brings it back.
-    [TestMethod]
-    public void AFoldingCardIgnoresTheBodyAndThePointer()
-    {
-        CardState folding = State(CardShowing.CompactFolding, UnaskedKind.MovedTo);
-
-        Assert.AreEqual(CardDoes.Nothing, Decide(folding, new CardEvent(CardEventKind.BodyClick)).Does);
-        Assert.AreEqual(CardDoes.Nothing, Decide(folding, new CardEvent(CardEventKind.PointerOver)).Does);
-        Assert.AreEqual(CardDoes.Nothing, Decide(folding, new CardEvent(CardEventKind.PointerLeave)).Does);
     }
 
     // The asked card ignores what is not a notice or the case opening; a click or pointer is the card's own business there.

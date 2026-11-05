@@ -50,7 +50,7 @@ internal sealed partial class WidgetCardPresenter
     // the moment a card is shown or changes form.
     internal bool IsFullCardShown => IsShown || UnaskedOpenCards().Any(c => !c.Card.IsCompactShown);
 
-    internal bool IsUnaskedShown =>_unaskedCards.Values.Any(c => c.Card is { IsDisposed: false, Visible: true, IsExiting: false });
+    internal bool IsUnaskedShown => _unaskedCards.Values.Any(c => c.Card is { IsDisposed: false, Visible: true, IsExiting: false });
 
     // The displays an unasked card is on screen on now, by Id, for tests.
     internal IReadOnlyList<string> UnaskedShownDisplaysForTest =>

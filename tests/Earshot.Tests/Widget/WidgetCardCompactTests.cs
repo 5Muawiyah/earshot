@@ -678,36 +678,4 @@ public sealed class WidgetCardCompactTests
             Assert.AreEqual(CompactActionState.Done, card.ActionStateShown);
         });
     }
-
-    [TestMethod]
-    public void AFoldThatIsCancelledComesBackInFromWhereItIs()
-    {
-        CardDesktop.Run(() =>
-        {
-            Driven d = Present(animations: true, MovedTo);
-            using WidgetCard card = d.Card;
-
-            card.HideAnimated();
-            d.Advance(60);
-            Assert.IsTrue(card.IsExiting, "Folding away");
-
-            Assert.IsTrue(card.CancelFold());
-            Assert.IsFalse(card.IsExiting);
-            d.Advance(400);
-            Assert.IsTrue(card.Visible, "It did not hide");
-            Assert.AreEqual(d.Rest.Y, card.Bounds.Y, "and it is back at rest");
-        });
-    }
-
-    [TestMethod]
-    public void AFoldCannotBeCancelledWhenNothingIsFolding()
-    {
-        CardDesktop.Run(() =>
-        {
-            Driven d = Present(animations: true, MovedTo);
-            using WidgetCard card = d.Card;
-
-            Assert.IsFalse(card.CancelFold());
-        });
-    }
 }
