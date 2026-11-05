@@ -504,6 +504,46 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // An hours-old reason with a button that allows the AirPods is not a fair account of now.
+    [TestMethod]
+    public void AHeldFailureTooOldToSayAnythingIsDroppedWhenTheCardIsNextAskedFor()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var environment = new FakeCardEnvironment { Notifications = State(Shell.QUNS_RUNNING_D3D_FULL_SCREEN) };
+            using var rig = new ConnectRig(environment: environment);
+            rig.Fail(AReason, "Connect in Windows");
+            rig.PassTheCross();
+            Application.DoEvents();
+            Assert.IsTrue(rig.Presenter.FailureHeldForTest);
+
+            rig.Time.Advance(WidgetCardPresenter.HeldFailureLimit + TimeSpan.FromSeconds(1));
+            rig.OpenAsked();
+
+            Assert.AreNotEqual(AReason, rig.Asked.StatusRow.Text);
+            Assert.IsFalse(rig.Presenter.FailureHeldForTest);
+            Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: a held failure was dropped, it is too old to say anything"), string.Join("\n", rig.Log.Entries.Select(e => e.Message)));
+        });
+    }
+
+    [TestMethod]
+    public void AHeldFailureStillInItsTimeIsShownWhenTheCardIsNextAskedFor()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            var environment = new FakeCardEnvironment { Notifications = State(Shell.QUNS_RUNNING_D3D_FULL_SCREEN) };
+            using var rig = new ConnectRig(environment: environment);
+            rig.Fail(AReason, "Connect in Windows");
+            rig.PassTheCross();
+            Application.DoEvents();
+
+            rig.Time.Advance(WidgetCardPresenter.HeldFailureLimit - TimeSpan.FromSeconds(1));
+            rig.OpenAsked();
+
+            Assert.AreEqual(AReason, rig.Asked.StatusRow.Text);
+        });
+    }
+
     [TestMethod]
     public void AHeldFailureIsDroppedWhenWhereTheAirPodsAreChanges()
     {

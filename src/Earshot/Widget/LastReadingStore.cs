@@ -56,6 +56,8 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
     // reading up to this much older than it was. Design choice.
     public static readonly TimeSpan ReadTimeWriteInterval = TimeSpan.FromMinutes(1);
 
+    private readonly TimeProvider _time;
+
     private readonly ILog _log;
     private readonly Lock _gate = new();
     private bool _newerSchema;
@@ -65,8 +67,9 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
     private LastReadingBook? _held;
     private IReadOnlyList<SpentMark> _spent = [];
 
-    public LastReadingStore(string path, ILog log)
+    public LastReadingStore(string path, ILog log, TimeProvider? time = null)
     {
+        _time = time ?? TimeProvider.System;
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(log);
         FilePath = Path.GetFullPath(path);
@@ -332,10 +335,18 @@ internal sealed class LastReadingStore : ILastReadingStore, ISpentStore
             : null;
     }
 
-    private static SavedReading? ToReading(SavedReadingData? data) =>
-        data is null || data.Percent is < 0 or > 100 || data.Model is <= 0 or > ushort.MaxValue
-            ? null
-            : new SavedReading(data.Percent, data.Charging, data.ReadAt, (ushort)data.Model);
+    // A figure off the broadcast's steps of ten did not come from it, so it is no reading. A read time ahead of the clock (a clock put
+    // back, a file edited) is brought back to now, or the other bud would look too old to stand beside this one.
+    private SavedReading? ToReading(SavedReadingData? data)
+    {
+        if (data is null || data.Percent is < 0 or > 100 || data.Percent % 10 != 0 || data.Model is <= 0 or > ushort.MaxValue)
+        {
+            return null;
+        }
+
+        DateTimeOffset now = _time.GetUtcNow();
+        return new SavedReading(data.Percent, data.Charging, data.ReadAt > now ? now : data.ReadAt, (ushort)data.Model);
+    }
 
     private static SavedReadingData? ToData(SavedReading? reading) =>
         reading is null ? null : new SavedReadingData { Percent = reading.Percent, Charging = reading.Charging, ReadAt = reading.ReadAt, Model = reading.Model };

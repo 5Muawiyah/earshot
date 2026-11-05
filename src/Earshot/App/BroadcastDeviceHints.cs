@@ -9,7 +9,7 @@ namespace Earshot.App;
 //   Unknown          the broadcast cannot say: the listener is off or stopped, or no pair is linked, so there is no pair
 //                    whose silence could mean anything
 //   NotHeard         the linked pair has not been heard for longer than the broadcast counts as fresh
-//   InUseElsewhere   heard, and its ear state says it is in use on a device other than this PC
+//   InUseElsewhere   heard, and the status reads the AirPods as on another device (the moved-to rule)
 //   LidClosed        heard, and the case-open bit has been seen and says the lid is shut
 //   HeardNearby      heard, and nothing says it is away or shut: the PC's side is then the one left to look at
 //

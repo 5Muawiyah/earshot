@@ -44,6 +44,37 @@ public sealed class LastReadingStoreTests : IDisposable
             { "Model": 8231, "Part": "case", "PercentPerHour": -3, "MeasuredAt": "2026-10-02T08:00:00+00:00", "SpanMinutes": 20 } ] }
         """;
 
+    // The broadcast gives steps of ten, so a saved figure off a step did not come from it.
+    [TestMethod]
+    public void AValueNotInStepsOfTenReadsAsNoReading()
+    {
+        WriteRaw("""
+            { "SchemaVersion": 1,
+              "Left": { "Percent": 73, "Charging": false, "ReadAt": "2026-10-02T09:00:00+00:00", "Model": 8231 },
+              "Right": { "Percent": 70, "Charging": false, "ReadAt": "2026-10-02T09:00:00+00:00", "Model": 8231 } }
+            """);
+
+        LastReadingBook loaded = NewStore().Load();
+
+        Assert.IsNull(loaded.Left);
+        Assert.AreEqual(70, loaded.Right!.Percent);
+    }
+
+    // A time ahead of the clock would make the other bud look too old to stand beside it.
+    [TestMethod]
+    public void AReadTimeInTheFutureIsBroughtBackToNow()
+    {
+        var clock = new Streaming.TestTimeProvider();
+        WriteRaw("""
+            { "SchemaVersion": 1,
+              "Left": { "Percent": 70, "Charging": false, "ReadAt": "2999-01-01T09:00:00+00:00", "Model": 8231 } }
+            """);
+
+        LastReadingBook loaded = new LastReadingStore(FilePath, _log, clock).Load();
+
+        Assert.AreEqual(clock.GetUtcNow(), loaded.Left!.ReadAt);
+    }
+
     [TestMethod]
     public void ABookComesBackAsItWasSaved()
     {
@@ -201,9 +232,9 @@ public sealed class LastReadingStoreTests : IDisposable
 
         Assert.AreEqual(70, NewStore().Load().Left?.Percent, "The whole file is read, never the temp one.");
 
-        store.Save(SampleBook() with { Left = new SavedReading(55, false, ReadAt, Model) });
+        store.Save(SampleBook() with { Left = new SavedReading(50, false, ReadAt, Model) });
 
-        Assert.AreEqual(55, NewStore().Load().Left?.Percent);
+        Assert.AreEqual(50, NewStore().Load().Left?.Percent);
         Assert.IsFalse(File.Exists(store.TempPath), "The temp file is moved over the file, not left behind.");
     }
 
@@ -232,8 +263,8 @@ public sealed class LastReadingStoreTests : IDisposable
         Assert.AreSame(LastReadingBook.Empty, again.Load());
         NewStore().Save(SampleBook());
         File.WriteAllText(FilePath, GoodJson);
-        again.Save(SampleBook() with { Left = new SavedReading(33, false, ReadAt, Model) });
-        Assert.AreEqual(33, NewStore().Load().Left?.Percent, "Readable now: a successful read lets the save through.");
+        again.Save(SampleBook() with { Left = new SavedReading(30, false, ReadAt, Model) });
+        Assert.AreEqual(30, NewStore().Load().Left?.Percent, "Readable now: a successful read lets the save through.");
     }
 
     [TestMethod]

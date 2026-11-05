@@ -12,9 +12,15 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 {
     // A failure: Held is a failure no card has said yet (a gate refused the one that would have). Hold is how long the unasked card
     // that opened for it stays; the asked card and a card already open keep it until it closes.
+    // How long a failure a gate held back stays to be said on the next asked card. A design choice, not a measurement.
+    internal static readonly TimeSpan HeldFailureLimit = TimeSpan.FromMinutes(5);
+
     private sealed record ActiveFailure(string Reason, FailureNextStep? Next, AirPodsWhere Where, int Token)
     {
         public TimeSpan? Hold { get; init; }
+
+        // When a gate held it back, so a held failure can grow too old to say.
+        public DateTimeOffset? HeldAt { get; init; }
 
         public bool Held { get; init; }
 
@@ -138,7 +144,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
             return;
         }
 
-        _failure = failure with { Held = true, Hold = null };
+        _failure = failure with { Held = true, Hold = null, HeldAt = _time.GetUtcNow() };
         _log.Write(LogLevel.Debug, "Card: held (connect failed), it is shown when he next asks for the card.");
     }
 
@@ -195,6 +201,13 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
     // working, and it ends when that card closes.
     private void ShowHeldFailure()
     {
+        if (_failure is { Held: true, HeldAt: { } heldAt } && _time.GetUtcNow() - heldAt > HeldFailureLimit)
+        {
+            _log.Write(LogLevel.Debug, "Card: a held failure was dropped, it is too old to say anything about now.");
+            DropFailure();
+            return;
+        }
+
         if (_failure is { Displayed: false } waiting)
         {
             StopFailureTimer();

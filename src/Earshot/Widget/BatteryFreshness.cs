@@ -70,8 +70,9 @@ internal static class BatteryFreshness
 {
     // A value read within this long is live; older, it is a last reading, drawn in the stale style with its age. In use
     // the set sends about 35 documented messages a minute (one every 1.7 s), so 30 s holds about 17; the longest gap from
-    // one sender in any capture is 6.14 s and for a merged set 3.11 s. A closed case sends nothing, so values go stale
-    // half a minute after the lid closes, which is what the stale style is for.
+    // one sender in any capture is 6.14 s and for a merged set 3.11 s. A closed case soon goes quiet (the logs of 2 to 4
+    // November show a lone one or two messages about a minute after a close), so values go stale soon after the lid closes,
+    // which is what the stale style is for.
     public static readonly TimeSpan FreshWindow = TimeSpan.FromSeconds(30);
 
     // Windows' figure counts only while the AirPods are on this PC and it was read within two poll periods.
