@@ -121,6 +121,7 @@ public sealed class BatteryLogLineTests : IDisposable
         }
 
         Assert.AreEqual(1, Count(@"^Battery: gauge 40 from " + lower + @", live\.$"), "Said once, not at every message.");
+        LiveTests.LiveTest25Lines.AssertLogged(_log, LiveTests.LiveTest25Lines.GaugeFigure);
 
         Tick(45);
         _clock.Advance(WidgetTiming.HeadsetPollInterval);

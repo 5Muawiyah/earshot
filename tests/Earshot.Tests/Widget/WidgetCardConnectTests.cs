@@ -401,6 +401,7 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.AreEqual("Earshot: AirPods", card.AccessibleName);
             Assert.AreEqual(TimeSpan.FromSeconds(12), card.HoldRemaining, "Twelve seconds, as a notice with a button.");
             Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: shown unasked (connect failed)"), string.Join("\n", rig.Log.Entries.Select(e => e.Message)));
+            LiveTests.LiveTest25Lines.AssertLogged(rig.Log, LiveTests.LiveTest25Lines.FailedCard);
         });
     }
 

@@ -90,6 +90,7 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.AreEqual(TimeSpan.FromMilliseconds(6000), row.Hold);
             Assert.AreEqual(1, rig.Presenter.AnnouncementsForTest);
             Assert.IsTrue(rig.Log.Has(LogLevel.Debug, "Card: shown unasked (moved to), on 1 display"), Lines(rig.Log));
+            LiveTests.LiveTest25Lines.AssertLogged(rig.Log, LiveTests.LiveTest25Lines.MovedCardShown);
             Assert.IsEmpty(rig.Callbacks.ToggleCalls, "Showing it asked for nothing.");
         });
     }
@@ -378,6 +379,8 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.AreEqual(CompactActionState.Progress, card.ActionStateShown);
             Assert.IsFalse(card.HoldActive, "It does not fold while the work runs.");
             Assert.IsTrue(rig.Presenter.IsUnaskedShown);
+
+            LiveTests.LiveTest25Lines.AssertLogged(rig.Log, LiveTests.LiveTest25Lines.TakeBackPressed);
 
             // A press on the ring starts nothing more.
             card.CurrentControls().First(c => c.Role == CardControlRole.PushButton).Activate();

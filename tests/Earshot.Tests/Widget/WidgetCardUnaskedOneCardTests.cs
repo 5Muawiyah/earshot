@@ -188,6 +188,8 @@ public sealed partial class WidgetCardUnaskedTests
             time.Advance(TimeSpan.FromMilliseconds(8200));
             presenter.CaseClosed();
             Assert.IsTrue(log.Has(LogLevel.Debug, "Card: closed (case), the case closed, after 8200 ms."), Lines(log));
+            LiveTests.LiveTest25Lines.AssertLogged(log, LiveTests.LiveTest25Lines.CaseCardShown);
+            LiveTests.LiveTest25Lines.AssertLogged(log, LiveTests.LiveTest25Lines.CaseCardClosed);
         });
     }
 

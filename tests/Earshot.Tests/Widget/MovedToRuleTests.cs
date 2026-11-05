@@ -438,6 +438,7 @@ public sealed class MovedToRuleTests
         MovedVerdict verdict = rule.Check(At(3.8), false)!;
 
         Assert.AreEqual("Move: 3 messages by +3800 ms, first +900 ms, median -62 dBm, case-known 0: moved.", verdict.Line());
+        LiveTests.LiveTest25Lines.AssertMatches(verdict.Line(), LiveTests.LiveTest25Lines.MovedVerdict);
     }
 
     [TestMethod]

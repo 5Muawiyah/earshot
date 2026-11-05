@@ -998,4 +998,38 @@
                 'connect-after-pairing' = 'fail'; 'trace-saved' = 'fail' }
             FindingsInclude = @{ 'pairFailureLine' = 'Pair AirPods: Failed, NoDevice.'; 'pairingRunOutcome' = 'failed' } }
     }
+
+    # ------------------------------------------------------ 25 one card
+    # The log cannot say when a line was written, so a case that holds a line for a step holds it for every step. none holds no line:
+    # every criterion that needs a line fails (the fake owner says yes to each picture), and the three that need silence pass (the fake
+    # owner says no to each of those). one holds one of each line: every criterion that needs a line passes, and the three that need
+    # silence fail on the lines. two holds two of each: the two shortcut switches cannot be told apart, so they are inconclusive.
+    # no-moved-card: the owner saw no Moved to card and does not offer the sides and steps, so Moved to fails, Take back has nothing to
+    # press and the sides and steps are not reached. The gauge figures in steps of ten are decided by the log alone: none has none.
+    '25-one-card|first' = @{
+        none = @{ Overall = 'fail'; Criteria = @{
+                'shortcut-connect-card-closed' = 'fail'; 'shortcut-disconnect-card-closed' = 'fail'; 'failed-connect-cross-then-reason' = 'fail'
+                'case-opens-the-card' = 'fail'; 'case-shut-closes-the-card' = 'fail'; 'shut-case-no-card' = 'pass'
+                'moved-to-shows-and-is-true' = 'fail'; 'take-back-returns-the-airpods' = 'fail'; 'own-disconnect-shows-nothing' = 'pass'
+                'out-of-range-shows-nothing' = 'pass'; 'sides-and-steps' = 'pass'; 'battery-in-steps-of-ten' = 'inconclusive' }
+            FindingsInclude = @{ 'connectShortcutMs' = $null; 'gaugeFigureLines' = 0; 'movedToTrue' = 'yes' } }
+        one  = @{ Overall = 'fail'; Criteria = @{
+                'shortcut-connect-card-closed' = 'pass'; 'shortcut-disconnect-card-closed' = 'pass'; 'failed-connect-cross-then-reason' = 'pass'
+                'case-opens-the-card' = 'pass'; 'case-shut-closes-the-card' = 'pass'; 'shut-case-no-card' = 'fail'
+                'moved-to-shows-and-is-true' = 'pass'; 'take-back-returns-the-airpods' = 'pass'; 'own-disconnect-shows-nothing' = 'fail'
+                'out-of-range-shows-nothing' = 'fail'; 'sides-and-steps' = 'pass'; 'battery-in-steps-of-ten' = 'pass' }
+            FindingsInclude = @{ 'connectShortcutMs' = 2749; 'gaugeFigureLines' = 1; 'sidesAndStepsAnswers' = 'yes, yes, yes' } }
+        two  = @{ Overall = 'fail'; Criteria = @{
+                'shortcut-connect-card-closed' = 'inconclusive'; 'shortcut-disconnect-card-closed' = 'inconclusive'; 'failed-connect-cross-then-reason' = 'pass'
+                'case-opens-the-card' = 'pass'; 'case-shut-closes-the-card' = 'pass'; 'shut-case-no-card' = 'fail'
+                'moved-to-shows-and-is-true' = 'pass'; 'take-back-returns-the-airpods' = 'pass'; 'own-disconnect-shows-nothing' = 'fail'
+                'out-of-range-shows-nothing' = 'fail'; 'sides-and-steps' = 'pass'; 'battery-in-steps-of-ten' = 'pass' }
+            FindingsInclude = @{ 'connectShortcutMs' = $null; 'gaugeFigureLines' = 2 } }
+        'no-moved-card' = @{ Overall = 'fail'; Criteria = @{
+                'shortcut-connect-card-closed' = 'pass'; 'shortcut-disconnect-card-closed' = 'pass'; 'failed-connect-cross-then-reason' = 'pass'
+                'case-opens-the-card' = 'pass'; 'case-shut-closes-the-card' = 'pass'; 'shut-case-no-card' = 'fail'
+                'moved-to-shows-and-is-true' = 'fail'; 'take-back-returns-the-airpods' = 'inconclusive'; 'own-disconnect-shows-nothing' = 'fail'
+                'out-of-range-shows-nothing' = 'fail'; 'sides-and-steps' = 'inconclusive'; 'battery-in-steps-of-ten' = 'pass' }
+            FindingsInclude = @{ 'movedToTrue' = 'not asked'; 'sidesAndStepsOffered' = 'no' } }
+    }
 }

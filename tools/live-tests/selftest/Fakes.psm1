@@ -130,6 +130,19 @@ $script:LogFixtures = @(
     [ordered]@{ Pattern = 'pair: Windows answered '; Raw = $true; Text = 'pair: Windows answered Paired (0).' }
     [ordered]@{ Pattern = 'Bluetooth trace: '; Raw = $true; Text = 'Bluetooth trace: started; it records once the administrator prompt is allowed.' }
     [ordered]@{ Pattern = 'Bluetooth trace ended: '; Raw = $true; Text = 'Bluetooth trace ended: Saved.' }
+
+    # test 25: the card, the case, a move and the battery, in the shapes the tray writes. Each text is a line the flow's own test asserts (the
+    # case and moved-to card lines in WidgetCardUnaskedOneCardTests and WidgetCardMovedToTests, the case lines in CaseOpenLogTests, the move line in
+    # MovedToRuleTests, the gauge line in BatteryLogLineTests), and LiveTest25LogLineTests holds each to the pattern the script reads it with.
+    [ordered]@{ Pattern = 'Card: shown unasked'; Raw = $true; Text = 'Card: shown unasked (case), on 2 displays, state QUNS_ACCEPTS_NOTIFICATIONS, closes when the case closes.' }
+    [ordered]@{ Pattern = 'Card: shown unasked'; Raw = $true; Text = 'Card: shown unasked (moved to), on 1 display, state QUNS_ACCEPTS_NOTIFICATIONS, holds 6000 ms.' }
+    [ordered]@{ Pattern = 'Card: shown unasked'; Raw = $true; Text = 'Card: shown unasked (connect failed), on 1 display, state QUNS_ACCEPTS_NOTIFICATIONS, holds 2000 ms.' }
+    [ordered]@{ Pattern = 'Card: closed'; Raw = $true; Text = 'Card: closed (case), the case closed, after 8200 ms.' }
+    [ordered]@{ Pattern = 'Card: button pressed'; Raw = $true; Text = 'Card: button pressed (Take back).' }
+    [ordered]@{ Pattern = 'Case: open by'; Raw = $true; Text = 'Case: open by burst: 9 messages in 2000 ms from 2 senders, median -58 dBm, lid 0x52, no close before it.' }
+    [ordered]@{ Pattern = 'Case: closed after'; Raw = $true; Text = 'Case: closed after 8 s of silence: open for 3000 ms, 13 messages, lid 0x51 to 0x5A.' }
+    [ordered]@{ Pattern = 'Move: '; Raw = $true; Text = 'Move: 3 messages by +3800 ms, first +900 ms, median -62 dBm, case-known 0: moved.' }
+    [ordered]@{ Pattern = 'Battery: gauge'; Raw = $true; Text = 'Battery: gauge 70 from left, live.' }
 )
 
 # The one pattern that is also written with a stamp in the past, so the -SinceUtc filter in
@@ -175,6 +188,7 @@ $script:StartStates = @{
     '23-connect-every-state|first'       = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '23-connect-every-state|resume'      = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
     '24-pair-airpods|first'              = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
+    '25-one-card|first'                  = @{ NodeState = 'Blocked'; Render = 'Unplugged'; Protection = 'Protected'; SetUp = $true }
 }
 
 # The made up devices this fake machine has: the pinned pair, a phone with no A2DP sink, and a
@@ -271,6 +285,22 @@ $script:Answers = [ordered]@{
     'did windows ask for it more than once'                                  = 'no'
     'do you want to try the bluetooth trace now'                             = 'yes'
 
+    # test 25: One card. The questions about something that should not have shown are answered no.
+    'with the card closed, did the ring on the gauge spin'                   = 'yes'
+    'with the card closed, did the ring spin and then'                       = 'yes'
+    'did the ring spin, then show a cross'                                   = 'yes'
+    'did the earshot card open by itself while the window'                   = 'yes'
+    'while the case stayed shut, did any card open by itself'                = 'no'
+    'did a small card open by itself saying moved to'                        = 'yes'
+    'was that true: did your iphone have the airpods'                        = 'yes'
+    'did the take back icon spin'                                            = 'yes'
+    'after you chose disconnect in earshot, did a moved to card open'        = 'no'
+    'when you came back, had a moved to card opened'                         = 'no'
+    'do you want to check the sides and steps now'                           = 'yes'
+    'do the left and right figures on the card match'                        = 'yes'
+    'does the card show the figure of the right airpod'                       = 'yes'
+    'does the card show the figure of the left airpod'                        = 'yes'
+
     # test 20: hand back on Exit.
     'did the sound go back to your phone or stop coming out'                 = 'yes'
     'did a card say the airpods were being handed back'                      = 'yes'
@@ -324,6 +354,8 @@ $script:CaseItemCounts = @{
     'not-reached' = 1
     # test 24: Pair AirPods ended in a failed pairing, and the log holds only the two lines it wrote.
     'pair-failed' = 0
+    # test 25: no Moved to card opened when the iPhone took the AirPods, and the sides and steps were not offered.
+    'no-moved-card' = 1
 
     # test 17 and test 22: the hand-back service's own cases. Each looks like the shared "one" for every log line and
     # list, and differs only in the status file the service wrote (Write-FakeStatusFiles below).
@@ -360,7 +392,7 @@ function Initialize-FakeMachine
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -424,7 +456,7 @@ function New-FakeSandbox
             'declined-start', 'handback-cut-short', 'handback-not-reached', 'no-sleep-event', 'repaged-at-wake',
             'exit-cut-short', 'pause-declined', 'chosen-rising',
             'service-not-run', 'service-partial', 'service-over-budget', 'tray-not-ended', 'service-block-sent', 'service-already-blocked', 'tray-unreadable',
-            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed')][string]$Case
+            'switch-timed-out', 'switch-not-at-rest', 'switch-rejected', 'switch-unparsable', 'not-reached', 'pair-failed', 'no-moved-card')][string]$Case
     )
 
     $counts = $script:CaseItemCounts
@@ -1403,6 +1435,13 @@ function Get-FakeAnswer
     if ((Get-FakeContext).Case -eq 'not-reached' -and ($Options -contains 'no') -and
         ($lower.Contains('can you set this up now') -or $lower.Contains('do you want to restart now') -or $lower.Contains('did you restart this pc and sign in') -or
             $lower.Contains('can you put the case into pairing mode now')))
+    {
+        return 'no'
+    }
+
+    # test 25, no-moved-card: the iPhone took the AirPods and no Moved to card opened, and the owner does not offer the sides and steps.
+    if ((Get-FakeContext).Case -eq 'no-moved-card' -and ($Options -contains 'no') -and
+        ($lower.Contains('did a small card open by itself saying moved to') -or $lower.Contains('do you want to check the sides and steps now')))
     {
         return 'no'
     }

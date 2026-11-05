@@ -20,7 +20,9 @@ public sealed class CaseOpenLogTests
 
         Feed(tracker, SenderA, 0, lid: 0x52, linkMade: true);
 
-        Assert.AreEqual("Case: open by link: lid 0x52.", tracker.TakeLines().Single());
+        string line = tracker.TakeLines().Single();
+        Assert.AreEqual("Case: open by link: lid 0x52.", line);
+        LiveTests.LiveTest25Lines.AssertMatches(line, LiveTests.LiveTest25Lines.CaseOpened);
         Assert.AreEqual(0, tracker.TakeLines().Count, "Taken once.");
     }
 
