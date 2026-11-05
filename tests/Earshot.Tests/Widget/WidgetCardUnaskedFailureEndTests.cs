@@ -104,4 +104,24 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.AreNotEqual(AReason, rig.Asked.StatusRow.Text, "It does not come back on the next card.");
         });
     }
+
+    [TestMethod]
+    public void TheLogClaimsTheGaugesCrossOnlyForAToggleThatEndedFailed()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var failed = new ConnectRig(asked: false);
+            failed.Presenter.ToggleStarted(connect: true);
+            failed.Presenter.ToggleEnded(connect: true, ToggleOutcome.Failed);
+            Assert.AreEqual(FailureShown.NotShown, failed.Fail(AReason, next: null));
+            Assert.IsTrue(failed.Log.Has(LogLevel.Debug, "so the gauge's cross says it"), "A failed toggle is told by the cross, and the log says so.");
+
+            using var partial = new ConnectRig(asked: false);
+            partial.Presenter.ToggleStarted(connect: true);
+            partial.Presenter.ToggleEnded(connect: true, ToggleOutcome.Partial);
+            Assert.AreEqual(FailureShown.NotShown, partial.Fail(AReason, next: null));
+            Assert.IsFalse(partial.Log.Has(LogLevel.Debug, "cross says it"), "A part-way toggle draws no cross, so the log does not claim one.");
+            Assert.IsTrue(partial.Log.Has(LogLevel.Debug, "no cross is drawn"));
+        });
+    }
 }

@@ -29,6 +29,9 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
     }
 
     private CardButtonWork _work = CardButtonWork.None;
+
+    // How the toggle that ran last ended, for what the log says of a failure: only a Failed one is told by the gauge's cross.
+    private ToggleOutcome? _lastOutcome;
     private ActiveFailure? _failure;
     private int _failureToken;
     private ITimer? _failureTimer;
@@ -66,6 +69,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
 
         NoteToggleStartedForMovedTo(connect);
+        _lastOutcome = null;
         DropFailure();
         _work = connect ? CardButtonWork.Connecting : CardButtonWork.Disconnecting;
         _log.Write(LogLevel.Debug, "Card: " + (connect ? "connecting" : "disconnecting") + ".");
@@ -80,6 +84,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
 
         _work = CardButtonWork.None;
+        _lastOutcome = outcome;
         if (outcome is ToggleOutcome.Succeeded or ToggleOutcome.Partial)
         {
             DropFailure();
@@ -117,7 +122,9 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
         if (next is null)
         {
-            _log.Write(LogLevel.Debug, "Card: connect failed, no card is open and there is no next step, so the gauge's cross says it.");
+            _log.Write(LogLevel.Debug, _lastOutcome == ToggleOutcome.Failed
+                ? "Card: connect failed, no card is open and there is no next step, so the gauge's cross says it."
+                : "Card: failure not said on a card, no card is open and there is no next step, and no cross is drawn for it.");
             return FailureShown.NotShown;
         }
 
