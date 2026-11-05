@@ -697,7 +697,7 @@ internal sealed partial class TrayContext
 
         CardContent content = RadioCard(radio, place);
         FailureNextStep? next = content.Action is { } action ? new FailureNextStep(action.Label, action.OnClick) : null;
-        if (await SayFailureAsync(content.Status, next) == FailureShown.NotShown && !_closing && !_closed)
+        if (await SayFailureAsync(content.Status, next, afterToggle: false) == FailureShown.NotShown && !_closing && !_closed)
         {
             ShowCompactRadio(content, place);
         }

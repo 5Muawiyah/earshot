@@ -21,7 +21,7 @@ internal sealed class RecordingToggleCard : IToggleCard
 
     public void ToggleEnded(bool connect, ToggleOutcome outcome) => Ended.Add((connect, outcome));
 
-    public Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false)
+    public Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false, bool afterToggle = true)
     {
         Failures.Add(new FailureSaid(reason, nextStep?.Label, nextStep?.OnPress, mustBeSaid));
         return Task.FromResult(Answer);

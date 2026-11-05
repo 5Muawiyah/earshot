@@ -57,11 +57,11 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
     public void ToggleEnded(bool connect, ToggleOutcome outcome) => _uiPost(() => ToggleEndedOnUiThread(connect, outcome));
 
-    public Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false)
+    public Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false, bool afterToggle = true)
     {
         ArgumentNullException.ThrowIfNull(reason);
         var result = new TaskCompletionSource<FailureShown>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _uiPost(() => result.TrySetResult(ShowFailedOnUiThread(reason, nextStep, mustBeSaid)));
+        _uiPost(() => result.TrySetResult(ShowFailedOnUiThread(reason, nextStep, mustBeSaid, afterToggle)));
         return result.Task;
     }
 
@@ -114,7 +114,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
         }
     }
 
-    private FailureShown ShowFailedOnUiThread(string reason, FailureNextStep? next, bool mustBeSaid)
+    private FailureShown ShowFailedOnUiThread(string reason, FailureNextStep? next, bool mustBeSaid, bool afterToggle)
     {
         if (_disposed)
         {
@@ -125,10 +125,13 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
 
         // What the failure is named in the log, and whether the gauge drew a cross for it, from the toggle that ended just before; each
         // is used once, so a failure with no toggle before it (Pair AirPods) is not named after an earlier one.
-        string what = _lastEndedConnect switch { true => "connect failed", false => "disconnect failed", null => "failure" };
-        bool crossDrawn = _lastOutcome == ToggleOutcome.Failed;
-        _lastEndedConnect = null;
-        _lastOutcome = null;
+        string what = !afterToggle ? "failure" : _lastEndedConnect switch { true => "connect failed", false => "disconnect failed", null => "failure" };
+        bool crossDrawn = afterToggle && _lastOutcome == ToggleOutcome.Failed;
+        if (afterToggle)
+        {
+            _lastEndedConnect = null;
+            _lastOutcome = null;
+        }
         var failure = new ActiveFailure(reason, next, _callbacks.CurrentSnapshot().Where, ++_failureToken) { MustBeSaid = mustBeSaid, What = what };
         if (IsShown || IsUnaskedFullShown)
         {

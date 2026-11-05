@@ -35,6 +35,7 @@ internal interface IToggleCard
 
     // The attempt failed: reason is the whole sentence, nextStep the one button that can help, or null. mustBeSaid is a failure that
     // leaves the PC able to page the AirPods (a disconnect whose block did not take): with no card open and no next step it is held
-    // for the next card he asks for instead of being left to the gauge's cross, which may never have been on screen.
-    Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false);
+    // for the next card he asks for instead of being left to the gauge's cross, which may never have been on screen. afterToggle is false
+    // for a failure no connect or disconnect led to (Pair AirPods), so it is not named after the last toggle, nor told as its cross.
+    Task<FailureShown> ShowFailed(string reason, FailureNextStep? nextStep, bool mustBeSaid = false, bool afterToggle = true);
 }

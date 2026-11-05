@@ -28,14 +28,14 @@ internal sealed partial class TrayContext
 
     // Says a failed connect or disconnect on the one card: in the status row of the card that is open, else on a card that opens for the
     // next step, else nowhere (the gauge's cross and tooltip say it). Completes with what became of it.
-    private async Task<FailureShown> SayFailureAsync(string reason, FailureNextStep? next, bool mustBeSaid = false)
+    private async Task<FailureShown> SayFailureAsync(string reason, FailureNextStep? next, bool mustBeSaid = false, bool afterToggle = true)
     {
         if (_closing || _closed || ToggleCard is not { } card)
         {
             return FailureShown.NotShown;
         }
 
-        return await card.ShowFailed(reason, next, mustBeSaid);
+        return await card.ShowFailed(reason, next, mustBeSaid, afterToggle);
     }
 
     // Connect in Windows, from the failure line: it allows the AirPods and opens Windows' Bluetooth settings; the coordinator tells the

@@ -542,6 +542,23 @@ public sealed partial class WidgetCardUnaskedTests
         });
     }
 
+    // A Pair AirPods failure after a connect that worked is not named after that connect, nor told as a cross the gauge never drew.
+    [TestMethod]
+    public void AFailureNoToggleLedToIsNotNamedAfterTheLastToggle()
+    {
+        Phase5.CardDesktop.Run(() =>
+        {
+            using var rig = new ConnectRig();
+            rig.Presenter.ToggleEnded(connect: true, ToggleOutcome.Failed);
+            Application.DoEvents();
+
+            _ = rig.Presenter.ShowFailed("Pairing did not finish.", null, afterToggle: false).GetAwaiter().GetResult();
+
+            Assert.IsFalse(rig.Log.Has(LogLevel.Debug, "Card: connect failed"), string.Join("\n", rig.Log.Entries.Select(e => e.Message)));
+            Assert.IsFalse(rig.Log.Has(LogLevel.Debug, "so the gauge's cross says it"));
+        });
+    }
+
     // An hours-old reason with a button that allows the AirPods is not a fair account of now.
     [TestMethod]
     public void AHeldFailureTooOldToSayAnythingIsDroppedWhenTheCardIsNextAskedFor()
