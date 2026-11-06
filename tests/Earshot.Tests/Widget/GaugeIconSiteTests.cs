@@ -8,11 +8,10 @@ using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
-// Every icon the gauge draws (the icons spec, sections 1b, 2 and 3): the gauge is rendered with the icon log on, and each mode and
-// story frame must have drawn the icon the spec maps it to, in the style the spec gives it, in the palette's ink, in the box the spec
-// gives it and from GaugeRenderer; and the pixels in that box must be exactly the icon's coverage mask composited in that ink over the
-// gauge drawn without its icons. The gauge bitmap is Format32bppPArgb, so the comparison is made on the stored (premultiplied) values,
-// within one level of 255 a channel.
+// Every icon the gauge draws: the gauge is rendered with the icon log on, and each mode and story frame must have drawn the icon it
+// maps to (IconCatalogue), in the style it is drawn in, in the palette's ink, in the box it is drawn in and from GaugeRenderer; and the
+// pixels in that box must be exactly the icon's coverage mask composited in that ink over the gauge drawn without its icons. The gauge
+// bitmap is Format32bppPArgb, so the comparison is made on the stored (premultiplied) values, within one level of 255 a channel.
 [TestClass]
 public sealed class GaugeIconSiteTests
 {

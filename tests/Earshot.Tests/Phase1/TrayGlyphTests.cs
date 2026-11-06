@@ -8,7 +8,7 @@ using MingCute = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Phase1;
 
-// The tray icon is MingCute's AirPods icon (the icons spec, sections 1b and 8): Disconnected the line drawing, Connected the filled
+// The tray icon is MingCute's AirPods icon (IconCatalogue): Disconnected the line drawing, Connected the filled
 // one, Busy the filled one at 0.4 of its strength, Blocked the line drawing with Earshot's own slash. 16, 20, 24 and 32 px are the
 // tray icon sizes at 100, 125, 150 and 200 percent scaling.
 [TestClass]

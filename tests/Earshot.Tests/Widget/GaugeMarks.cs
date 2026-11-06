@@ -10,7 +10,7 @@ namespace Earshot.Tests.Widget;
 // drawn pixel an icon's mask covers most.
 internal static class GaugeMarks
 {
-    // 14 px at 100%, in a box centred in the ring box (the icons spec, section 3).
+    // 14 px at 100%, in a box centred in the ring box (IconRaster's rule A: the icon's art area fills the box).
     public static int BoxPx(GaugeLayout layout) => GaugeLayout.Round(14, layout.Dpi);
 
     public static Rectangle Box(GaugeLayout layout)

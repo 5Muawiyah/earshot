@@ -12,7 +12,7 @@ using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Icons;
 
-// Earshot draws no icon from a font (the icons spec, section 8, with the kept list empty): the built assembly names no icon font and
+// Earshot draws no icon from a font, and no icon font is kept for any icon: the built assembly names no icon font and
 // holds no private-use code point as a string or character constant, the type that held the code points is gone, and a render matrix
 // of the surfaces draws icons from the catalogue only and no text in an icon font or in the private use area.
 [TestClass]
@@ -217,7 +217,7 @@ public sealed class SegoeFluentAbsenceTests
         Assert.IsEmpty(privateUse, "Text with a private use code point: " + string.Join(", ", privateUse));
         Assert.IsGreaterThan(0, fonts.Count, "The card drew text, so the check looked at something.");
 
-        // What these pages must show, from the spec's table of icons: the title row, the status row, the marks, the settings rows and
+        // What these pages must show, from the table of icons each page uses: the title row, the status row, the marks, the settings rows and
         // the updates rows.
         Icon[] required =
         [
