@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using Earshot.Icons;
 using Earshot.Streaming;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tray;
 
@@ -47,12 +49,23 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _copyDiagnostics = new();
     private readonly ToolStripMenuItem _exit = new();
 
+    // The icon of each top-level command (section 5 of the icon spec). A submenu's entries are values, not commands: none has one.
+    private readonly Dictionary<ToolStripItem, Icon> _icons = [];
+    private Bitmap? _placeholder;
+    private int _iconPx;
+    private uint _dpi;
+
     public TrayMenu(Func<MenuState> state)
     {
         ArgumentNullException.ThrowIfNull(state);
         _state = state;
 
-        Strip = new ContextMenuStrip();
+        Strip = new ContextMenuStrip
+        {
+            // The check column keeps the tick and the indeterminate mark where they have always been; the icons go in the image column.
+            ShowCheckMargin = true,
+            ShowImageMargin = true,
+        };
         Strip.Items.AddRange(
         [
             _safeMode,
@@ -111,9 +124,19 @@ internal sealed class TrayMenu : IDisposable
         _copyDiagnostics.Click += (_, _) => CopyDiagnosticsClicked?.Invoke(this, EventArgs.Empty);
         _exit.Click += (_, _) => ExitClicked?.Invoke(this, EventArgs.Empty);
         Strip.Opening += OnOpening;
+        Strip.Opened += OnOpened;
 
+        AssignIcons();
+        Strip.Renderer = new TrayMenuRenderer(IconOf);
+        ApplyDpi(CursorDpi());
         Apply(state());
     }
+
+    // Where the menu's dpi is read from. The defaults ask Windows (the monitor under the cursor when the menu opens, then the menu's
+    // own window once it is up); a test that cannot move between monitors sets both.
+    internal Func<uint> CursorDpi { get; set; } = TrayMenuScale.DpiAtCursor;
+
+    internal Func<nint, uint> WindowDpi { get; set; } = TrayMenuScale.DpiOfWindow;
 
     public event EventHandler? ToggleClicked;
 
@@ -209,12 +232,113 @@ internal sealed class TrayMenu : IDisposable
         Set(_exit, state.Exit);
     }
 
-    public void Dispose() => Strip.Dispose();
+    public void Dispose()
+    {
+        Strip.Dispose();
+        _placeholder?.Dispose();
+        _placeholder = null;
+    }
 
     // What Opening does, for tests that cannot open the menu on screen.
     internal void Refresh() => Apply(_state());
 
-    private void OnOpening(object? sender, CancelEventArgs e) => Refresh();
+    private void OnOpening(object? sender, CancelEventArgs e)
+    {
+        Refresh();
+        ApplyDpi(CursorDpi());
+    }
+
+    // The menu is on a monitor now: if its window turns out to be at another dpi than the cursor's, the icons follow the window.
+    private void OnOpened(object? sender, EventArgs e)
+    {
+        uint actual = WindowDpi(Strip.Handle);
+        if (actual != _dpi)
+        {
+            ApplyDpi(actual);
+        }
+    }
+
+    // The icon a command draws and in which style: filled when the command is checked (an indeterminate one stays line), and the
+    // Connect and Disconnect command filled while it says Disconnect. Null for an item with no icon.
+    internal (Icon Icon, IconStyle Style)? IconOf(ToolStripItem item)
+    {
+        if (!_icons.TryGetValue(item, out Icon icon))
+        {
+            return null;
+        }
+
+        bool filled = ReferenceEquals(item, _toggle)
+            ? (item.Text ?? string.Empty).StartsWith(MenuModel.Disconnect, StringComparison.Ordinal)
+            : item is ToolStripMenuItem { CheckState: CheckState.Checked };
+        return (icon, filled ? IconStyle.Filled : IconStyle.Line);
+    }
+
+    // The icon box for a menu at dpi: SM_CXSMICON at that dpi. Every command carries one shared transparent image of that size so the
+    // layout reserves the box; the renderer paints over it.
+    internal void ApplyDpi(uint dpi)
+    {
+        _dpi = dpi;
+        int px = TrayMenuScale.IconPx(dpi);
+        if (px == _iconPx && _placeholder is not null)
+        {
+            return;
+        }
+
+        var next = new Bitmap(px, px);
+        Strip.ImageScalingSize = new Size(px, px);
+        foreach (ToolStripItem item in _icons.Keys)
+        {
+            item.Image = next;
+        }
+
+        _placeholder?.Dispose();
+        _placeholder = next;
+        _iconPx = px;
+        Strip.Invalidate();
+    }
+
+    // The dpi the icons were last sized for, and their box, for tests.
+    internal uint IconDpi => _dpi;
+
+    internal int IconPx => _iconPx;
+
+    private void AssignIcons()
+    {
+        (ToolStripMenuItem Item, Icon Icon)[] table =
+        [
+            (_safeMode, Icon.SafeShield),
+            (_toggle, Icon.AirPods),
+            (_playFromPhone, Icon.PlayCircle),
+            (_refreshBattery, Icon.Refresh),
+            (_sendTo, Icon.Send),
+            (_blockAtBoot, Icon.Lock),
+            (_handBack, Icon.Power),
+            (_protectAudio, Icon.Headphone),
+            (_protectCaveat, Icon.MicOff),
+            (_openOnStartup, Icon.Rocket),
+            (_speakStatus, Icon.Announcement),
+            (_showOnTaskbar, Icon.LayoutBottom),
+            (_leftClickConnects, Icon.Mouse),
+            (_caseOpenCard, Icon.AirPodsCase),
+            (_lowBatteryAlert, Icon.Notification),
+            (_lowBatteryThreshold, Icon.Battery),
+            (_nameOtherDevice, Icon.Cellphone),
+            (_chooseDevice, Icon.Device),
+            (_setUp, Icon.Settings),
+            (_repair, Icon.Tool),
+            (_fixConnection, Icon.Bluetooth),
+            (_pairAirPods, Icon.BluetoothSearching),
+            (_checkForUpdates, Icon.Download),
+            (_checkAutomatically, Icon.Sync),
+            (_copyDiagnostics, Icon.Copy),
+            (_exit, Icon.Exit),
+        ];
+        foreach ((ToolStripMenuItem item, Icon icon) in table)
+        {
+            item.ImageScaling = ToolStripItemImageScaling.None;
+            _icons[item] = icon;
+        }
+    }
 
     // The submenu is whatever the state says, rebuilt each time: a sentence is a disabled item, and a device, Stop
     // and Refresh the list raise PlayFromPhoneItemClicked with the item they were built from. The device id rides on
