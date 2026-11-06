@@ -26,6 +26,7 @@ internal sealed class TrayIconFactory
 {
     private readonly ILog _log;
     private readonly ThemeReader _theme;
+    private readonly Func<int, GlyphState, Color, Icon> _create;
     private IconKey? _applied;
     private int _size;
     private Color _ink;
@@ -35,11 +36,19 @@ internal sealed class TrayIconFactory
     private readonly record struct IconKey(GlyphState State, int Size, int InkArgb);
 
     public TrayIconFactory(ILog log, ThemeReader theme)
+        : this(log, theme, Create)
+    {
+    }
+
+    // create draws the icon; a test gives one that fails, to see what Apply does with a drawing failure.
+    internal TrayIconFactory(ILog log, ThemeReader theme, Func<int, GlyphState, Color, Icon> create)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(theme);
+        ArgumentNullException.ThrowIfNull(create);
         _log = log;
         _theme = theme;
+        _create = create;
     }
 
     // Puts the icon for state into notifyIcon. remeasure reads the taskbar size and theme again; force
@@ -66,9 +75,11 @@ internal sealed class TrayIconFactory
         Icon fresh;
         try
         {
-            fresh = Create(px, state, ink);
+            fresh = _create(px, state, ink);
         }
-        catch (Exception ex) when (ex is ExternalException or ArgumentException)
+        // GDI+ reports a failed allocation or a bad bitmap as OutOfMemoryException (or ArgumentException): a drawing failure like
+        // the others, recorded with its raw error, and the caller (the block coordinator) must not see it.
+        catch (Exception ex) when (ex is ExternalException or ArgumentException or OutOfMemoryException)
         {
             _log.Error("The tray icon could not be drawn at " + px.ToString(System.Globalization.CultureInfo.InvariantCulture) +
                 " px for " + state + ". The previous icon stays.", ex);

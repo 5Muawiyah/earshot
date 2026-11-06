@@ -220,6 +220,26 @@ public sealed class TrayGlyphTests
         }
     }
 
+    // The tray icon is drawn through GDI+, which reports a failure to allocate as an OutOfMemoryException. Applying an icon must not
+    // let that through to the block coordinator that asked for it: the failure is logged with its raw error and the icon stays.
+    [TestMethod]
+    [DataRow(typeof(OutOfMemoryException))]
+    [DataRow(typeof(ArgumentException))]
+    [DataRow(typeof(System.Runtime.InteropServices.ExternalException))]
+    public void ADrawingFailureIsLoggedAndTheIconStays(Type failure)
+    {
+        var log = new CapturingLog();
+        var thrown = (Exception)Activator.CreateInstance(failure, "GDI+ said no")!;
+        var factory = new TrayIconFactory(log, new ThemeReader(log), (_, _, _) => throw thrown);
+        using var notify = new System.Windows.Forms.NotifyIcon();
+        bool changed = factory.Apply(notify, GlyphState.Connected, remeasure: true, force: true);
+        Assert.IsFalse(changed, "no new icon was assigned");
+        Assert.IsNull(notify.Icon, "the previous icon (none here) stays");
+        LogEntry entry = log.Entries.Single(e => e.Message.Contains("could not be drawn", StringComparison.Ordinal));
+        Assert.AreEqual(Earshot.Contracts.LogLevel.Error, entry.Level);
+        Assert.AreSame(thrown, entry.Exception, "the raw error is recorded");
+    }
+
     [TestMethod]
     public void EachStateDiffersFromEveryOtherAtEverySize()
     {
