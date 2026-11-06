@@ -1,6 +1,7 @@
 using System.Drawing;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -168,7 +169,7 @@ public sealed class CardDesignPixelTests
             (Bitmap bitmap, WidgetCardLayout.Layout layout, Color surface, CardColours c) = Draw(card, Model(Snapshot(TimeSpan.FromSeconds(5))), theme, dpi);
             using (bitmap)
             {
-                Assert.AreEqual(FluentGlyphs.OnThisPc, card.StatusRow.Glyph);
+                Assert.AreEqual(Icon.Computer, card.StatusRow.Glyph);
                 Assert.AreEqual("On this PC", card.StatusRow.Text);
                 Assert.AreEqual(c.Text, card.StatusRow.Ink);
             }
@@ -177,7 +178,7 @@ public sealed class CardDesignPixelTests
             (Bitmap cautionBitmap, _, _, _) = Draw(card, nothing, theme, dpi);
             using (cautionBitmap)
             {
-                Assert.AreEqual(FluentGlyphs.Warning, card.StatusRow.Glyph);
+                Assert.AreEqual(Icon.Alert, card.StatusRow.Glyph);
                 Assert.AreEqual("Open the case", card.StatusRow.Text);
                 Assert.AreEqual(c.Caution, card.StatusRow.Ink, "Caution");
                 AssertNear(DesignPixels.Over(c.Caution, surface), DesignPixels.Extreme(cautionBitmap, layout.WhereLine, surface), 90, "The row's ink is caution");
@@ -187,7 +188,7 @@ public sealed class CardDesignPixelTests
             (Bitmap offBitmap, _, _, _) = Draw(card, off, theme, dpi);
             using (offBitmap)
             {
-                Assert.AreEqual(FluentGlyphs.BluetoothOff, card.StatusRow.Glyph);
+                Assert.AreEqual(Icon.BluetoothOff, card.StatusRow.Glyph);
                 Assert.AreEqual("Bluetooth off", card.StatusRow.Text);
                 Assert.IsFalse(card.ButtonUsable, "Connect is disabled");
                 Assert.IsTrue(CardKit.HasInk(offBitmap, new Rectangle(layout.WhereLine.Right - 16, layout.WhereLine.Y, 16, layout.WhereLine.Height), surface), "The chevron to Bluetooth settings");

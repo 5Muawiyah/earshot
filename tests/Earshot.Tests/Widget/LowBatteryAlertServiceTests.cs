@@ -3,6 +3,7 @@ using Earshot.Tests.Streaming;
 using Earshot.Widget;
 using Earshot.Widget.Alert;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -142,7 +143,7 @@ public sealed class LowBatteryAlertServiceTests : IDisposable
         CompactLine?[] lines = _notifier.Lines.ToArray();
         Assert.IsTrue(lines.All(l => l is not null));
         CollectionAssert.AreEquivalent(LeftAndCaseRows, lines.Select(l => l!.Content.Text).ToArray());
-        Assert.IsTrue(lines.All(l => l!.Content.Glyph == FluentGlyphs.Warning && l.Content.Ink == InkRole.Caution && l.Content.Kind == UnaskedKind.LowFallback));
+        Assert.IsTrue(lines.All(l => l!.Content.Glyph == Icon.Alert && l.Content.Ink == InkRole.Caution && l.Content.Kind == UnaskedKind.LowFallback));
     }
 
     [TestMethod]

@@ -1,6 +1,7 @@
 using System.Drawing;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -241,7 +242,7 @@ public sealed class SettingsPageDesignLayoutTests
         {
             SettingsItem row = Row(l, id);
             Assert.AreEqual(row.Bounds, row.A, "The whole row presses.");
-            Assert.AreEqual(FluentGlyphs.ChevronRight, row.ChevronGlyph);
+            Assert.AreEqual(Icon.ChevronRight, row.ChevronGlyph);
             Assert.IsFalse(row.Chevron.IsEmpty);
             Assert.IsTrue(l.Targets.Contains(new SettingsTarget(id, SettingsPart.Button)));
         }

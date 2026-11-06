@@ -2,6 +2,7 @@ using Earshot.App;
 using Earshot.Contracts;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -399,7 +400,7 @@ public sealed class MovedToServiceTests
 
         SendToModel model = SendToModel.From(rig.Where, "iPhone", busy: false);
 
-        Assert.AreEqual(FluentGlyphs.CellPhone, model.WhereGlyph);
+        Assert.AreEqual(Icon.Cellphone, model.WhereGlyph);
         Assert.IsTrue(model.Rows.Single(r => r.Choice == SendToChoice.OtherDevice).Current);
         Assert.IsFalse(model.Rows.Single(r => r.Choice == SendToChoice.ThisPc).Current);
     }

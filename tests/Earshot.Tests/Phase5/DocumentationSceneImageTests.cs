@@ -8,6 +8,7 @@ using Earshot.Tests.Phase1;
 using Earshot.Tray;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Phase5;
 
@@ -75,7 +76,7 @@ public sealed class DocumentationSceneImageTests
         {
             using WidgetCard card = Earshot.Tests.Widget.DesignPixels.NewCard(Earshot.Tests.Widget.DesignTheme.Dark, 1.0, notice: true);
             card.Render(
-                Earshot.Tests.Widget.CardKit.MainModel() with { Form = CardForm.Compact, Compact = new CompactContent('\0', InkRole.Primary, TrayStatus.CardConnected, null, null) },
+                Earshot.Tests.Widget.CardKit.MainModel() with { Form = CardForm.Compact, Compact = new CompactContent(null, InkRole.Primary, TrayStatus.CardConnected, null, null) },
                 192);
             Assert.IsTrue(card.IsCompactShown);
             using Bitmap cardBitmap = Earshot.Tests.Widget.CardKit.Render(card);

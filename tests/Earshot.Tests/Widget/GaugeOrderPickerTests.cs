@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -185,7 +186,7 @@ public sealed class GaugeOrderPickerTests
         }
 
         SettingsRowInfo info = SettingsRows.For(SettingsRowId.GaugeOrder);
-        Assert.AreEqual(FluentGlyphs.Sort, info.Glyph);
+        Assert.AreEqual(Icon.Transfer, info.Glyph);
         Assert.AreEqual("Gauge order", info.Name);
         Assert.AreEqual("Pick how the gauge's ring, number and bolt line up", info.Tip);
     }

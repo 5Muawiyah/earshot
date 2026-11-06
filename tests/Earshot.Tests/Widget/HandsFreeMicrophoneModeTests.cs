@@ -11,6 +11,7 @@ using Earshot.Tests.Update;
 using Earshot.Tray;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -641,7 +642,7 @@ public sealed class HandsFreeMicrophoneRowTests
             SettingsRowInfo info = SettingsRows.For(row);
             SettingsItem item = Rows(Layout(Values(true, MicrophoneRowState.OpenSettings))).Single(r => r.Row == row);
 
-            Assert.AreNotEqual('\0', info.Glyph, row + " has an icon.");
+            Assert.IsNotNull(info.Glyph, row + " has an icon.");
             Assert.AreEqual(info.Glyph, item.Glyph);
             Assert.IsFalse(string.IsNullOrWhiteSpace(info.Tip), row + " has a tooltip.");
             Assert.IsFalse(string.IsNullOrWhiteSpace(info.Name), row + " has an accessible name.");
@@ -649,7 +650,7 @@ public sealed class HandsFreeMicrophoneRowTests
             Assert.IsFalse(item.Label.Contains('\u2014', StringComparison.Ordinal));
         }
 
-        Assert.AreEqual(FluentGlyphs.MicOff, SettingsRows.For(SettingsRowId.MicrophoneOff).Glyph);
+        Assert.AreEqual(Icon.MicOff, SettingsRows.For(SettingsRowId.MicrophoneOff).Glyph);
         Assert.AreEqual("Open sound settings", SettingsRows.NameOf(SettingsRowId.SoundSettings, SettingsPart.Button));
         Assert.AreEqual("Microphone off mode", SettingsRows.NameOf(SettingsRowId.MicrophoneOff, SettingsPart.Toggle));
     }

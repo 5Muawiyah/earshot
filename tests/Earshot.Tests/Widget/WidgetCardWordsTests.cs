@@ -1,6 +1,7 @@
 using System.Drawing;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -35,7 +36,7 @@ public sealed class WidgetCardWordsTests
                     _ => null,
                 };
                 Assert.AreEqual(caption, row.Sub, row.Row + ": nothing under the label unless it is the design's caption or something is wrong.");
-                Assert.AreNotEqual('\0', row.Glyph, row.Row + " has an icon.");
+                Assert.IsNotNull(row.Glyph, row.Row + " has an icon.");
                 Assert.IsFalse(row.IconRect.IsEmpty, row.Row + " has a place for it.");
                 Assert.IsTrue(row.Bounds.Contains(row.IconRect), row.Row + ": the icon is inside its row.");
                 Assert.IsFalse(string.IsNullOrWhiteSpace(row.Tip), row.Row + " has a tooltip.");
@@ -46,13 +47,8 @@ public sealed class WidgetCardWordsTests
     }
 
     [TestMethod]
-    public void ARowsIconIsDrawnBesideItsLabelWhenTheFontIsThere()
+    public void ARowsIconIsDrawnBesideItsLabel()
     {
-        if (FluentGlyphs.Family is null)
-        {
-            Assert.Inconclusive("No icon font is installed on this machine.");
-        }
-
         Phase5.CardSta.Run(() =>
         {
             foreach (int dpi in Dpis)
@@ -72,11 +68,6 @@ public sealed class WidgetCardWordsTests
     [TestMethod]
     public void TheMainViewDrawsItsWhereReadAndUpdateLinesWithIcons()
     {
-        if (FluentGlyphs.Family is null)
-        {
-            Assert.Inconclusive("No icon font is installed on this machine.");
-        }
-
         Phase5.CardSta.Run(() =>
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;

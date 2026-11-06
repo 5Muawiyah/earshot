@@ -8,6 +8,7 @@ using Earshot.Tests.Phase5;
 using Earshot.Tray;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Measure;
 
@@ -291,7 +292,7 @@ public sealed class StartupIdleAndCardMeasureTests
     private static TimeSpan OpenOnce(WidgetCard card)
     {
         var clock = Stopwatch.StartNew();
-        var row = new CompactContent('\0', InkRole.Primary, TrayStatus.CardConnecting, null, null);
+        var row = new CompactContent(null, InkRole.Primary, TrayStatus.CardConnecting, null, null);
         card.Render(Earshot.Tests.Widget.CardKit.MainModel() with { Form = CardForm.Compact, Compact = row }, 96);
         card.PresentAnimated(new Rectangle(new Point(100, 100), card.ClientSize), 0);
         Application.DoEvents();

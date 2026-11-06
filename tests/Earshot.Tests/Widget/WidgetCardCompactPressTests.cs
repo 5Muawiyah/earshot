@@ -3,6 +3,7 @@ using System.Windows.Forms;
 using Earshot.Tests.Phase5;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -13,12 +14,12 @@ public sealed class WidgetCardCompactPressTests
 {
     private static readonly TimeSpan Six = TimeSpan.FromSeconds(6);
 
-    private static CompactContent MovedTo(string text) => new('', InkRole.Primary, text, new CompactAction("Take back", '', "Taking back"), Six)
+    private static CompactContent MovedTo(string text) => new(Icon.Cellphone, InkRole.Primary, text, new CompactAction("Take back", Icon.Computer, "Taking back"), Six)
     {
         Kind = UnaskedKind.MovedTo,
     };
 
-    private static CompactContent Charged { get; } = new('', InkRole.Accent, "Fully charged", null, Six) { Kind = UnaskedKind.ChargedFallback };
+    private static CompactContent Charged { get; } = new(Icon.Check, InkRole.Accent, "Fully charged", null, Six) { Kind = UnaskedKind.ChargedFallback };
 
     private static WidgetCardModel Compact(CompactContent content) =>
         CardKit.MainModel() with { Form = CardForm.Compact, Compact = content, CompactState = CompactActionState.Idle };

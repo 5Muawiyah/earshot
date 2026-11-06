@@ -6,6 +6,7 @@ using Earshot.Interop;
 using Earshot.Tests.Phase5;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -82,9 +83,9 @@ public sealed partial class WidgetCardUnaskedTests
             Assert.IsTrue(rig.Card.IsCompactShown);
             CompactContent row = rig.Presenter.UnaskedCompactForTest!;
             Assert.AreEqual("Moved to iPhone", row.Text);
-            Assert.AreEqual(FluentGlyphs.CellPhone, row.Glyph);
+            Assert.AreEqual(Icon.Cellphone, row.Glyph);
             Assert.AreEqual(UnaskedKind.MovedTo, row.Kind);
-            Assert.AreEqual(FluentGlyphs.OnThisPc, row.Action!.Glyph);
+            Assert.AreEqual(Icon.Computer, row.Action!.Glyph);
             Assert.AreEqual("Take back", row.Action.Label);
             Assert.AreEqual(TimeSpan.FromMilliseconds(6000), row.Hold);
             Assert.AreEqual(1, rig.Presenter.AnnouncementsForTest);
@@ -105,7 +106,7 @@ public sealed partial class WidgetCardUnaskedTests
 
             CompactContent row = rig.Presenter.UnaskedCompactForTest!;
             Assert.AreEqual("Moved to another device", row.Text);
-            Assert.AreEqual(FluentGlyphs.Devices, row.Glyph);
+            Assert.AreEqual(Icon.Device, row.Glyph);
         });
     }
 
@@ -123,8 +124,8 @@ public sealed partial class WidgetCardUnaskedTests
 
             rig.OpenAsked();
 
-            (char glyph, string text, _) = rig.Asked.StatusRow;
-            Assert.AreEqual(FluentGlyphs.CellPhone, glyph);
+            (Icon? glyph, string text, _) = rig.Asked.StatusRow;
+            Assert.AreEqual(Icon.Cellphone, glyph);
             Assert.AreEqual("On your iPhone", text);
         });
     }

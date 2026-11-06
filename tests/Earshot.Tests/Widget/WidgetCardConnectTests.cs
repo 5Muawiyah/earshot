@@ -7,6 +7,7 @@ using Earshot.Tests.Phase5;
 using Earshot.Tray;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -224,7 +225,7 @@ public sealed partial class WidgetCardUnaskedTests
     [TestMethod]
     public void TheCloseButtonOfAnUnaskedCardIsTheThinSystemCloseAtTenPixels()
     {
-        Assert.AreEqual('', WidgetCard.UnaskedCloseGlyph);
+        Assert.AreEqual(Icon.Close, WidgetCard.UnaskedCloseGlyph);
         Assert.AreEqual(10, WidgetCard.UnaskedCloseGlyphSizeAt96);
     }
 
@@ -265,8 +266,8 @@ public sealed partial class WidgetCardUnaskedTests
             FailureShown shown = rig.Fail(reason, "Connect in Windows");
 
             Assert.AreEqual(FailureShown.Shown, shown);
-            (char glyph, string text, _) = rig.Asked.StatusRow;
-            Assert.AreEqual(FluentGlyphs.Error, glyph, "E783.");
+            (Icon? glyph, string text, _) = rig.Asked.StatusRow;
+            Assert.AreEqual(Icon.Warning, glyph, "The circled mark.");
             Assert.AreEqual(reason, text, "The reason is not shortened.");
             CardControl words = rig.Asked.CurrentControls().Single(c => c.Role == CardControlRole.StaticText && c.Name == reason);
             Assert.AreEqual(reason, words.Tooltip, "The whole reason is in the tooltip.");

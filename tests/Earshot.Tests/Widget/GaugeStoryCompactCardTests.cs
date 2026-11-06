@@ -5,6 +5,7 @@ using Earshot.Tests.Phase1;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using static Earshot.Tests.Phase1.Phase1Fixtures;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -62,7 +63,7 @@ public sealed class GaugeStoryCompactCardTests
             using var card = new WidgetCard(new CapturingLog(), CardOpening.Unasked);
             var seen = new List<bool>();
             card.OnScreenChanged += (_, _) => seen.Add(card.IsCompactShown);
-            CompactContent row = new('', InkRole.Primary, "Moved to iPhone", null, TimeSpan.FromSeconds(6));
+            CompactContent row = new(Icon.Cellphone, InkRole.Primary, "Moved to iPhone", null, TimeSpan.FromSeconds(6));
             WidgetCardModel compact = CardKit.MainModel() with { Form = CardForm.Compact, Compact = row };
             card.Render(compact, 96);
             card.Show();

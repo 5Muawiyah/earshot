@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using Earshot.Interop;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -91,29 +92,55 @@ public sealed class WidgetCardTests
         });
     }
 
-    // The head (an ellipse) and the stem (a rounded rectangle) overlap where the stem meets the head:
-    // FillMode.Alternate (the GraphicsPath default) XORs that overlap into a hole instead of filling it
-    // solid, which FillMode.Winding fixes.
+    // The bud mark of a live reading is the filled drawing of its half of the AirPods icon: one solid piece, with no hole where the
+    // head and the stem meet. The middle of its fully covered pixels is inked on the card.
     [TestMethod]
-    public void TheBudGlyphHasNoHoleWhereTheHeadAndStemMeet()
+    public void TheFilledBudMarkHasNoHoleWhereItsHeadAndStemMeet()
     {
         Phase5.CardSta.Run(() =>
         {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
             using var card = new WidgetCard(new CapturingLog());
             card.SetTheme(Color.Black, highContrast: false);
-            card.Render(Model(Snapshot()), 96);
-            using Bitmap bitmap = Render(card);
+            card.Render(Model(Snapshot(left: new PartReading(80, false, null) { ReadAt = now }, readAt: now)), 96);
+            Earshot.Icons.IconPainter.DrawnIconLog = [];
+            Bitmap bitmap;
+            Earshot.Icons.DrawnIcon bud;
+            try
+            {
+                bitmap = Render(card);
+                bud = Earshot.Icons.IconPainter.DrawnIconLog.Single(d => d.Icon == Icon.AirPodsLeft);
+            }
+            finally
+            {
+                Earshot.Icons.IconPainter.DrawnIconLog = null;
+            }
 
-            WidgetCardLayout.Layout layout = WidgetCardLayout.Compute(96, showSwitch: false);
-            Rectangle bounds = layout.Left.Glyph;
-            float headSize = bounds.Width * 0.6f;
-            float stemCentreX = bounds.X + (headSize * 0.70f); // BudGlyphPath's own formula, mirror: false
-            int x = (int)Math.Round(stemCentreX);
-            int y = (int)Math.Round(bounds.Y + (headSize * 0.60f)); // just inside the head, at the stem's own top
+            using (bitmap)
+            {
+                Assert.AreEqual(Earshot.Icons.IconStyle.Filled, bud.Style, "A live reading on this PC: the filled drawing.");
+                ReadOnlySpan<byte> mask = Earshot.Icons.IconRaster.Coverage(bud.Icon, bud.Style, bud.BoxPx, bud.Rule).Span;
+                int side = Earshot.Icons.IconRaster.MaskSide(bud.BoxPx);
+                var solid = new List<(int X, int Y)>();
+                for (int y = 0; y < side; y++)
+                {
+                    for (int x = 0; x < side; x++)
+                    {
+                        if (mask[(y * side) + x] == 255)
+                        {
+                            solid.Add((x, y));
+                        }
+                    }
+                }
 
-            Color background = bitmap.GetPixel(0, 0);
-            Color pixel = bitmap.GetPixel(x, y);
-            Assert.AreNotEqual(background, pixel, "The head/stem junction must be filled solid, not a hole.");
+                Assert.IsNotEmpty(solid, "The filled bud has pixels of full coverage.");
+                double cx = solid.Average(p => p.X);
+                double cy = solid.Average(p => p.Y);
+                (int X, int Y) middle = solid.OrderBy(p => ((p.X - cx) * (p.X - cx)) + ((p.Y - cy) * (p.Y - cy))).First();
+                Color background = bitmap.GetPixel(0, 0);
+                Color pixel = bitmap.GetPixel(bud.Box.X - Earshot.Icons.IconRaster.Apron + middle.X, bud.Box.Y - Earshot.Icons.IconRaster.Apron + middle.Y);
+                Assert.AreNotEqual(background, pixel, "The middle of the solid bud must be inked, not a hole.");
+            }
         });
     }
 

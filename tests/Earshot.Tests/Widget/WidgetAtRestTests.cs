@@ -295,11 +295,11 @@ public sealed class WidgetAtRestTests
         // The allow-list: every external type a widget member, parameter, return, generic argument or
         // method body may reach, enumerated by running a reflection walk of the built widget types against
         // the real assembly and recording every distinct external type it actually touches (App: 3, Audio:
-        // 1, Contracts: 12, Icons: 3, Interop: 29, Tray: 2 - 50 in total). Nothing else from
+        // 1, Contracts: 12, Icons: 7, Interop: 29, Tray: 2 - 54 in total). Nothing else from
         // these six namespaces is reachable, including the very types the old deny-list named by hand:
         // IConnectionController, ConnectResult, ControllerResult and the Null* controllers live in
         // Earshot.Contracts and Earshot.Contracts.Null alongside allowed types, so the namespace itself
-        // cannot be allowed wholesale, only these 50 names; ServiceRegistry (Earshot.Composition) and
+        // cannot be allowed wholesale, only these 54 names; ServiceRegistry (Earshot.Composition) and
         // BlockCoordinator, TrayContext (Earshot.App) are excluded the same way, as are CfgMgr32,
         // BluetoothApis, KsControl, TaskSchedulerCom and IKsControl sitting inside Earshot.Interop next to
         // 29 allowed ones. A type reached that is not here, not under Earshot.Widget itself, and not under
@@ -314,6 +314,7 @@ public sealed class WidgetAtRestTests
             typeof(ILog), typeof(ISettingsStore), typeof(LogExtensions), typeof(LogLevel), typeof(StepOutcome),
             typeof(StepOutcomes),
             typeof(IconsNs.EarbudGlyph), typeof(IconsNs.GlyphState), typeof(IconsNs.ThemeReader),
+            typeof(IconsNs.IconPainter), typeof(IconsNs.IconStyle), typeof(IconsNs.IconRule), typeof(IconsNs.Catalogue.Icon),
             typeof(APPBARDATA), typeof(BITMAPINFO), typeof(BITMAPINFOHEADER), typeof(BLENDFUNCTION),
             typeof(ComActivation), typeof(Dwm), typeof(IPersistFile), typeof(IPropertyStore), typeof(IShellLinkW),
             typeof(IUIAutomation), typeof(IUIAutomationCacheRequest), typeof(IUIAutomationCondition),

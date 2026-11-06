@@ -4,6 +4,7 @@ using Earshot.Tests;
 using Earshot.Tests.Phase5;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -17,17 +18,17 @@ public sealed class WidgetCardCompactTests
 
     public static IEnumerable<object[]> ThemesAndScales() => DesignPixels.ThemesAndScales();
 
-    private static CompactContent MovedTo { get; } = new('', InkRole.Primary, "Moved to iPhone", new CompactAction("Take back", '', "Taking back"), Six)
+    private static CompactContent MovedTo { get; } = new(Icon.Cellphone, InkRole.Primary, "Moved to iPhone", new CompactAction("Take back", Icon.Computer, "Taking back"), Six)
     {
         Kind = UnaskedKind.MovedTo,
     };
 
-    private static CompactContent Low { get; } = new('', InkRole.Caution, "Left 20%", null, Six) { Kind = UnaskedKind.LowFallback };
+    private static CompactContent Low { get; } = new(Icon.Alert, InkRole.Caution, "Left 20%", null, Six) { Kind = UnaskedKind.LowFallback };
 
-    private static CompactContent Charged { get; } = new('', InkRole.Accent, "Fully charged", null, Six) { Kind = UnaskedKind.ChargedFallback };
+    private static CompactContent Charged { get; } = new(Icon.Check, InkRole.Accent, "Fully charged", null, Six) { Kind = UnaskedKind.ChargedFallback };
 
     private static CompactContent Failure { get; } = new(
-        '\0', InkRole.Primary,
+        null, InkRole.Primary,
         "The AirPods did not answer. They may be in the case, out of range or connected to another device. Check them and try again.",
         new CompactAction("Connect in Windows"), TimeSpan.FromSeconds(12));
 
@@ -35,14 +36,6 @@ public sealed class WidgetCardCompactTests
         CardKit.MainModel() with { Form = CardForm.Compact, Compact = content, CompactState = state };
 
     private static WidgetCardModel Full() => CardKit.MainModel();
-
-    private static void NeedsIconFont()
-    {
-        if (FluentGlyphs.Family is null)
-        {
-            Assert.Inconclusive("No icon font on this PC, so no glyph is drawn.");
-        }
-    }
 
     // ---- What it draws
 
@@ -81,7 +74,6 @@ public sealed class WidgetCardCompactTests
     [DynamicData(nameof(ThemesAndScales))]
     public void TheGlyphIsDrawnInItsRolesInkAndTheWordsInThePrimaryInk(DesignTheme theme, int dpi, double t)
     {
-        NeedsIconFont();
         CardSta.Run(() =>
         {
             DesignTokens tokens = DesignPixels.Tokens(theme);
@@ -115,7 +107,6 @@ public sealed class WidgetCardCompactTests
     [TestMethod]
     public void ACautionGlyphIsNotThePrimaryInkAndAChargedOneIsNotEither()
     {
-        NeedsIconFont();
         CardSta.Run(() =>
         {
             DesignTokens tokens = DesignPixels.Tokens(DesignTheme.Light);
@@ -135,7 +126,6 @@ public sealed class WidgetCardCompactTests
     [TestMethod]
     public void ARowOfLowOrChargedHasNoButtonAndAMovedToRowHasOne()
     {
-        NeedsIconFont();
         CardSta.Run(() =>
         {
             DesignTokens tokens = DesignPixels.Tokens(DesignTheme.Dark);
@@ -205,7 +195,6 @@ public sealed class WidgetCardCompactTests
     [TestMethod]
     public void ADoneButtonDrawsATickInTheAccent()
     {
-        NeedsIconFont();
         CardSta.Run(() =>
         {
             DesignTokens tokens = DesignPixels.Tokens(DesignTheme.Light);

@@ -1,6 +1,7 @@
 using System.Drawing;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -133,7 +134,7 @@ public sealed class SendToCardTests
         foreach (SettingsRowId row in new[] { SettingsRowId.SendTo, SettingsRowId.SendToCard, SettingsRowId.SendToGauge })
         {
             SettingsRowInfo info = SettingsRows.For(row);
-            Assert.AreNotEqual('\0', info.Glyph, row.ToString());
+            Assert.IsNotNull(info.Glyph, row.ToString());
             Assert.IsFalse(string.IsNullOrWhiteSpace(info.Name));
             Assert.IsFalse(string.IsNullOrWhiteSpace(info.Tip));
         }

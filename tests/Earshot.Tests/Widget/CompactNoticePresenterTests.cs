@@ -6,6 +6,7 @@ using Earshot.Infra;
 using Earshot.Tests.TestWindow;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -46,7 +47,7 @@ public sealed class CompactNoticePresenterTests
         Assert.IsFalse(request.Content.Action.IsIcon, "A notice's button is a text button.");
         Assert.AreEqual(TimeSpan.FromSeconds(12), request.Content.Hold);
         Assert.AreEqual(UnaskedKind.Notice, request.Content.Kind);
-        Assert.AreEqual('\0', request.Content.Glyph, "A notice has no glyph unless the caller's content has one.");
+        Assert.IsNull(request.Content.Glyph, "A notice has no glyph unless the caller's content has one.");
         request.OnAction!();
         Assert.AreEqual(1, ran);
     }

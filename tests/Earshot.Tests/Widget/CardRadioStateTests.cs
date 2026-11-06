@@ -3,6 +3,7 @@ using Earshot.App;
 using Earshot.Bluetooth;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -43,7 +44,7 @@ public sealed class CardRadioStateTests
             card.ToggleRequested += (_, _) => toggles++;
             card.Render(CardKit.MainModel() with { Radio = CardRadio.NotWorking }, 96);
 
-            Assert.AreEqual(FluentGlyphs.Error, card.StatusRow.Glyph);
+            Assert.AreEqual(Icon.Warning, card.StatusRow.Glyph);
             Assert.AreEqual("Bluetooth isn't working", card.StatusRow.Text);
             Assert.AreEqual(card.CautionInk, card.StatusRow.Ink);
             Assert.IsFalse(card.BluetoothOff, "It is not the off state.");
@@ -73,7 +74,7 @@ public sealed class CardRadioStateTests
             card.ToggleRequested += (_, _) => toggles++;
             card.Render(CardKit.MainModel() with { Radio = CardRadio.NoAirPodsPaired, ConnectIntent = true }, 96);
 
-            Assert.AreEqual(FluentGlyphs.Bluetooth, card.StatusRow.Glyph);
+            Assert.AreEqual(Icon.Bluetooth, card.StatusRow.Glyph);
             Assert.AreEqual("No AirPods paired", card.StatusRow.Text);
 
             CardControl button = card.CurrentControls().Single(c => c.Name == "Pair AirPods");

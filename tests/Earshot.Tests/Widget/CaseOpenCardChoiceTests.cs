@@ -2,6 +2,7 @@ using System.Drawing;
 using Earshot.Interop;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -224,7 +225,7 @@ public sealed class CaseOpenCardChoiceTests
     {
         SettingsLayout closed = SettingsPageLayout.Compute(Values(expanded: false, displays: 3), 96, new CountingMeasure());
         SettingsItem row = closed.Items.Single(i => i.Row == SettingsRowId.CaseCard);
-        Assert.AreEqual(FluentGlyphs.Preview, row.Glyph, "The Preview icon, E8A0.");
+        Assert.AreEqual(Icon.AirPodsCase, row.Glyph, "The case icon.");
         Assert.AreEqual("Open when the case opens", row.Label);
         Assert.IsTrue(closed.Targets.Contains(new SettingsTarget(SettingsRowId.CaseCard, SettingsPart.Toggle)));
         Assert.IsTrue(closed.Targets.Contains(new SettingsTarget(SettingsRowId.CaseCard, SettingsPart.Expand)));
@@ -237,7 +238,7 @@ public sealed class CaseOpenCardChoiceTests
         CollectionAssert.AreEqual(
             new[] { SettingsRowId.CaseCardClose, SettingsRowId.CaseCardDisplays, SettingsRowId.CaseCardDisplay, SettingsRowId.CaseCardDisplay, SettingsRowId.CaseCardDisplay },
             rows.Skip(at + 1).Take(5).ToArray(), "Close, Displays, then a box per display, inside the row's expander.");
-        Assert.IsTrue(open.Items.Where(i => i.Row is SettingsRowId.CaseCardClose or SettingsRowId.CaseCardDisplays or SettingsRowId.CaseCardDisplay).All(i => i.Nested && i.Glyph == '\0'));
+        Assert.IsTrue(open.Items.Where(i => i.Row is SettingsRowId.CaseCardClose or SettingsRowId.CaseCardDisplays or SettingsRowId.CaseCardDisplay).All(i => i.Nested && i.Glyph is null));
         CollectionAssert.AreEqual(
             BoxIndexes,
             open.Targets.Where(t => t.Part == SettingsPart.Check).Select(t => t.Index).ToArray(), "Each box is a keyboard stop of its own.");

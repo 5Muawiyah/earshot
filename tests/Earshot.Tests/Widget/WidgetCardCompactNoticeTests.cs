@@ -533,7 +533,7 @@ public sealed partial class WidgetCardUnaskedTests
             int plain = card.LaidOutSize.Height;
             Assert.IsNull(card.CurrentStripLayout);
 
-            var notice = new CompactContent('\0', InkRole.Primary, "Not protected", new CompactAction("Fix connection"), TimeSpan.FromSeconds(12));
+            var notice = new CompactContent(null, InkRole.Primary, "Not protected", new CompactAction("Fix connection"), TimeSpan.FromSeconds(12));
             card.Render(settings with { Notice = notice }, 96);
 
             Assert.IsNotNull(card.CurrentStripLayout);
@@ -554,7 +554,7 @@ public sealed partial class WidgetCardUnaskedTests
         Phase5.CardDesktop.Run(() =>
         {
             using WidgetCard card = CardKit.NewCard(dark: false);
-            var notice = new CompactContent('\0', InkRole.Primary, "Not protected", new CompactAction("Fix connection"), TimeSpan.FromSeconds(12));
+            var notice = new CompactContent(null, InkRole.Primary, "Not protected", new CompactAction("Fix connection"), TimeSpan.FromSeconds(12));
             card.Render(CardKit.SettingsModel(FakeCardHost.Defaults()) with { Notice = notice }, 96);
             card.Show();
             Application.DoEvents();

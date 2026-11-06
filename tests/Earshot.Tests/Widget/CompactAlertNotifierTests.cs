@@ -3,6 +3,7 @@ using Earshot.Contracts;
 using Earshot.Widget;
 using Earshot.Widget.Alert;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
@@ -39,7 +40,7 @@ public sealed class CompactAlertNotifierTests
         Assert.IsTrue(outcome.Ok);
         CompactRequest request = target.Requests.Single();
         Assert.AreEqual("Left 20%", request.Content.Text);
-        Assert.AreEqual(FluentGlyphs.Warning, request.Content.Glyph);
+        Assert.AreEqual(Icon.Alert, request.Content.Glyph);
         Assert.AreEqual(InkRole.Caution, request.Content.Ink);
         Assert.AreEqual(CardAnchor.NearTray, request.Anchor);
         Assert.IsNull(request.Content.Action);
@@ -56,7 +57,7 @@ public sealed class CompactAlertNotifierTests
 
         CompactContent row = target.Requests.Single().Content;
         Assert.AreEqual("Fully charged", row.Text);
-        Assert.AreEqual(FluentGlyphs.CheckMark, row.Glyph);
+        Assert.AreEqual(Icon.Check, row.Glyph);
         Assert.AreEqual(InkRole.Accent, row.Ink);
     }
 
