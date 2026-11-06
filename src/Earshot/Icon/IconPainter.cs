@@ -31,7 +31,7 @@ internal static class IconPainter
         new(bounds.X + ((bounds.Width - boxPx) / 2), bounds.Y + ((bounds.Height - boxPx) / 2));
 
     // The icon in a boxPx square centred in bounds, in ink (its alpha is the icon's opacity). rotationStep turns it about the middle
-    // of the box, a tenth of a turn clockwise a step.
+    // of the box, a tenth of a turn clockwise a step. boxPx outside IconRaster.MinBox to MaxBox is drawn at the nearest of those.
     public static void Draw(
         Graphics g,
         Icon icon,
@@ -45,6 +45,10 @@ internal static class IconPainter
         [CallerLineNumber] int callerLine = 0)
     {
         ArgumentNullException.ThrowIfNull(g);
+
+        // A box the mask cannot be made for (the card's column mark at a very large display scale and text size) is drawn at the
+        // nearest size it can, centred where the larger one would have been, rather than thrown from a paint handler.
+        boxPx = Math.Clamp(boxPx, IconRaster.MinBox, IconRaster.MaxBox);
         Point origin = BoxOrigin(bounds, boxPx);
         var box = new Rectangle(origin, new Size(boxPx, boxPx));
         DrawnIconLog?.Add(new DrawnIcon(icon, style, boxPx, ink, box, rule, rotationStep, Path.GetFileName(callerFile) + ":" + callerLine));

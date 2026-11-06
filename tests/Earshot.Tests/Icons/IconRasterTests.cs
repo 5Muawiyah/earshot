@@ -467,6 +467,44 @@ public sealed class IconRasterTests
         Assert.Throws<ArgumentOutOfRangeException>(() => IconRaster.Coverage(Icon.Check, IconStyle.Line, 257));
     }
 
+    // A box the mask cannot be made for (the card's column mark at a very large display scale and text size is more than 256 px) is
+    // drawn at the nearest size the mask can, centred where the larger box would have been, not thrown from the paint handler. The
+    // smallest too.
+    [TestMethod]
+    [DataRow(300, 256)]
+    [DataRow(512, 256)]
+    [DataRow(3, 4)]
+    public void ABoxOutsideTheMaskRangeIsDrawnAtTheNearestSizeAndCentred(int asked, int drawn)
+    {
+        var bounds = new Rectangle(0, 0, 600, 600);
+        using var bitmap = new Bitmap(600, 600, PixelFormat.Format32bppArgb);
+        using (Graphics g = Graphics.FromImage(bitmap))
+        {
+            g.Clear(Color.White);
+            IconPainter.Draw(g, Icon.Close, IconStyle.Line, bounds, asked, Color.Black);
+        }
+
+        int left = int.MaxValue, right = -1, top = int.MaxValue, bottom = -1;
+        for (int y = 0; y < 600; y++)
+        {
+            for (int x = 0; x < 600; x++)
+            {
+                if (bitmap.GetPixel(x, y).R < 128)
+                {
+                    left = Math.Min(left, x);
+                    right = Math.Max(right, x);
+                    top = Math.Min(top, y);
+                    bottom = Math.Max(bottom, y);
+                }
+            }
+        }
+
+        Assert.IsGreaterThan(-1, right, "the icon was drawn");
+        Assert.AreEqual(300.0, (left + right + 1) / 2.0, 1.5, "centred across");
+        Assert.AreEqual(300.0, (top + bottom + 1) / 2.0, 1.5, "centred down");
+        Assert.IsLessThanOrEqualTo(drawn, right - left + 1, "no wider than the box it was drawn at");
+    }
+
     // ---- The catalogue
 
     [TestMethod]
