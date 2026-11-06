@@ -1,8 +1,10 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using Earshot.Contracts;
+using Earshot.Icons;
 using Earshot.Interop;
 using Earshot.Tray;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -976,8 +978,8 @@ internal sealed partial class WidgetCard : Form
         if (layout.ShowColumns)
         {
             ShownBattery shown = _model.ShownParts;
-            DrawEarbudColumn(g, layout.Left, WidgetCopy.LeftLabel, _model.Snapshot.Left, shown.Left, mirror: false);
-            DrawEarbudColumn(g, layout.Right, WidgetCopy.RightLabel, _model.Snapshot.Right, shown.Right, mirror: true);
+            DrawEarbudColumn(g, layout.Left, WidgetCopy.LeftLabel, _model.Snapshot.Left, shown.Left, IconId.AirPodsLeft, mirror: false);
+            DrawEarbudColumn(g, layout.Right, WidgetCopy.RightLabel, _model.Snapshot.Right, shown.Right, IconId.AirPodsRight, mirror: true);
             DrawCaseColumn(g, layout.Case, WidgetCopy.CaseLabel, shown.Case);
         }
 
@@ -1001,8 +1003,8 @@ internal sealed partial class WidgetCard : Form
     }
 
     // The close button of a card nobody asked for, in the settings slot: the glyph and its size in epx at 96 dpi (design choice).
-    internal static char UnaskedCloseGlyph => FluentGlyphs.ChromeClose;
-    internal static int UnaskedCloseGlyphSizeAt96 => 10;
+    internal static IconId UnaskedCloseGlyph => IconId.Close;
+    internal static int UnaskedCloseGlyphSizeAt96 => CardPaint.MarkBoxAt96;
 
     // "AirPods" at 14 px semibold, and the gear when the view has one.
     private void DrawTitleRow(Graphics g, WidgetCardLayout.Layout layout)
@@ -1017,19 +1019,12 @@ internal sealed partial class WidgetCard : Form
         DrawRefreshIcon(g, layout);
         if (_unasked)
         {
-            // The unasked card's close button: the thin system close, or the clear button's own cross without the font.
-            if (!CardPaint.TryGlyph(g, UnaskedCloseGlyph, layout.Gear, colours.Text, _dpi, UnaskedCloseGlyphSizeAt96, _look.TextScale))
-            {
-                CardPaint.IconButton(g, layout.Gear, GlyphKind.Cross, enabled: true, colours, _dpi, focused: false, bordered: false);
-            }
-
+            // The unasked card's close button: the close icon, 10 px, in the settings slot.
+            CardPaint.DrawIcon(g, UnaskedCloseGlyph, filled: false, layout.Gear, colours.Text, _dpi, UnaskedCloseGlyphSizeAt96, _look.TextScale);
             return;
         }
 
-        if (!CardPaint.TryGlyph(g, FluentGlyphs.Settings, layout.Gear, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
-        {
-            CardPaint.Gear(g, layout.Gear, colours.Text, _dpi);
-        }
+        CardPaint.DrawIcon(g, IconId.Settings, filled: false, layout.Gear, colours.Text, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
 
         if (_focus == WidgetCardFocus.Gear && FocusShown)
         {
@@ -1044,12 +1039,12 @@ internal sealed partial class WidgetCard : Form
         CardColours colours = Colours;
         CardPaint.Divider(g, layout.UpdateLine.Left, layout.UpdateLine.Right, layout.UpdateLine.Top, colours);
         string version = _model.UpdateVersion ?? string.Empty;
-        int box = CardPlacement.Scale(CardPaint.GlyphSizeAt96, _dpi);
+        int box = CardPlacement.Scale(CardPaint.IconBoxAt96, _dpi);
         var iconRect = new Rectangle(layout.UpdateCaption.X, layout.UpdateCaption.Y + ((layout.UpdateCaption.Height - box) / 2), box, box);
-        bool hasIcon = CardPaint.TryGlyph(g, FluentGlyphs.Download, iconRect, colours.TextSecondary, _dpi);
-        int indent = hasIcon ? box + CardPlacement.Scale(8, _dpi) : 0;
+        CardPaint.DrawIcon(g, IconId.Download, filled: false, iconRect, colours.TextSecondary, _dpi);
+        int indent = box + CardPlacement.Scale(8, _dpi);
         CardPaint.Text(
-            g, hasIcon ? WidgetCopy.UpdateAvailableShort(version) : WidgetCopy.UpdateAvailable(version),
+            g, WidgetCopy.UpdateAvailableShort(version),
             new Rectangle(layout.UpdateCaption.X + indent, layout.UpdateCaption.Y, Math.Max(1, layout.UpdateCaption.Width - indent), layout.UpdateCaption.Height), _type,
             CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
         CardPaint.SmallButton(g, layout.UpdateButton, WidgetCopy.UpdateButton, colours, _type, _dpi, focused: _focus == WidgetCardFocus.UpdateButton && FocusShown);
@@ -1276,73 +1271,6 @@ internal sealed partial class WidgetCard : Form
         _log.Warn("The widget card " + what + " could not be set, so it keeps the plain frame: " + problem);
     }
 
-    // A single earbud (a round head over a short stem) in bounds, mirrored horizontally for the right ear.
-    // Adapted from the head/stem proportions Icon\EarbudGlyph.cs uses for the tray icon's pair; here one bud
-    // is filled directly with GDI+ FillPath, matching this card's own owner-painted model (OnPaint fills
-    // the whole client area itself), rather than composited through EarbudGlyph's alpha buffer (built for
-    // the layered gauge's UpdateLayeredWindow, not an owner-painted Form).
-    private static GraphicsPath BudGlyphPath(Rectangle bounds, bool mirror)
-    {
-        // Winding, not the default Alternate: the head (an ellipse) and the stem (a rounded rectangle)
-        // overlap where the stem meets the head, and Alternate XORs that overlap into a hole instead of
-        // filling it solid.
-        var path = new GraphicsPath { FillMode = FillMode.Winding };
-        float w = bounds.Width;
-        float h = bounds.Height;
-        float headSize = w * 0.6f;
-        float headOffsetX = mirror ? w - headSize : 0f;
-        var head = new RectangleF(bounds.X + headOffsetX, bounds.Y, headSize, headSize);
-        path.AddEllipse(head);
-
-        float stemWidth = Math.Max(2f, w * 0.22f);
-        float stemHeight = h * 0.45f;
-        float stemCentreX = mirror
-            ? bounds.X + headOffsetX + (headSize * 0.30f)
-            : bounds.X + headOffsetX + (headSize * 0.70f);
-        var stem = new RectangleF(stemCentreX - (stemWidth / 2f), bounds.Y + (headSize * 0.55f), stemWidth, stemHeight);
-        AddRoundedRect(path, stem, stemWidth / 2f);
-        return path;
-    }
-
-    // The case as a rounded rectangle with a lid line: drawn as two filled pieces (the lid, then the box)
-    // with a thin unpainted gap between them, which reads as the seam without needing a second colour.
-    private static (GraphicsPath Lid, GraphicsPath Box) CaseGlyphPaths(Rectangle bounds)
-    {
-        float w = bounds.Width;
-        float h = bounds.Height;
-        float gap = Math.Max(1f, h * 0.08f);
-        float lidHeight = h * 0.22f;
-        var lidRect = new RectangleF(bounds.X, bounds.Y, w, lidHeight);
-        var boxRect = new RectangleF(bounds.X, bounds.Y + lidHeight + gap, w, Math.Max(0f, h - lidHeight - gap));
-
-        var lid = new GraphicsPath();
-        AddRoundedRect(lid, lidRect, Math.Min(lidRect.Width, lidRect.Height) * 0.4f);
-        var box = new GraphicsPath();
-        AddRoundedRect(box, boxRect, Math.Min(boxRect.Width, boxRect.Height) * 0.25f);
-        return (lid, box);
-    }
-
-    private static void AddRoundedRect(GraphicsPath path, RectangleF rect, float radius)
-    {
-        float r = Math.Max(0, Math.Min(radius, Math.Min(rect.Width, rect.Height) / 2f));
-        if (r <= 0 || rect.Width <= 0 || rect.Height <= 0)
-        {
-            if (rect.Width > 0 && rect.Height > 0)
-            {
-                path.AddRectangle(rect);
-            }
-
-            return;
-        }
-
-        float d = r * 2f;
-        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
-        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
-        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
-        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-    }
-
     // The card's 1 px surface stroke, inside the edge, rounded to the window's 8 px corners.
     private void DrawSurfaceStroke(Graphics g)
     {
@@ -1371,17 +1299,14 @@ internal sealed partial class WidgetCard : Form
         CardPaint.NoteDrawn(text, bounds, font, format, _type.SizeOf(TypeRole.Caption));
     }
 
-    // The mark is a filled shape in the primary text colour, never the accent: the earbud in a square of the mark's height.
-    private void DrawEarbudColumn(Graphics g, WidgetCardLayout.ColumnLayout column, string label, PartReading part, ShownPart shown, bool mirror)
+    // The mark is the bud's own half of the AirPods icon, in the primary text colour (never the accent), in a square of the mark's
+    // height: filled while the figure beside it is a live reading and the AirPods are on this PC, the line drawing otherwise.
+    private void DrawEarbudColumn(Graphics g, WidgetCardLayout.ColumnLayout column, string label, PartReading part, ShownPart shown, IconId bud, bool mirror)
     {
         DrawColumnLabel(g, column.Label, label);
         int side = Math.Min(column.Glyph.Width, column.Glyph.Height);
         var square = new Rectangle(column.Glyph.X + ((column.Glyph.Width - side) / 2), column.Glyph.Y, side, side);
-        using GraphicsPath glyph = BudGlyphPath(square, mirror);
-        using (var brush = new SolidBrush(MarkInk(shown)))
-        {
-            g.FillPath(brush, glyph);
-        }
+        CardPaint.DrawIconFitted(g, bud, filled: MarkFilled(shown), column.Glyph, MarkInk(shown));
 
         // Like the figure, the mark is of the part's shown reading, but only a live one while the AirPods are on this PC: a last
         // reading (shown at any age, and for AirPods that are away) says nothing of where a bud is now. A raw value of
@@ -1397,14 +1322,7 @@ internal sealed partial class WidgetCard : Form
     private void DrawCaseColumn(Graphics g, WidgetCardLayout.ColumnLayout column, string label, ShownPart shown)
     {
         DrawColumnLabel(g, column.Label, label);
-        (GraphicsPath lid, GraphicsPath box) = CaseGlyphPaths(column.Glyph);
-        using (lid)
-        using (box)
-        using (var brush = new SolidBrush(MarkInk(shown)))
-        {
-            g.FillPath(brush, lid);
-            g.FillPath(brush, box);
-        }
+        CardPaint.DrawIconFitted(g, IconId.AirPodsCase, filled: MarkFilled(shown), column.Glyph, MarkInk(shown));
 
         DrawBatteryPart(g, column, shown);
     }
@@ -1423,6 +1341,9 @@ internal sealed partial class WidgetCard : Form
 
     // The earbud or case mark: the primary ink for a part with a value, the disabled ink for a part with none.
     internal Color MarkInk(ShownPart shown) => shown.HasValue ? Colours.Text : Colours.TextDisabled;
+
+    // The mark is the filled drawing exactly when the part's figure is a live reading and the AirPods are on this PC.
+    internal bool MarkFilled(ShownPart shown) => shown.Fresh && _model.Snapshot.Where == AirPodsWhere.ThisPc;
 
     // A live value is drawn in the primary ink and the accent (caution when low); a last reading in the tertiary token with no
     // bolt (it was charging then, and nothing says it is now), its read-time line saying its age in the fewest characters. A part
@@ -1467,7 +1388,7 @@ internal sealed partial class WidgetCard : Form
         g.FillRectangle(track, column.Bar.X, column.Bar.Y + ((column.Bar.Height - trackHeight) / 2), column.Bar.Width, trackHeight);
     }
 
-    // The clock (12, Read time E823) and the age, centred as one run, in the tertiary token.
+    // The clock (12) and the age, centred as one run, in the tertiary token.
     private void DrawReadTime(Graphics g, Rectangle bounds, string age, Color ink)
     {
         using Font font = _type.Role(TypeRole.Caption);
@@ -1478,7 +1399,7 @@ internal sealed partial class WidgetCard : Form
         float run = box + gap + textWidth;
         int left = bounds.X + (int)Math.Max(0, (bounds.Width - run) / 2f);
         var iconRect = new Rectangle(left, bounds.Y + ((bounds.Height - box) / 2), box, box);
-        _ = CardPaint.TryGlyph(g, FluentGlyphs.ReadTime, iconRect, ink, _dpi, ReadTimeGlyphAt96, _look.TextScale);
+        CardPaint.DrawIcon(g, IconId.Time, filled: false, iconRect, ink, _dpi, ReadTimeGlyphAt96, _look.TextScale);
         DrawText(g, new Rectangle(iconRect.Right + gap, bounds.Y, Math.Max(1, bounds.Right - iconRect.Right - gap), bounds.Height), age, ink, TypeRole.Caption, StringAlignment.Near);
     }
 
@@ -1495,34 +1416,13 @@ internal sealed partial class WidgetCard : Form
         g.FillEllipse(brush, x, y, d, d);
     }
 
-    // The charging bolt, Fluent E945 at 12, in the reserved slot right of the value; five points drawn where no icon font is installed.
-    private void DrawBolt(Graphics g, Rectangle slot, Color ink)
-    {
-        if (CardPaint.TryGlyph(g, FluentGlyphs.Bolt, slot, ink, _dpi, ReadTimeGlyphAt96, _look.TextScale))
-        {
-            return;
-        }
-
-        float h = slot.Height;
-        float w = h * 0.6f;
-        float x = slot.X + ((slot.Width - w) / 2f);
-        float y = slot.Y;
-        PointF[] points =
-        [
-            new PointF(x + (w * 0.55f), y),
-            new PointF(x, y + (h * 0.6f)),
-            new PointF(x + (w * 0.42f), y + (h * 0.6f)),
-            new PointF(x + (w * 0.45f), y + h),
-            new PointF(x + w, y + (h * 0.38f)),
-            new PointF(x + (w * 0.58f), y + (h * 0.38f)),
-        ];
-        using var brush = new SolidBrush(ink);
-        g.FillPolygon(brush, points);
-    }
+    // The charging bolt, the filled lightning icon at 12, in the reserved slot right of the value. It is drawn only while charging.
+    private void DrawBolt(Graphics g, Rectangle slot, Color ink) =>
+        CardPaint.DrawIcon(g, IconId.Lightning, filled: true, slot, ink, _dpi, ReadTimeGlyphAt96, _look.TextScale);
 
     // The status row: its icon (16), then the words (Body) and, with Bluetooth off, a chevron to Bluetooth settings. Nothing
-    // heard (and the case not yet opened) is the caution ink with the Open the case glyph; Bluetooth off has its own glyph;
-    // otherwise On this PC, or the iPhone, in the primary ink.
+    // heard (and the case not yet opened) is the caution ink with the Open the case icon; Bluetooth off has its own icon;
+    // otherwise On this PC, or the iPhone, in the primary ink. The computer is filled while the AirPods are on this PC.
     private void DrawStatusRow(Graphics g, Rectangle bounds)
     {
         if (NoticeOnStatusRow && Carried is { } carried)
@@ -1532,20 +1432,18 @@ internal sealed partial class WidgetCard : Form
         }
 
         CardColours colours = Colours;
-        (char glyph, string text, Color ink) = StatusRow;
-        int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
+        (IconId? glyph, string text, Color ink) = StatusRow;
+        int box = TextFit.Grow(CardPaint.IconBoxAt96, _dpi, _look.TextScale);
         var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
         int gap = CardPlacement.Scale(8, _dpi);
         int chevron = BluetoothOff ? TextFit.Grow(ChevronGlyphAt96, _dpi, _look.TextScale) : 0;
-        if (!CardPaint.TryGlyph(g, glyph, iconRect, ink, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
+        if (glyph is { } icon)
         {
-            DrawText(g, bounds, text, ink, TypeRole.Body, StringAlignment.Near);
+            CardPaint.DrawIcon(g, icon, filled: icon == IconId.Computer && _model.Snapshot.Where == AirPodsWhere.ThisPc, iconRect, ink, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
         }
-        else
-        {
-            int textX = iconRect.Right + gap;
-            DrawText(g, new Rectangle(textX, bounds.Y, Math.Max(1, bounds.Right - chevron - textX), bounds.Height), text, ink, TypeRole.Body, StringAlignment.Near);
-        }
+
+        int textX = iconRect.Right + gap;
+        DrawText(g, new Rectangle(textX, bounds.Y, Math.Max(1, bounds.Right - chevron - textX), bounds.Height), text, ink, TypeRole.Body, StringAlignment.Near);
 
         if (BluetoothOff)
         {
@@ -1555,7 +1453,7 @@ internal sealed partial class WidgetCard : Form
             }
 
             var chevronRect = new Rectangle(bounds.Right - chevron, bounds.Y + ((bounds.Height - chevron) / 2), chevron, chevron);
-            _ = CardPaint.TryGlyph(g, FluentGlyphs.ChevronRight, chevronRect, colours.TextSecondary, _dpi, ChevronGlyphAt96, _look.TextScale);
+            CardPaint.DrawIcon(g, IconId.ChevronRight, filled: false, chevronRect, colours.TextSecondary, _dpi, ChevronGlyphAt96, _look.TextScale);
         }
     }
 
@@ -1564,19 +1462,16 @@ internal sealed partial class WidgetCard : Form
     private void DrawSendToRow(Graphics g, Rectangle bounds)
     {
         CardColours colours = Colours;
-        int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
+        int box = TextFit.Grow(CardPaint.IconBoxAt96, _dpi, _look.TextScale);
         var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
         int chevron = TextFit.Grow(ChevronGlyphAt96, _dpi, _look.TextScale);
         int gap = CardPlacement.Scale(8, _dpi);
-        int textX = bounds.X;
-        if (CardPaint.TryGlyph(g, FluentGlyphs.Send, iconRect, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
-        {
-            textX = iconRect.Right + gap;
-        }
+        CardPaint.DrawIcon(g, IconId.Send, filled: false, iconRect, colours.Text, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
+        int textX = iconRect.Right + gap;
 
         DrawText(g, new Rectangle(textX, bounds.Y, Math.Max(1, bounds.Right - chevron - gap - textX), bounds.Height), SendToCopy.CardRow, colours.Text, TypeRole.Body, StringAlignment.Near);
         var chevronRect = new Rectangle(bounds.Right - chevron, bounds.Y + ((bounds.Height - chevron) / 2), chevron, chevron);
-        _ = CardPaint.TryGlyph(g, FluentGlyphs.ChevronRight, chevronRect, colours.TextSecondary, _dpi, ChevronGlyphAt96, _look.TextScale);
+        CardPaint.DrawIcon(g, IconId.ChevronRight, filled: false, chevronRect, colours.TextSecondary, _dpi, ChevronGlyphAt96, _look.TextScale);
         if (_focus == WidgetCardFocus.SendTo && FocusShown)
         {
             CardPaint.Focus(g, bounds, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
@@ -1587,7 +1482,7 @@ internal sealed partial class WidgetCard : Form
     internal const int ChevronGlyphAt96 = 12;
 
     // What the status row holds now, for the painter, the tooltip and tests.
-    internal (char Glyph, string Text, Color Ink) StatusRow
+    internal (IconId? Glyph, string Text, Color Ink) StatusRow
     {
         get
         {
@@ -1599,35 +1494,35 @@ internal sealed partial class WidgetCard : Form
 
             if (BluetoothOff)
             {
-                return (FluentGlyphs.BluetoothOff, WidgetCopy.BluetoothOff, colours.Text);
+                return (IconId.BluetoothOff, WidgetCopy.BluetoothOff, colours.Text);
             }
 
             if (NotWorking)
             {
-                return (FluentGlyphs.Error, WidgetCopy.BluetoothNotWorking, colours.Caution);
+                return (IconId.Warning, WidgetCopy.BluetoothNotWorking, colours.Caution);
             }
 
             if (NoAirPodsPaired)
             {
-                return (FluentGlyphs.Bluetooth, WidgetCopy.NoAirPodsPaired, colours.Text);
+                return (IconId.Bluetooth, WidgetCopy.NoAirPodsPaired, colours.Text);
             }
 
             if (_model.Refresh is { IsProblem: true } problem && problem.Outcome == BatteryRefreshOutcome.NothingHeard)
             {
-                return (FluentGlyphs.Warning, WidgetCopy.OpenTheCase, colours.Caution);
+                return (IconId.Alert, WidgetCopy.OpenTheCase, colours.Caution);
             }
 
             if (_model.Refresh is { IsProblem: true } other)
             {
-                return (FluentGlyphs.Warning, other.ReadLine ?? string.Empty, colours.Caution);
+                return (IconId.Alert, other.ReadLine ?? string.Empty, colours.Caution);
             }
 
             if (AsksToOpenTheCase)
             {
-                return (FluentGlyphs.Warning, WidgetCopy.OpenTheCaseToShowBattery, colours.Caution);
+                return (IconId.Alert, WidgetCopy.OpenTheCaseToShowBattery, colours.Caution);
             }
 
-            char glyph = !_unasked && _model.Snapshot.Where == AirPodsWhere.Elsewhere ? FluentGlyphs.CellPhone : FluentGlyphs.OnThisPc;
+            IconId glyph = !_unasked && _model.Snapshot.Where == AirPodsWhere.Elsewhere ? IconId.Cellphone : IconId.Computer;
             return (glyph, WhereLineText, colours.Text);
         }
     }
@@ -1722,18 +1617,13 @@ internal sealed partial class WidgetCard : Form
     // Whether Connect and Disconnect can be pressed: the model says so, and Bluetooth is not off.
     internal bool ButtonUsable => _model.ButtonEnabled && !BluetoothOff && _model.Work == CardButtonWork.None;
 
-    // A line of text with its icon at the left, in the primary ink; with no icon font the words alone.
-    private void DrawIconLine(Graphics g, Rectangle bounds, char glyph, string text, TypeRole role = TypeRole.Body)
+    // A line of text with its icon at the left, in the primary ink.
+    private void DrawIconLine(Graphics g, Rectangle bounds, IconId glyph, bool filled, string text, TypeRole role = TypeRole.Body)
     {
         CardColours colours = Colours;
-        int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
+        int box = TextFit.Grow(CardPaint.IconBoxAt96, _dpi, _look.TextScale);
         var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
-        if (!CardPaint.TryGlyph(g, glyph, iconRect, colours.Text, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
-        {
-            DrawText(g, bounds, text, colours.Text, role, StringAlignment.Near);
-            return;
-        }
-
+        CardPaint.DrawIcon(g, glyph, filled, iconRect, colours.Text, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
         int indent = box + CardPlacement.Scale(8, _dpi);
         DrawText(g, new Rectangle(bounds.X + indent, bounds.Y, Math.Max(1, bounds.Width - indent), bounds.Height), text, colours.Text, role, StringAlignment.Near);
     }
@@ -1746,7 +1636,7 @@ internal sealed partial class WidgetCard : Form
         int trackWidth = CardPlacement.Scale(WidgetCardLayout.ToggleWidthAt96, _dpi);
         int trackHeight = CardPlacement.Scale(WidgetCardLayout.ToggleHeightAt96, _dpi);
         var labelRect = new Rectangle(rect.X, rect.Y, Math.Max(0, rect.Width - trackWidth - 8), rect.Height);
-        DrawIconLine(g, labelRect, FluentGlyphs.EarbudForThisPc(), WidgetCopy.AutoPauseSwitch);
+        DrawIconLine(g, labelRect, IconId.AirPods, _model.AutoPauseOn, WidgetCopy.AutoPauseSwitch);
 
         var track = new Rectangle(rect.Right - trackWidth, rect.Y + ((rect.Height - trackHeight) / 2), trackWidth, trackHeight);
         CardPaint.Toggle(g, track, _model.AutoPauseOn, colours, _dpi, Knob(SettingsRowId.PauseBud, track, _model.AutoPauseOn));
@@ -2021,7 +1911,7 @@ internal sealed partial class WidgetCard : Form
             g.FillPath(tileFill, tilePath);
         }
 
-        DrawTileMark(g, layout.Tile, colours.OnAccent);
+        DrawTileMark(g, layout.Tile, colours.OnAccent, _dpi);
         CardPaint.Wrapped(g, UpdatesTitleText(rows), layout.StatusTitle, _type, fourteen, bold: true, colours.Text);
         CardPaint.Wrapped(g, UpdatesCaptionText(setup), layout.StatusCaption, _type, twelve, bold: false, setup.Icon == SetupIcon.Caution ? colours.Caution : colours.TextSecondary);
         if (setup.Icon == SetupIcon.Spinner && layout.Action.IsEmpty)
@@ -2048,9 +1938,9 @@ internal sealed partial class WidgetCard : Form
         foreach (WidgetCardLayout.UpdatesRowLayout row in layout.UpdateRows)
         {
             Surface(row.Surface);
-            char glyph = row.Index switch { 0 => FluentGlyphs.Sync, 1 => FluentGlyphs.WhatsNew, 2 => FluentGlyphs.Repair, _ => FluentGlyphs.Bluetooth };
+            IconId glyph = row.Index switch { 0 => IconId.Sync, 1 => IconId.Information, 2 => IconId.Tool, _ => IconId.Bluetooth };
             string label = row.Index switch { 0 => WidgetCopy.CheckAutomatically, 1 => WidgetCopy.SettingsWhatsNew, 2 => WidgetCopy.RepairEarshot, 3 => WidgetCopy.FixConnectionRow, 4 => WidgetCopy.PairAirPodsRow, _ => WidgetCopy.TraceRow };
-            CardPaint.Glyph(g, glyph, row.Icon, colours.Text, _dpi);
+            CardPaint.DrawIcon(g, glyph, filled: row.Index == 0 && rows.AutoCheck, row.Icon, colours.Text, _dpi);
             CardPaint.Wrapped(g, label, row.Label, _type, fourteen, bold: false, colours.Text);
             bool focused = focusVisible && focus == new SetupTarget(SetupTargetKind.Row, row.Index);
             switch (row.Index)
@@ -2064,10 +1954,7 @@ internal sealed partial class WidgetCard : Form
 
                     break;
                 case 1:
-                    if (!CardPaint.TryGlyph(g, FluentGlyphs.OpenExternal, row.Control, colours.TextSecondary, _dpi, FluentGlyphs.ChevronSizeAt96, 1.0))
-                    {
-                        CardPaint.Chevron(g, row.Control, up: false, colours.TextSecondary, _dpi);
-                    }
+                    CardPaint.DrawIcon(g, IconId.ExternalLink, filled: false, row.Control, colours.TextSecondary, _dpi, CardPaint.ChevronBoxAt96);
 
                     if (focused)
                     {
@@ -2089,22 +1976,11 @@ internal sealed partial class WidgetCard : Form
         }
     }
 
-    // The earbud pair in the status tile, in the colour for text on the accent: the gauge's own pair scaled to the tile.
-    private static void DrawTileMark(Graphics g, Rectangle tile, Color ink)
-    {
-        var grid = new GaugeLayout(
-            96, 0, 0, tile, 0, 0, tile, Rectangle.Empty, Rectangle.Empty, Size.Empty, 0, 0, 0);
-        (RectangleF[] shapes, float radius) = grid.EarbudShapes();
-        using var path = new GraphicsPath { FillMode = FillMode.Winding };
-        foreach (RectangleF shape in shapes)
-        {
-            using GraphicsPath one = CardPaint.RoundedRectangle(shape, radius);
-            path.AddPath(one, connect: false);
-        }
+    // The AirPods icon in the status tile, the line drawing in the colour for text on the accent, 20 px at 100% in the middle of the tile.
+    private static void DrawTileMark(Graphics g, Rectangle tile, Color ink, int dpi) =>
+        CardPaint.DrawIcon(g, IconId.AirPods, filled: false, tile, ink, dpi, TileMarkBoxAt96);
 
-        using var brush = new SolidBrush(ink);
-        g.FillPath(brush, path);
-    }
+    private const int TileMarkBoxAt96 = 20;
 
     // The download's bar, 4 px, with its percentage 36 wide at the right. While the size is not known the bar has
     // no fill and there is no figure: a percentage is only ever the download's own.

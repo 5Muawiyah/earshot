@@ -1,3 +1,5 @@
+using IconId = Earshot.Icons.Catalogue.Icon;
+
 namespace Earshot.Widget;
 
 // Who asked for a card. An asked card is the gauge click or a shortcut: activatable, takes focus and keys. An unasked one
@@ -24,20 +26,20 @@ internal enum UnaskedKind
 }
 
 // The button a compact row can carry: an icon button (a glyph, 32 x 32 at 100% text, named and given a tooltip by Label) when
-// Glyph is set, else a text button showing Label, right-aligned on the last line. RunningLabel is what a screen reader calls the
+// Glyph is not null, else a text button showing Label, right-aligned on the last line. RunningLabel is what a screen reader calls the
 // button while its work runs ("Taking back").
-internal sealed record CompactAction(string Label, char Glyph = '\0', string? RunningLabel = null)
+internal sealed record CompactAction(string Label, IconId? Glyph = null, string? RunningLabel = null)
 {
-    public bool IsIcon => Glyph != '\0';
+    public bool IsIcon => Glyph is not null;
 }
 
 // How far a compact action has got. Idle: its glyph or label. Progress: a 16 px accent ring turning while the work runs.
-// Done: a tick (E73E) for the time the design holds it.
+// Done: a tick for the time the design holds it.
 internal enum CompactActionState { Idle, Progress, Done }
 
-// What a compact row says. Glyph is '\0' when the row has none. Hold is how long the row stays once its entrance has finished,
+// What a compact row says. Glyph is null when the row has none. Hold is how long the row stays once its entrance has finished,
 // or null for a row that stays until it is closed. Kind says what the row is about, for the arbiter.
-internal sealed record CompactContent(char Glyph, InkRole Ink, string Text, CompactAction? Action, TimeSpan? Hold)
+internal sealed record CompactContent(IconId? Glyph, InkRole Ink, string Text, CompactAction? Action, TimeSpan? Hold)
 {
     public UnaskedKind Kind { get; init; } = UnaskedKind.Notice;
 }
@@ -46,27 +48,28 @@ internal sealed record CompactContent(char Glyph, InkRole Ink, string Text, Comp
 // seconds once its entrance has finished (OneCardArbiter.CompactHold); only moved to carries a button.
 internal static class CompactContents
 {
-    // E8EA and "Moved to iPhone"; with the label empty, E772 and "Moved to another device". The button is E977, "Take back".
+    // The phone and "Moved to iPhone"; with the label empty, the device icon and "Moved to another device". The button is the computer,
+    // "Take back".
     public static CompactContent MovedTo(string otherDeviceLabel) => new(
-        string.IsNullOrWhiteSpace(otherDeviceLabel) ? FluentGlyphs.Devices : FluentGlyphs.CellPhone,
+        string.IsNullOrWhiteSpace(otherDeviceLabel) ? IconId.Device : IconId.Cellphone,
         InkRole.Primary,
         WidgetCopy.MovedTo(otherDeviceLabel),
-        new CompactAction(WidgetCopy.TakeBack, FluentGlyphs.OnThisPc, WidgetCopy.TakingBack),
+        new CompactAction(WidgetCopy.TakeBack, IconId.Computer, WidgetCopy.TakingBack),
         OneCardArbiter.CompactHold)
     {
         Kind = UnaskedKind.MovedTo,
     };
 
-    // E7BA in caution and the part that crossed with its number.
+    // The alert triangle in caution and the part that crossed with its number.
     public static CompactContent LowBattery(string partsLabel, int percent) => new(
-        FluentGlyphs.Warning, InkRole.Caution, WidgetCopy.LowBatteryCompact(partsLabel, percent), null, OneCardArbiter.CompactHold)
+        IconId.Alert, InkRole.Caution, WidgetCopy.LowBatteryCompact(partsLabel, percent), null, OneCardArbiter.CompactHold)
     {
         Kind = UnaskedKind.LowFallback,
     };
 
-    // E73E in the accent and "Fully charged".
+    // A tick in the accent and "Fully charged".
     public static CompactContent FullyCharged() => new(
-        FluentGlyphs.CheckMark, InkRole.Accent, WidgetCopy.FullyChargedCompact, null, OneCardArbiter.CompactHold)
+        IconId.Check, InkRole.Accent, WidgetCopy.FullyChargedCompact, null, OneCardArbiter.CompactHold)
     {
         Kind = UnaskedKind.ChargedFallback,
     };

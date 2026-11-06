@@ -22,6 +22,10 @@ internal static class IconPainter
     [ThreadStatic]
     internal static List<DrawnIcon>? DrawnIconLog;
 
+    // True while a test renders a page for its background alone: every icon is still logged, none is painted. Per thread.
+    [ThreadStatic]
+    internal static bool PaintNothingForTest;
+
     // The box's top-left corner for an icon of boxPx pixels centred in bounds: whole pixels, by integer division.
     public static Point BoxOrigin(Rectangle bounds, int boxPx) =>
         new(bounds.X + ((bounds.Width - boxPx) / 2), bounds.Y + ((bounds.Height - boxPx) / 2));
@@ -46,7 +50,7 @@ internal static class IconPainter
         DrawnIconLog?.Add(new DrawnIcon(icon, style, boxPx, ink, box, rule, rotationStep, Path.GetFileName(callerFile) + ":" + callerLine));
 
         ReadOnlyMemory<byte> mask = IconRaster.Coverage(icon, style, boxPx, rule, rotationStep);
-        if (ink.A == 0)
+        if (ink.A == 0 || PaintNothingForTest)
         {
             return;
         }

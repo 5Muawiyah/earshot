@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using Earshot.Tray;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -59,7 +60,7 @@ internal sealed partial class WidgetCard
 
     private WidgetCardLayout.CompactLayout ComputeCompactLayout(Graphics measure, CompactContent content)
     {
-        bool hasGlyph = content.Glyph != '\0';
+        bool hasGlyph = content.Glyph is not null;
         WidgetCardLayout.CompactButton button = content.Action is null
             ? WidgetCardLayout.CompactButton.None
             : content.Action.IsIcon ? WidgetCardLayout.CompactButton.Icon : WidgetCardLayout.CompactButton.Text;
@@ -93,9 +94,9 @@ internal sealed partial class WidgetCard
         }
 
         CardColours colours = Colours;
-        if (!layout.Glyph.IsEmpty)
+        if (!layout.Glyph.IsEmpty && content.Glyph is { } glyph)
         {
-            _ = CardPaint.TryGlyph(g, content.Glyph, layout.Glyph, CompactInk(content.Ink, colours), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
+            CardPaint.DrawIcon(g, glyph, filled: false, layout.Glyph, CompactInk(content.Ink, colours), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
         }
 
         DrawText(g, layout.Text, content.Text, colours.Text, TypeRole.Body, StringAlignment.Near, wrap: layout.Lines > 1);
@@ -140,10 +141,14 @@ internal sealed partial class WidgetCard
                 DrawRing(g, bounds, WithOpacity(colours.Accent, opacity), _spinAngle);
                 break;
             case CompactActionState.Done:
-                _ = CardPaint.TryGlyph(g, FluentGlyphs.CheckMark, bounds, WithOpacity(colours.HighContrast ? colours.Text : colours.Accent, opacity), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
+                CardPaint.DrawIcon(g, IconId.Check, filled: false, bounds, WithOpacity(colours.HighContrast ? colours.Text : colours.Accent, opacity), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
                 break;
             default:
-                _ = CardPaint.TryGlyph(g, action.Glyph, bounds, WithOpacity(colours.Text, opacity), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
+                if (action.Glyph is { } glyph)
+                {
+                    CardPaint.DrawIcon(g, glyph, filled: false, bounds, WithOpacity(colours.Text, opacity), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
+                }
+
                 break;
         }
     }

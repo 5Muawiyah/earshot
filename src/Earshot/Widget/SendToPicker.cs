@@ -2,6 +2,7 @@ using System.Drawing.Drawing2D;
 using Earshot.Contracts;
 using Earshot.Interop;
 using Earshot.Tray;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -32,7 +33,7 @@ internal static class SendToLayout
         int iconGap = CardPlacement.Scale(IconGapAt96, dpi);
         int line = WidgetCardLayout.RowHeight(dpi, textScale);
         int rowHeight = line + CardPlacement.Scale(RowExtraAt96, dpi);
-        int box = TextFit.Grow(CardPaint.GlyphSizeAt96, dpi, textScale);
+        int box = TextFit.Grow(CardPaint.IconBoxAt96, dpi, textScale);
 
         var header = new Rectangle(pad, pad, width - (2 * pad), line);
         var headerIcon = new Rectangle(header.X + inside, header.Y + ((header.Height - box) / 2), box, box);
@@ -380,8 +381,7 @@ internal sealed class SendToPicker : Form
         }
 
         // Where the AirPods are now.
-        char headerGlyph = _model.WhereGlyph == FluentGlyphs.Earbud ? FluentGlyphs.EarbudForThisPc() : _model.WhereGlyph;
-        _ = CardPaint.TryGlyph(g, headerGlyph, _layout.HeaderIcon, colours.TextSecondary, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale);
+        CardPaint.DrawIcon(g, _model.WhereGlyph, filled: false, _layout.HeaderIcon, colours.TextSecondary, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
         CardPaint.Text(g, _model.Where, _layout.HeaderText, _type, CardPlacement.Scale(12, _dpi), bold: false, colours.TextSecondary, StringAlignment.Near, StringAlignment.Center);
         CardPaint.Divider(g, _layout.Header.Left, _layout.Header.Right, _layout.DividerY, colours);
 
@@ -400,11 +400,11 @@ internal sealed class SendToPicker : Form
             }
 
             Color ink = row.Enabled ? colours.Text : colours.TextDisabled;
-            _ = CardPaint.TryGlyph(g, row.Glyph, at.Icon, ink, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale);
+            CardPaint.DrawIcon(g, row.Glyph, filled: row.Current, at.Icon, ink, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
             CardPaint.Text(g, row.Label, at.Label, _type, CardPlacement.Scale(14, _dpi), bold: false, ink, StringAlignment.Near, StringAlignment.Center);
             if (row.Current)
             {
-                _ = CardPaint.TryGlyph(g, FluentGlyphs.CheckMark, at.Tick, colours.Accent, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale);
+                CardPaint.DrawIcon(g, IconId.Check, filled: false, at.Tick, colours.Accent, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
             }
 
             if (_focusCue && i == _focus && ContainsFocus)

@@ -1,4 +1,5 @@
 using Earshot.App;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -357,7 +358,7 @@ internal sealed record SettingsItem(
 {
     // The icon beside the label, where it goes, the tooltip and the accessible name. The pictures of the gauge orders,
     // for the one row that has them. Init-only, so a row built without them is a row with no icon.
-    public char Glyph { get; init; }
+    public IconId? Glyph { get; init; }
 
     public Rectangle IconRect { get; init; }
 
@@ -380,7 +381,7 @@ internal sealed record SettingsItem(
     // row, where the gauge as it is now is drawn.
     public Rectangle Chevron { get; init; }
 
-    public char ChevronGlyph { get; init; }
+    public IconId? ChevronGlyph { get; init; }
 
     public Rectangle Preview { get; init; }
 }
@@ -499,7 +500,7 @@ internal static class SettingsPageLayout
             SettingsRowInfo info = SettingsRows.For(item.Row);
             return item with
             {
-                Glyph = nested ? '\0' : info.Glyph,
+                Glyph = nested ? null : info.Glyph,
                 IconRect = IconAt(item.LabelRect),
                 Tip = info.Tip,
                 AccessibleName = info.Name,
@@ -613,7 +614,7 @@ internal static class SettingsPageLayout
                 (top, _) => (Rectangle.Empty, Rectangle.Empty, new Rectangle(right - chevronBox, top + ((control - chevronBox) / 2), chevronBox, chevronBox)),
                 SettingsPart.Button);
             SettingsItem row = items[^1];
-            items[^1] = row with { A = row.Bounds, Chevron = row.Value, ChevronGlyph = FluentGlyphs.ChevronRight };
+            items[^1] = row with { A = row.Bounds, Chevron = row.Value, ChevronGlyph = IconId.ChevronRight };
         }
 
         void ToggleRow(SettingsRowId id, string label, string? sub) =>
@@ -676,7 +677,7 @@ internal static class SettingsPageLayout
             items.Add(Dressed(new SettingsItem(
                 SettingsItemKind.Row, SettingsRowId.GaugeOrder, WidgetCopy.SettingsOrder, null, false, headBounds, orderLabel,
                 Rectangle.Empty, Rectangle.Empty, headBounds, Rectangle.Empty), separated: false)
-                with { Chevron = chevron, ChevronGlyph = values.GaugeOrderExpanded ? FluentGlyphs.ChevronUp : FluentGlyphs.ChevronDown, Preview = preview });
+                with { Chevron = chevron, ChevronGlyph = values.GaugeOrderExpanded ? IconId.ChevronUp : IconId.ChevronDown, Preview = preview });
             targets.Add(new SettingsTarget(SettingsRowId.GaugeOrder, SettingsPart.Expand));
             y += header;
 
@@ -833,7 +834,7 @@ internal static class SettingsPageLayout
             SettingsPart.Expand);
         {
             SettingsItem row = items[^1];
-            items[^1] = row with { B = row.Bounds, Chevron = row.Value, ChevronGlyph = values.MoreExpanded ? FluentGlyphs.ChevronUp : FluentGlyphs.ChevronDown };
+            items[^1] = row with { B = row.Bounds, Chevron = row.Value, ChevronGlyph = values.MoreExpanded ? IconId.ChevronUp : IconId.ChevronDown };
         }
 
         if (values.MoreExpanded)

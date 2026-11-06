@@ -1,4 +1,6 @@
 
+using IconId = Earshot.Icons.Catalogue.Icon;
+
 namespace Earshot.Widget;
 
 // A notice carried by the card the owner asked for. While that card is open a notice does not open another window: on the main
@@ -58,7 +60,7 @@ internal sealed partial class WidgetCard
         }
 
         int contentWidth = WidgetCardLayout.WidthFor(_dpi) - (2 * CardPlacement.Scale(WidgetCardLayout.PaddingAt96, _dpi));
-        int glyph = notice.Glyph != '\0' ? TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale) + gap : 0;
+        int glyph = notice.Glyph is not null ? TextFit.Grow(CardPaint.IconBoxAt96, _dpi, _look.TextScale) + gap : 0;
         int button = _noticeActionWidth > 0 ? _noticeActionWidth + gap : 0;
         int lines = CardPaint.Lines(measure, notice.Text, Math.Max(1, contentWidth - glyph - button), _type, CardPlacement.Scale(14, _dpi), bold: false);
         return Math.Clamp(lines, 1, WidgetCardLayout.CompactMaxLines);
@@ -85,14 +87,12 @@ internal sealed partial class WidgetCard
         CardColours colours = Colours;
         int gap = CardPlacement.Scale(8, _dpi);
         int textX = bounds.X;
-        if (notice.Glyph != '\0')
+        if (notice.Glyph is { } glyph)
         {
-            int box = TextFit.Grow(CardPaint.GlyphSizeAt96, _dpi, _look.TextScale);
+            int box = TextFit.Grow(CardPaint.IconBoxAt96, _dpi, _look.TextScale);
             var iconRect = new Rectangle(bounds.X, bounds.Y + ((bounds.Height - box) / 2), box, box);
-            if (CardPaint.TryGlyph(g, notice.Glyph, iconRect, CompactInk(notice.Ink, colours), _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
-            {
-                textX = iconRect.Right + gap;
-            }
+            CardPaint.DrawIcon(g, glyph, filled: false, iconRect, CompactInk(notice.Ink, colours), _dpi, CardPaint.IconBoxAt96, _look.TextScale);
+            textX = iconRect.Right + gap;
         }
 
         Rectangle action = NoticeActionRect();
@@ -142,10 +142,10 @@ internal sealed partial class WidgetCard
             g.DrawLine(pen, strip.Left, strip.Top, strip.Right, strip.Top);
         }
 
-        if (!layout.Glyph.IsEmpty)
+        if (!layout.Glyph.IsEmpty && notice.Glyph is { } glyph)
         {
-            _ = CardPaint.TryGlyph(
-                g, notice.Glyph, new Rectangle(layout.Glyph.X, strip.Y + layout.Glyph.Y, layout.Glyph.Width, layout.Glyph.Height),
+            CardPaint.DrawIcon(
+                g, glyph, filled: false, new Rectangle(layout.Glyph.X, strip.Y + layout.Glyph.Y, layout.Glyph.Width, layout.Glyph.Height),
                 CompactInk(notice.Ink, colours), _dpi, WidgetCardLayout.CompactGlyphAt96, _look.TextScale);
         }
 

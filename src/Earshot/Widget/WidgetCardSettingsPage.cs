@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -844,9 +845,10 @@ internal sealed partial class WidgetCard
                 g.DrawLine(line, item.Bounds.Left + 1, strokeY, item.Bounds.Right - 2, strokeY);
             }
 
-            if (item.Glyph != '\0')
+            if (item.Glyph is { } glyph)
             {
-                CardPaint.Glyph(g, FluentGlyphs.Resolve(item.Glyph), item.IconRect, colours.Text, _dpi);
+                // Filled while the row's switch is on, the line drawing otherwise.
+                CardPaint.DrawIcon(g, glyph, filled: ToggleValue(values, item.Row), item.IconRect, colours.Text, _dpi);
             }
 
             if (item.Label.Length > 0)
@@ -859,10 +861,9 @@ internal sealed partial class WidgetCard
                 CardPaint.Wrapped(g, item.Sub, item.SubRect, _type, twelve, bold: false, item.SubIsProblem ? colours.Caution : colours.TextSecondary);
             }
 
-            if (!item.Chevron.IsEmpty && item.ChevronGlyph != '\0'
-                && !CardPaint.TryGlyph(g, item.ChevronGlyph, item.Chevron, colours.TextSecondary, _dpi, FluentGlyphs.ChevronSizeAt96, 1.0))
+            if (!item.Chevron.IsEmpty && item.ChevronGlyph is { } chevronGlyph)
             {
-                CardPaint.Chevron(g, item.Chevron, up: item.ChevronGlyph == FluentGlyphs.ChevronUp, colours.TextSecondary, _dpi);
+                CardPaint.DrawIcon(g, chevronGlyph, filled: false, item.Chevron, colours.TextSecondary, _dpi, CardPaint.ChevronBoxAt96);
             }
 
             switch (item.Row)
@@ -896,7 +897,7 @@ internal sealed partial class WidgetCard
                     CardPaint.SmallButton(g, item.A, WidgetCopy.CopyButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button));
                     break;
                 case SettingsRowId.SoundSettings:
-                    CardPaint.SmallButton(g, item.A, WidgetCopy.OpenButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button), FluentGlyphs.OpenExternal);
+                    CardPaint.SmallButton(g, item.A, WidgetCopy.OpenButton, colours, _type, _dpi, Focused(item.Row, SettingsPart.Button), IconId.ExternalLink);
                     break;
                 case SettingsRowId.About:
                 case SettingsRowId.History:
@@ -920,10 +921,7 @@ internal sealed partial class WidgetCard
                         CardPaint.Focus(g, item.A, item.A.Height / 2, colours, _dpi);
                     }
 
-                    if (!CardPaint.TryGlyph(g, _caseCardExpanded ? FluentGlyphs.ChevronUp : FluentGlyphs.ChevronDown, item.B, colours.TextSecondary, _dpi, FluentGlyphs.ChevronSizeAt96, 1.0))
-                    {
-                        CardPaint.Chevron(g, item.B, up: _caseCardExpanded, colours.TextSecondary, _dpi);
-                    }
+                    CardPaint.DrawIcon(g, _caseCardExpanded ? IconId.ChevronUp : IconId.ChevronDown, filled: false, item.B, colours.TextSecondary, _dpi, CardPaint.ChevronBoxAt96);
 
                     if (Focused(item.Row, SettingsPart.Expand))
                     {

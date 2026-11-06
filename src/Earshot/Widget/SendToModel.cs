@@ -1,3 +1,5 @@
+using IconId = Earshot.Icons.Catalogue.Icon;
+
 namespace Earshot.Widget;
 
 // What each row of the send-to picker does.
@@ -16,7 +18,7 @@ internal enum SendToChoice
 
 // One row: what it does, the icon beside it, its words, whether it is where the AirPods are now (a tick, and a press
 // does nothing) and whether it can be pressed at all.
-internal sealed record SendToRow(SendToChoice Choice, char Glyph, string Label, bool Current, bool Enabled)
+internal sealed record SendToRow(SendToChoice Choice, IconId Glyph, string Label, bool Current, bool Enabled)
 {
     // A press does something only on a row that is available and is not where the AirPods already are.
     public bool Acts => Enabled && !Current;
@@ -33,7 +35,7 @@ internal sealed record SendToRow(SendToChoice Choice, char Glyph, string Label, 
 // The other device's name is shown as the place only in the second state, where the existing state says the AirPods are on it. In
 // the other two it appears only as the name of what a press would do ("Send to iPhone").
 // Both of the first two rows are held while a switch is already in flight (busy), as the Connect button is.
-internal sealed record SendToModel(string Where, char WhereGlyph, IReadOnlyList<SendToRow> Rows)
+internal sealed record SendToModel(string Where, IconId WhereGlyph, IReadOnlyList<SendToRow> Rows)
 {
     public static SendToModel From(AirPodsWhere where, string otherDeviceLabel, bool busy)
     {
@@ -49,11 +51,11 @@ internal sealed record SendToModel(string Where, char WhereGlyph, IReadOnlyList<
 
         var rows = new List<SendToRow>
         {
-            new(SendToChoice.ThisPc, FluentGlyphs.OnThisPc, SendToCopy.ThisPc, Current: here, Enabled: !busy),
-            new(SendToChoice.OtherDevice, FluentGlyphs.CellPhone, SendToCopy.SendToDevice(name), Current: there, Enabled: !busy && (here || there)),
-            new(SendToChoice.OtherSpeakers, FluentGlyphs.Volume, SendToCopy.OtherSpeakers, Current: false, Enabled: true),
+            new(SendToChoice.ThisPc, IconId.Computer, SendToCopy.ThisPc, Current: here, Enabled: !busy),
+            new(SendToChoice.OtherDevice, IconId.Cellphone, SendToCopy.SendToDevice(name), Current: there, Enabled: !busy && (here || there)),
+            new(SendToChoice.OtherSpeakers, IconId.Volume, SendToCopy.OtherSpeakers, Current: false, Enabled: true),
         };
-        char glyph = here ? FluentGlyphs.OnThisPc : there ? FluentGlyphs.CellPhone : FluentGlyphs.Earbud;
+        IconId glyph = here ? IconId.Computer : there ? IconId.Cellphone : IconId.AirPods;
         return new SendToModel(whereText, glyph, rows);
     }
 }

@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -70,38 +71,14 @@ internal sealed partial class WidgetCard
         bool reading = _model.Refresh is { Reading: true };
         Color ink = reading ? colours.Accent : RefreshDisabled ? colours.TextDisabled : colours.Text;
         Rectangle bounds = layout.Refresh;
-        GraphicsState saved = g.Save();
-        if (reading)
-        {
-            float centreX = bounds.X + (bounds.Width / 2f);
-            float centreY = bounds.Y + (bounds.Height / 2f);
-            g.TranslateTransform(centreX, centreY);
-            g.RotateTransform((_model.Refresh!.SpinFrame % BatteryRefreshView.SpinFrames) * (360f / BatteryRefreshView.SpinFrames));
-            g.TranslateTransform(-centreX, -centreY);
-        }
 
-        if (!CardPaint.TryGlyph(g, FluentGlyphs.Refresh, bounds, ink, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
-        {
-            DrawRefreshArrow(g, bounds, ink);
-        }
-
-        g.Restore(saved);
+        // The turn is baked into the icon's mask, a tenth of a turn a frame, so the icon is still drawn pixel for pixel.
+        int turn = reading ? _model.Refresh!.SpinFrame % BatteryRefreshView.SpinFrames : 0;
+        CardPaint.DrawIcon(g, IconId.Refresh, filled: false, bounds, ink, _dpi, CardPaint.IconBoxAt96, _look.TextScale, rotationStep: turn);
         if (_focus == WidgetCardFocus.Refresh && FocusShown)
         {
             CardPaint.Focus(g, bounds, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, _dpi), colours, _dpi);
         }
     }
 
-    // The icon where no icon font is installed: most of a circle with an arrowhead at its open end, 16 px, a 1.2 px
-    // stroke and round caps, like the gear beside it.
-    private void DrawRefreshArrow(Graphics g, Rectangle button, Color colour)
-    {
-        float s = _dpi / 96f;
-        float left = button.X + ((button.Width - (16 * s)) / 2f);
-        float top = button.Y + ((button.Height - (16 * s)) / 2f);
-        PointF P(float x, float y) => new(left + (x * s), top + (y * s));
-        using var pen = new Pen(colour, 1.2f * s) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-        g.DrawArc(pen, left + (2f * s), top + (2f * s), 12f * s, 12f * s, -60f, 280f);
-        g.DrawLines(pen, new[] { P(11.6f, 0.8f), P(11.6f, 4.2f), P(8.2f, 4.2f) });
-    }
 }

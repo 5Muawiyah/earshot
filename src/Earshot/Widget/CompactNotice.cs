@@ -88,7 +88,7 @@ internal sealed class CompactNoticePresenter : ICardPresenter
             || (!string.IsNullOrWhiteSpace(deviceName) && string.Equals(title, deviceName.Trim(), StringComparison.OrdinalIgnoreCase));
         string text = dropTitle ? content.Status : title + ": " + content.Status;
         CompactAction? action = content.Action is { } card ? new CompactAction(card.Label) : null;
-        var row = new CompactContent('\0', InkRole.Primary, text, action, OneCardArbiter.NoticeHold(content.Action is not null, content.StaysUp))
+        var row = new CompactContent(null, InkRole.Primary, text, action, OneCardArbiter.NoticeHold(content.Action is not null, content.StaysUp))
         {
             Kind = UnaskedKind.Notice,
         };

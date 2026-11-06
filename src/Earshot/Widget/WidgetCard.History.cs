@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -14,8 +15,8 @@ internal sealed partial class WidgetCard
         int twelve = CardPlacement.Scale(12, _dpi);
         float scale = _dpi / 96f;
 
-        DrawStepButton(g, page.DayBack, FluentGlyphs.ChevronLeft, left: true, view.CanBack, colours, focusVisible && focus == new SetupTarget(SetupTargetKind.Day, 0), radius);
-        DrawStepButton(g, page.DayForward, FluentGlyphs.ChevronRight, left: false, view.CanForward, colours, focusVisible && focus == new SetupTarget(SetupTargetKind.Day, 1), radius);
+        DrawStepButton(g, page.DayBack, IconId.ChevronLeft, view.CanBack, colours, focusVisible && focus == new SetupTarget(SetupTargetKind.Day, 0), radius);
+        DrawStepButton(g, page.DayForward, IconId.ChevronRight, view.CanForward, colours, focusVisible && focus == new SetupTarget(SetupTargetKind.Day, 1), radius);
         CardPaint.Text(
             g, view.DayLabel, page.DayLabel, _type, CardPlacement.Scale(14, _dpi), bold: true, colours.Text, StringAlignment.Center, StringAlignment.Center);
 
@@ -139,23 +140,12 @@ internal sealed partial class WidgetCard
         return pen;
     }
 
-    // An icon button holding a left or right chevron: the glyph, or two strokes without the icon font; dimmed when it cannot step.
+    // An icon button holding a left or right arrow; dimmed when it cannot step.
     // The hover and pressed fill is drawn under it with the other icon buttons' (DrawFills).
-    private void DrawStepButton(Graphics g, Rectangle rect, char glyph, bool left, bool enabled, CardColours colours, bool focused, int radius)
+    private void DrawStepButton(Graphics g, Rectangle rect, IconId glyph, bool enabled, CardColours colours, bool focused, int radius)
     {
         Color ink = enabled ? colours.Text : colours.TextDisabled;
-        if (!CardPaint.TryGlyph(g, glyph, rect, ink, _dpi, CardPaint.GlyphSizeAt96, _look.TextScale))
-        {
-            float s = _dpi / 96f;
-            float cx = rect.X + (rect.Width / 2f);
-            float cy = rect.Y + (rect.Height / 2f);
-            float dx = (left ? -1 : 1) * 3f * s;
-            using var pen = new Pen(ink, Math.Max(1f, 1.2f * s)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-            SmoothingMode before = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.DrawLines(pen, new PointF[] { new(cx - dx, cy - (5 * s)), new(cx + dx, cy), new(cx - dx, cy + (5 * s)) });
-            g.SmoothingMode = before;
-        }
+        CardPaint.DrawIcon(g, glyph, filled: false, rect, ink, _dpi, CardPaint.IconBoxAt96, _look.TextScale);
 
         if (focused)
         {

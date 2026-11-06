@@ -1,44 +1,45 @@
+using IconId = Earshot.Icons.Catalogue.Icon;
+
 namespace Earshot.Widget;
 
-// What each settings row shows beside its label and says to a screen reader: the icon, the tooltip that holds what
-// used to be the row's description, and the accessible name. The icons are Segoe Fluent Icons code points.
-// https://learn.microsoft.com/en-us/windows/apps/design/style/segoe-fluent-icons-font
-internal sealed record SettingsRowInfo(char Glyph, string? Tip, string? Name);
+// What each settings row shows beside its label and says to a screen reader: the icon (null for a row with none), the tooltip
+// that holds what used to be the row's description, and the accessible name. The icons are the catalogue's (Earshot.Icons).
+internal sealed record SettingsRowInfo(IconId? Glyph, string? Tip, string? Name);
 
 internal static class SettingsRows
 {
     public static SettingsRowInfo For(SettingsRowId row) => row switch
     {
-        SettingsRowId.GaugePosition => new(FluentGlyphs.DockBottom, WidgetCopy.TipGaugePosition, WidgetCopy.NameGaugePosition),
-        SettingsRowId.GaugeDisplay => new(FluentGlyphs.TvMonitor, WidgetCopy.TipGaugeDisplay, WidgetCopy.NameGaugeDisplay),
-        SettingsRowId.GaugeOrder => new(FluentGlyphs.Sort, WidgetCopy.TipGaugeOrder, WidgetCopy.NameGaugeOrder),
-        SettingsRowId.OtherDevice => new(FluentGlyphs.CellPhone, WidgetCopy.TipOtherDevice, WidgetCopy.NameOtherDeviceBox),
-        SettingsRowId.PauseBud => new(FluentGlyphs.Earbud, WidgetCopy.TipPauseBud, WidgetCopy.NamePauseBud),
-        SettingsRowId.PauseLeave => new(FluentGlyphs.Pause, WidgetCopy.TipPauseLeave, WidgetCopy.NamePauseLeave),
-        SettingsRowId.LowBattery => new(FluentGlyphs.Ringer, WidgetCopy.TipLowBattery, WidgetCopy.NameLowBattery),
-        SettingsRowId.LeftClick => new(FluentGlyphs.Mouse, WidgetCopy.TipLeftClick, WidgetCopy.NameLeftClick),
-        SettingsRowId.HandBack => new(FluentGlyphs.PowerButton, WidgetCopy.TipHandBack, WidgetCopy.NameHandBack),
-        SettingsRowId.Connect => new(FluentGlyphs.Keyboard, WidgetCopy.TipConnectShortcut, WidgetCopy.NameConnectShortcut),
-        SettingsRowId.Disconnect => new(FluentGlyphs.Keyboard, WidgetCopy.TipDisconnectShortcut, WidgetCopy.NameDisconnectShortcut),
-        SettingsRowId.OpenCard => new(FluentGlyphs.Keyboard, ShortcutCopy.TipCardShortcut, ShortcutCopy.NameCardShortcut),
-        SettingsRowId.SendTo => new(FluentGlyphs.Keyboard, SendToCopy.TipShortcut, SendToCopy.NameShortcut),
-        SettingsRowId.SendToCard => new(FluentGlyphs.Send, SendToCopy.TipCardRow, SendToCopy.NameCardRow),
-        SettingsRowId.SendToGauge => new(FluentGlyphs.Send, SendToCopy.TipGaugeMenu, SendToCopy.NameGaugeMenu),
-        SettingsRowId.Repair => new(FluentGlyphs.Repair, WidgetCopy.TipRepair, WidgetCopy.NameRepair),
-        SettingsRowId.CheckAutomatically => new(FluentGlyphs.Sync, WidgetCopy.TipAutoCheck, WidgetCopy.NameAutoCheck),
-        SettingsRowId.MicrophoneOff => new(FluentGlyphs.MicOff, WidgetCopy.TipMicOff, WidgetCopy.NameMicOff),
-        SettingsRowId.SoundSettings => new(FluentGlyphs.Volume, WidgetCopy.TipSoundSettings, WidgetCopy.NameSoundSettings),
-        SettingsRowId.CaseCard => new(FluentGlyphs.Preview, WidgetCopy.TipCaseCard, WidgetCopy.NameCaseCard),
-        SettingsRowId.FullyCharged => new(FluentGlyphs.Bolt, WidgetCopy.TipFullyCharged, WidgetCopy.NameFullyCharged),
-        SettingsRowId.MovedTo => new(FluentGlyphs.CellPhone, WidgetCopy.TipMovedTo, WidgetCopy.NameMovedTo),
-        SettingsRowId.History => new(FluentGlyphs.History, WidgetCopy.TipHistory, WidgetCopy.NameHistory),
-        SettingsRowId.CopyDiagnostics => new(FluentGlyphs.Copy, WidgetCopy.TipCopyDiagnostics, WidgetCopy.NameCopyDiagnostics),
-        SettingsRowId.More => new(FluentGlyphs.More, WidgetCopy.TipMore, WidgetCopy.NameMore),
-        SettingsRowId.About => new(FluentGlyphs.Sync, WidgetCopy.TipAbout, WidgetCopy.NameAbout),
-        SettingsRowId.CaseCardClose => new('\0', WidgetCopy.TipCaseCardClose, WidgetCopy.NameCaseCardClose),
-        SettingsRowId.CaseCardDisplays => new('\0', WidgetCopy.TipCaseCardDisplays, WidgetCopy.NameCaseCardDisplays),
-        SettingsRowId.CaseCardDisplay => new('\0', WidgetCopy.TipCaseCardDisplay, null),
-        _ => new('\0', null, null),
+        SettingsRowId.GaugePosition => new(IconId.LayoutBottom, WidgetCopy.TipGaugePosition, WidgetCopy.NameGaugePosition),
+        SettingsRowId.GaugeDisplay => new(IconId.Monitor, WidgetCopy.TipGaugeDisplay, WidgetCopy.NameGaugeDisplay),
+        SettingsRowId.GaugeOrder => new(IconId.Transfer, WidgetCopy.TipGaugeOrder, WidgetCopy.NameGaugeOrder),
+        SettingsRowId.OtherDevice => new(IconId.Cellphone, WidgetCopy.TipOtherDevice, WidgetCopy.NameOtherDeviceBox),
+        SettingsRowId.PauseBud => new(IconId.AirPods, WidgetCopy.TipPauseBud, WidgetCopy.NamePauseBud),
+        SettingsRowId.PauseLeave => new(IconId.Pause, WidgetCopy.TipPauseLeave, WidgetCopy.NamePauseLeave),
+        SettingsRowId.LowBattery => new(IconId.Notification, WidgetCopy.TipLowBattery, WidgetCopy.NameLowBattery),
+        SettingsRowId.LeftClick => new(IconId.Mouse, WidgetCopy.TipLeftClick, WidgetCopy.NameLeftClick),
+        SettingsRowId.HandBack => new(IconId.Power, WidgetCopy.TipHandBack, WidgetCopy.NameHandBack),
+        SettingsRowId.Connect => new(IconId.Keyboard, WidgetCopy.TipConnectShortcut, WidgetCopy.NameConnectShortcut),
+        SettingsRowId.Disconnect => new(IconId.Keyboard, WidgetCopy.TipDisconnectShortcut, WidgetCopy.NameDisconnectShortcut),
+        SettingsRowId.OpenCard => new(IconId.Keyboard, ShortcutCopy.TipCardShortcut, ShortcutCopy.NameCardShortcut),
+        SettingsRowId.SendTo => new(IconId.Keyboard, SendToCopy.TipShortcut, SendToCopy.NameShortcut),
+        SettingsRowId.SendToCard => new(IconId.Send, SendToCopy.TipCardRow, SendToCopy.NameCardRow),
+        SettingsRowId.SendToGauge => new(IconId.Send, SendToCopy.TipGaugeMenu, SendToCopy.NameGaugeMenu),
+        SettingsRowId.Repair => new(IconId.Tool, WidgetCopy.TipRepair, WidgetCopy.NameRepair),
+        SettingsRowId.CheckAutomatically => new(IconId.Sync, WidgetCopy.TipAutoCheck, WidgetCopy.NameAutoCheck),
+        SettingsRowId.MicrophoneOff => new(IconId.MicOff, WidgetCopy.TipMicOff, WidgetCopy.NameMicOff),
+        SettingsRowId.SoundSettings => new(IconId.Volume, WidgetCopy.TipSoundSettings, WidgetCopy.NameSoundSettings),
+        SettingsRowId.CaseCard => new(IconId.AirPodsCase, WidgetCopy.TipCaseCard, WidgetCopy.NameCaseCard),
+        SettingsRowId.FullyCharged => new(IconId.Lightning, WidgetCopy.TipFullyCharged, WidgetCopy.NameFullyCharged),
+        SettingsRowId.MovedTo => new(IconId.Cellphone, WidgetCopy.TipMovedTo, WidgetCopy.NameMovedTo),
+        SettingsRowId.History => new(IconId.History, WidgetCopy.TipHistory, WidgetCopy.NameHistory),
+        SettingsRowId.CopyDiagnostics => new(IconId.Copy, WidgetCopy.TipCopyDiagnostics, WidgetCopy.NameCopyDiagnostics),
+        SettingsRowId.More => new(IconId.More, WidgetCopy.TipMore, WidgetCopy.NameMore),
+        SettingsRowId.About => new(IconId.Sync, WidgetCopy.TipAbout, WidgetCopy.NameAbout),
+        SettingsRowId.CaseCardClose => new(null, WidgetCopy.TipCaseCardClose, WidgetCopy.NameCaseCardClose),
+        SettingsRowId.CaseCardDisplays => new(null, WidgetCopy.TipCaseCardDisplays, WidgetCopy.NameCaseCardDisplays),
+        SettingsRowId.CaseCardDisplay => new(null, WidgetCopy.TipCaseCardDisplay, null),
+        _ => new(null, null, null),
     };
 
     // The accessible name of one control of a row. The row's own name for most; the controls that share a row say

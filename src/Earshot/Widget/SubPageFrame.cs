@@ -1,5 +1,8 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Runtime.CompilerServices;
+using Earshot.Icons;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -95,10 +98,7 @@ internal static class SubPageFrame
             CardPaint.Focus(g, layout.Back, CardPlacement.Scale(FocusVisual.ControlRadiusAt96, dpi), colours, dpi);
         }
 
-        if (!CardPaint.TryGlyph(g, FluentGlyphs.Back, layout.Back, colours.Text, dpi))
-        {
-            CardPaint.BackArrow(g, layout.Back, colours.Text, dpi);
-        }
+        CardPaint.DrawIcon(g, IconId.Back, filled: false, layout.Back, colours.Text, dpi);
 
         CardPaint.Text(g, title, layout.Title, type, CardPlacement.Scale(14, dpi), bold: true, colours.Text, StringAlignment.Near, StringAlignment.Center);
         if (step is not null)
@@ -145,6 +145,42 @@ internal enum GlyphKind { Minus, Plus, Cross }
 
 internal static partial class CardPaint
 {
+    // The edge of the box an icon is drawn in, in epx at 96 dpi: 16 for most icons, 12 for a chevron, the clock, the bolt and the
+    // external link, 10 for the close of a card nobody asked for, the minus and the plus. The box grows with the display scale
+    // and, where the caller gives a text size, with that.
+    public const int IconBoxAt96 = 16;
+    public const int ChevronBoxAt96 = 12;
+    public const int MarkBoxAt96 = 10;
+
+    // An icon in a square box of sizeAt96 epx centred in bounds, in ink (its alpha is the icon's opacity), line or filled. The
+    // site recorded in the icon log is the line that calls this.
+    public static void DrawIcon(
+        Graphics g,
+        IconId icon,
+        bool filled,
+        Rectangle bounds,
+        Color ink,
+        int dpi,
+        int sizeAt96 = IconBoxAt96,
+        double textScale = 1.0,
+        IconRule rule = IconRule.A,
+        int rotationStep = 0,
+        [CallerFilePath] string callerFile = "",
+        [CallerLineNumber] int callerLine = 0) =>
+        IconPainter.Draw(g, icon, filled ? IconStyle.Filled : IconStyle.Line, bounds, TextFit.Grow(sizeAt96, dpi, textScale), ink, rule, rotationStep, callerFile, callerLine);
+
+    // An icon in the largest square that fits bounds, centred in it: the sub-page status icons, the card's columns and the updates tile.
+    public static void DrawIconFitted(
+        Graphics g,
+        IconId icon,
+        bool filled,
+        Rectangle bounds,
+        Color ink,
+        IconRule rule = IconRule.A,
+        [CallerFilePath] string callerFile = "",
+        [CallerLineNumber] int callerLine = 0) =>
+        IconPainter.Draw(g, icon, filled ? IconStyle.Filled : IconStyle.Line, bounds, Math.Min(bounds.Width, bounds.Height), ink, rule, 0, callerFile, callerLine);
+
     // What the card draws its words with, and what it measures them with: one format and one text hint, so a rectangle sized from a
     // measurement holds what is drawn in it. (Measuring with StringFormat.GenericTypographic, which does not pad, and drawing with the
     // default format, which does, let the layout size a label to a width the drawing then wrapped inside and cut short.)
@@ -343,7 +379,7 @@ internal static partial class CardPaint
 
     // A standard button: the control fill and stroke, the Body size (14) for the words, 4 px corners. trailingGlyph, when given, is a
     // 12 px glyph after the words (the Open button's external link).
-    public static void SmallButton(Graphics g, Rectangle rect, string label, CardColours colours, CardType type, int dpi, bool focused, char trailingGlyph = '\0')
+    public static void SmallButton(Graphics g, Rectangle rect, string label, CardColours colours, CardType type, int dpi, bool focused, IconId? trailingGlyph = null)
     {
         ArgumentNullException.ThrowIfNull(colours);
         int radius = Scale(4, dpi);
@@ -364,17 +400,17 @@ internal static partial class CardPaint
             g.DrawLine(bottom, rect.Left + radius, rect.Bottom - 1, rect.Right - radius - 1, rect.Bottom - 1);
         }
 
-        if (trailingGlyph == '\0')
+        if (trailingGlyph is not { } trailing)
         {
             Text(g, label, rect, type, Scale(14, dpi), bold: false, colours.Text, StringAlignment.Center, StringAlignment.Center);
         }
         else
         {
-            int glyph = Scale(FluentGlyphs.ChevronSizeAt96, dpi);
+            int glyph = Scale(ChevronBoxAt96, dpi);
             int pad = Scale(12, dpi);
             int gap = Scale(8, dpi);
             Text(g, label, new Rectangle(rect.X + pad, rect.Y, Math.Max(1, rect.Width - (2 * pad) - glyph - gap), rect.Height), type, Scale(14, dpi), bold: false, colours.Text, StringAlignment.Near, StringAlignment.Center);
-            _ = TryGlyph(g, trailingGlyph, new Rectangle(rect.Right - pad - glyph, rect.Y + ((rect.Height - glyph) / 2), glyph, glyph), colours.Text, dpi, FluentGlyphs.ChevronSizeAt96, 1.0);
+            DrawIcon(g, trailing, filled: false, new Rectangle(rect.Right - pad - glyph, rect.Y + ((rect.Height - glyph) / 2), glyph, glyph), colours.Text, dpi, ChevronBoxAt96);
         }
 
         if (focused)
@@ -389,29 +425,6 @@ internal static partial class CardPaint
     {
         ArgumentNullException.ThrowIfNull(colours);
         FocusVisual.Draw(g, control, radius, dpi, colours.Focus);
-    }
-
-    // The arrow of the back button, a 16 px line icon with a 1.2 px stroke and round caps.
-    public static void BackArrow(Graphics g, Rectangle button, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        float left = button.X + ((button.Width - (16 * s)) / 2f);
-        float top = button.Y + ((button.Height - (16 * s)) / 2f);
-        PointF P(float x, float y) => new(left + (x * s), top + (y * s));
-        using var pen = RoundPen(colour, 1.2f * s);
-        g.DrawLine(pen, P(13.5f, 8f), P(2.5f, 8f));
-        g.DrawLines(pen, new[] { P(7f, 3.5f), P(2.5f, 8f), P(7f, 12.5f) });
-    }
-
-    // A 12 px chevron, pointing up or down, centred in bounds.
-    public static void Chevron(Graphics g, Rectangle bounds, bool up, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        float left = bounds.X + ((bounds.Width - (12 * s)) / 2f);
-        float top = bounds.Y + ((bounds.Height - (12 * s)) / 2f);
-        PointF P(float x, float y) => new(left + (x * s), top + (y * s));
-        using var pen = RoundPen(colour, 1.2f * s);
-        g.DrawLines(pen, up ? new[] { P(2, 8), P(6, 4), P(10, 8) } : new[] { P(2, 4), P(6, 8), P(10, 4) });
     }
 
     // The 40 by 20 toggle: an accent track with a knob at the right when on, an outline with a knob at the left
@@ -442,25 +455,20 @@ internal static partial class CardPaint
         g.FillEllipse(knobBrush, knobX, knobY, knob, knob);
     }
 
-    // A 20 px status icon: a check in a circle, or a caution triangle, in the given colour, 1.4 px line.
-    public static void CheckIcon(Graphics g, Rectangle bounds, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        PointF P(float x, float y) => new(bounds.X + (x * s), bounds.Y + (y * s));
-        using var pen = RoundPen(colour, 1.4f * s);
-        g.DrawEllipse(pen, bounds.X + (1.7f * s), bounds.Y + (1.7f * s), 16.6f * s, 16.6f * s);
-        g.DrawLines(pen, new[] { P(6.2f, 10.2f), P(8.8f, 12.8f), P(13.8f, 7.6f) });
-    }
+    // The 20 px status icons of a sub-page: a check in a circle, a caution triangle, an arrow into a tray for an update and a
+    // shield for the step where Windows asks for its administrator approval. The whole 24 unit grid fills the box, so the art keeps
+    // its two unit margin.
+    public static void CheckIcon(Graphics g, Rectangle bounds, Color colour, int dpi) =>
+        DrawIconFitted(g, IconId.CheckCircle, filled: false, bounds, colour, IconRule.B);
 
-    public static void CautionIcon(Graphics g, Rectangle bounds, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        PointF P(float x, float y) => new(bounds.X + (x * s), bounds.Y + (y * s));
-        using var pen = RoundPen(colour, 1.4f * s);
-        g.DrawLines(pen, new[] { P(10f, 2.2f), P(18.4f, 17f), P(1.6f, 17f), P(10f, 2.2f) });
-        g.DrawLine(pen, P(10f, 7.6f), P(10f, 11.6f));
-        g.DrawLine(pen, P(10f, 14.2f), P(10f, 14.3f));
-    }
+    public static void CautionIcon(Graphics g, Rectangle bounds, Color colour, int dpi) =>
+        DrawIconFitted(g, IconId.Alert, filled: false, bounds, colour, IconRule.B);
+
+    public static void DownIcon(Graphics g, Rectangle bounds, Color colour, int dpi) =>
+        DrawIconFitted(g, IconId.Download, filled: false, bounds, colour, IconRule.B);
+
+    public static void ShieldIcon(Graphics g, Rectangle bounds, Color colour, int dpi) =>
+        DrawIconFitted(g, IconId.SafeShield2, filled: false, bounds, colour, IconRule.B);
 
     // The 20 px spinner: an accent arc, 2 px, that turns once every ten frames.
     public static void Spinner(Graphics g, Rectangle bounds, Color accent, int frame, int dpi)
@@ -471,54 +479,6 @@ internal static partial class CardPaint
         var arc = new RectangleF(bounds.X + inset, bounds.Y + inset, bounds.Width - (2 * inset), bounds.Height - (2 * inset));
         float start = (((frame % 10) + 10) % 10) * 36f - 90f;
         g.DrawArc(pen, arc, start, 110f);
-    }
-
-    // The 16 px gear of the title row: a small circle inside a larger one, with eight short spokes.
-    public static void Gear(Graphics g, Rectangle button, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        float left = button.X + ((button.Width - (16 * s)) / 2f);
-        float top = button.Y + ((button.Height - (16 * s)) / 2f);
-        PointF P(float x, float y) => new(left + (x * s), top + (y * s));
-        using var pen = RoundPen(colour, 1.2f * s);
-        g.DrawEllipse(pen, left + (5.8f * s), top + (5.8f * s), 4.4f * s, 4.4f * s);
-        g.DrawEllipse(pen, left + (3.2f * s), top + (3.2f * s), 9.6f * s, 9.6f * s);
-        (float X1, float Y1, float X2, float Y2)[] spokes =
-        [
-            (8f, 1.2f, 8f, 3.2f), (8f, 12.8f, 8f, 14.8f), (1.2f, 8f, 3.2f, 8f), (12.8f, 8f, 14.8f, 8f),
-            (3.2f, 3.2f, 4.6f, 4.6f), (11.4f, 11.4f, 12.8f, 12.8f), (12.8f, 3.2f, 11.4f, 4.6f), (4.6f, 11.4f, 3.2f, 12.8f),
-        ];
-        foreach ((float x1, float y1, float x2, float y2) in spokes)
-        {
-            g.DrawLine(pen, P(x1, y1), P(x2, y2));
-        }
-    }
-
-    // The 20 px arrow into a tray that stands for an update: the download and the available icons.
-    public static void DownIcon(Graphics g, Rectangle bounds, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        PointF P(float x, float y) => new(bounds.X + (x * s), bounds.Y + (y * s));
-        using var pen = RoundPen(colour, 1.4f * s);
-        g.DrawLine(pen, P(10f, 2.5f), P(10f, 13f));
-        g.DrawLines(pen, new[] { P(5.5f, 8.5f), P(10f, 13f), P(14.5f, 8.5f) });
-        g.DrawLine(pen, P(3f, 17f), P(17f, 17f));
-    }
-
-    // The 20 px shield of the step where Windows asks for its administrator approval.
-    public static void ShieldIcon(Graphics g, Rectangle bounds, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        PointF P(float x, float y) => new(bounds.X + (x * s), bounds.Y + (y * s));
-        using var pen = RoundPen(colour, 1.4f * s);
-        using var path = new GraphicsPath();
-        path.AddLine(P(10f, 1.8f), P(16.8f, 4.4f));
-        path.AddLine(P(16.8f, 4.4f), P(16.8f, 9.4f));
-        path.AddBezier(P(16.8f, 9.4f), P(16.8f, 13.6f), P(13.9f, 16.8f), P(10f, 18.2f));
-        path.AddBezier(P(10f, 18.2f), P(6.1f, 16.8f), P(3.2f, 13.6f), P(3.2f, 9.4f));
-        path.AddLine(P(3.2f, 9.4f), P(3.2f, 4.4f));
-        path.CloseFigure();
-        g.DrawPath(pen, path);
     }
 
     // A 4 px bar with full radius: the track, and the accent fill over the first percent of it.
@@ -541,30 +501,6 @@ internal static partial class CardPaint
         }
     }
 
-    // A 10 px minus, plus or cross centred in bounds, 1.2 px round line.
-    public static void Glyph10(Graphics g, Rectangle bounds, GlyphKind kind, Color colour, int dpi)
-    {
-        float s = dpi / 96f;
-        float left = bounds.X + ((bounds.Width - (10 * s)) / 2f);
-        float top = bounds.Y + ((bounds.Height - (10 * s)) / 2f);
-        PointF P(float x, float y) => new(left + (x * s), top + (y * s));
-        using var pen = RoundPen(colour, 1.2f * s);
-        switch (kind)
-        {
-            case GlyphKind.Minus:
-                g.DrawLine(pen, P(1, 5), P(9, 5));
-                break;
-            case GlyphKind.Plus:
-                g.DrawLine(pen, P(1, 5), P(9, 5));
-                g.DrawLine(pen, P(5, 1), P(5, 9));
-                break;
-            default:
-                g.DrawLine(pen, P(1.5f, 1.5f), P(8.5f, 8.5f));
-                g.DrawLine(pen, P(8.5f, 1.5f), P(1.5f, 8.5f));
-                break;
-        }
-    }
-
     // A button holding a minus, a plus or a cross. Disabled, it has the disabled control fill and the disabled text colour.
     public static void IconButton(Graphics g, Rectangle rect, GlyphKind kind, bool enabled, CardColours colours, int dpi, bool focused, bool bordered = true)
     {
@@ -583,9 +519,17 @@ internal static partial class CardPaint
         }
 
         Color ink = !enabled ? colours.TextDisabled : bordered ? colours.Text : colours.TextSecondary;
-        if (kind != GlyphKind.Cross || !TryGlyph(g, FluentGlyphs.Cancel, rect, ink, dpi))
+        switch (kind)
         {
-            Glyph10(g, rect, kind, ink, dpi);
+            case GlyphKind.Minus:
+                DrawIcon(g, IconId.Minimize, filled: false, rect, ink, dpi, MarkBoxAt96);
+                break;
+            case GlyphKind.Plus:
+                DrawIcon(g, IconId.Add, filled: false, rect, ink, dpi, MarkBoxAt96);
+                break;
+            default:
+                DrawIcon(g, IconId.Close, filled: false, rect, ink, dpi);
+                break;
         }
 
         if (focused)
@@ -594,8 +538,7 @@ internal static partial class CardPaint
         }
     }
 
-    // A box of a list: the accent with a check mark when ticked, the standard control with an outline when not. The check is
-    // the CheckMark glyph, or two strokes without the font.
+    // A box of a list: the accent with a check mark when ticked, the standard control with an outline when not.
     public static void CheckBox(Graphics g, Rectangle rect, bool on, CardColours colours, int dpi, bool focused)
     {
         ArgumentNullException.ThrowIfNull(colours);
@@ -611,12 +554,9 @@ internal static partial class CardPaint
             g.DrawPath(pen, path);
         }
 
-        if (on && !TryGlyph(g, FluentGlyphs.CheckMark, rect, colours.OnAccent, dpi))
+        if (on)
         {
-            float s = dpi / 96f;
-            PointF P(float x, float y) => new(rect.X + (x * s), rect.Y + (y * s));
-            using var tick = RoundPen(colours.OnAccent, 1.4f * s);
-            g.DrawLines(tick, new[] { P(5.5f, 10.2f), P(8.6f, 13.2f), P(14.5f, 7f) });
+            DrawIcon(g, IconId.Check, filled: false, rect, colours.OnAccent, dpi);
         }
 
         if (focused)

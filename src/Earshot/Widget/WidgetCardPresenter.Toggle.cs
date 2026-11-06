@@ -1,4 +1,5 @@
 using Earshot.Contracts;
+using IconId = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -192,7 +193,7 @@ internal sealed partial class WidgetCardPresenter : IToggleCard
     // gauge's cross is drawn by none: a button on a card that did not mark the failure displayed would press into nothing.
     private CompactContent? FailureContent() => _failure is { Held: false, Displayed: true } failure
         ? new CompactContent(
-            FluentGlyphs.Error, InkRole.Caution, failure.Reason, failure.Next is null ? null : new CompactAction(failure.Next.Label), failure.Hold)
+            IconId.Warning, InkRole.Caution, failure.Reason, failure.Next is null ? null : new CompactAction(failure.Next.Label), failure.Hold)
         {
             Kind = UnaskedKind.ConnectFailed,
         }
