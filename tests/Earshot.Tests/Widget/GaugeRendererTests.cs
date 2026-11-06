@@ -303,10 +303,9 @@ public sealed class GaugeRendererTests
         using Bitmap none = Draw(Of(GaugeMode.MarkOnly), dpi, light: false);
         using Bitmap away = Draw(Of(GaugeMode.NotOnThisPc), dpi, light: false);
 
-        RectangleF head = layout.EarbudShapes().Shapes[0];
-        var spot = new Point((int)(head.X + (head.Width / 2)), (int)(head.Y + (head.Height / 2)));
-        Assert.AreEqual(palette.Tertiary.A, none.GetPixel(spot.X, spot.Y).A, 2, "No recent reading: Text tertiary");
-        Assert.AreEqual(palette.Disabled.A, away.GetPixel(spot.X, spot.Y).A, 2, "Not on this PC: Text disabled");
+        Rectangle box = GaugeMarks.Box(layout);
+        GaugeMarks.AssertInk(none, Earshot.Icons.Catalogue.Icon.AirPods, Earshot.Icons.IconStyle.Filled, box, palette.Tertiary, "No recent reading: Text tertiary");
+        GaugeMarks.AssertInk(away, Earshot.Icons.Catalogue.Icon.AirPods, Earshot.Icons.IconStyle.Line, box, palette.Disabled, "Not on this PC: Text disabled");
     }
 
     [TestMethod]

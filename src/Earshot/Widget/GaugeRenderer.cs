@@ -1,5 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using Earshot.Icons;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Widget;
 
@@ -11,7 +13,7 @@ namespace Earshot.Widget;
 //   reading          ring track and arc (accent; caution when low), the pair in ink, the value, the bolt when charging
 //   no recent reading  ring track only, the pair in tertiary
 //   not on this PC   no ring, the pair in disabled
-//   on another device  no ring, the pair in tertiary and the phone glyph in the number slot, tertiary
+//   on another device  no ring, the pair in tertiary and the phone icon in the number slot, tertiary
 //   away, case value  ring track and arc in tertiary, the case mark in tertiary, the value in tertiary,
 //                     the bolt when the case was charging; a live case value is drawn in full ink
 //
@@ -21,32 +23,19 @@ namespace Earshot.Widget;
 //   failed           the track only, a cross in caution in the number's place
 //   leaving          the glyph fades out as the number (or the phone) comes back, the arc at what the state draws at rest
 //
-// GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit): GDI text (TextRenderer) writes alpha
+// GDI+ only (Graphics.FillPath, DrawString with AntiAliasGridFit, DrawImage for the icons): GDI text (TextRenderer) writes alpha
 // 0 and would vanish on a layered window (https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#layered-windows).
+//
+// Every mark is a MingCute icon drawn by IconPainter from its coverage mask (IconCatalogue): the pair (AirPods; filled while the
+// AirPods are on this PC, line otherwise), the case (AirPods case, line), the bolt (filled), the phone, the tick and the cross (line).
 //
 // The number is drawn one digit at a time in cells as wide as a "0", so every digit has the same width and
 // the number never shifts as it changes (GDI+ has no tabular figures switch). The cells are centred in the number slot,
 // which fits three digits.
 internal static class GaugeRenderer
 {
-    // The phone mark where no icon font is installed (a rounded outline, drawn on a 16 unit grid): the rectangle and its
-    // corner radius and stroke, in grid units.
-    private const float PhoneGrid = 16f;
-    private const float PhoneX = 4.6f;
-    private const float PhoneY = 1.6f;
-    private const float PhoneWidth = 6.8f;
-    private const float PhoneHeight = 12.8f;
-    private const float PhoneCorner = 1.6f;
-    private const float PhoneStroke = 1.2f;
-
-    // The bolt where no icon font is installed, on a 9 by 12 grid.
-    private static readonly PointF[] BoltGrid =
-    [
-        new(6f, 0f), new(1f, 7f), new(4.5f, 7f), new(3.5f, 12f), new(9f, 4.5f), new(5.5f, 4.5f),
-    ];
-
-    private const float BoltGridWidth = 9f;
-    private const float BoltGridHeight = 12f;
+    // The pair's and the case's box, in pixels at 100%, centred in the ring box: the mark sits inside the ring as the design draws it.
+    private const int MarkAt96 = 14;
 
     // The gauge for a snapshot at a moment: the content the snapshot gives, drawn in the palette for the
     // theme the ink says (a dark ink is the light theme). height is the taskbar's own thickness, which the
@@ -103,7 +92,7 @@ internal static class GaugeRenderer
         switch (content.Mode)
         {
             case GaugeMode.Reading:
-                DrawEarbudPair(g, layout, palette.Ink);
+                DrawPair(g, layout, palette.Ink, filled: true);
                 DrawRing(g, layout, palette, content, sweep);
                 DrawNumber(g, layout, content, palette, fontFamily);
                 if (content.Charging)
@@ -114,7 +103,7 @@ internal static class GaugeRenderer
                 break;
 
             case GaugeMode.CaseAway:
-                DrawCaseMark(g, CaseMarkRect(layout), ink);
+                DrawCaseMark(g, layout, ink);
                 DrawRing(g, layout, palette, content, sweep);
                 DrawNumber(g, layout, content, palette, fontFamily);
                 if (content.Charging)
@@ -125,18 +114,18 @@ internal static class GaugeRenderer
                 break;
 
             case GaugeMode.OnOtherDevice:
-                DrawEarbudPair(g, layout, palette.Tertiary);
+                DrawPair(g, layout, palette.Tertiary, filled: false);
                 DrawPhone(g, layout, palette.Tertiary);
                 break;
 
             case GaugeMode.MarkOnly:
-                DrawEarbudPair(g, layout, palette.Tertiary);
+                DrawPair(g, layout, palette.Tertiary, filled: true);
                 DrawRingTrack(g, layout, palette);
                 break;
 
             case GaugeMode.NotOnThisPc:
             default:
-                DrawEarbudPair(g, layout, palette.Disabled);
+                DrawPair(g, layout, palette.Disabled, filled: false);
                 break;
         }
 
@@ -152,18 +141,20 @@ internal static class GaugeRenderer
         switch (content.Mode)
         {
             case GaugeMode.Reading:
-                DrawEarbudPair(g, layout, palette.Ink);
+                DrawPair(g, layout, palette.Ink, filled: true);
                 break;
             case GaugeMode.CaseAway:
-                DrawCaseMark(g, CaseMarkRect(layout), ink);
+                DrawCaseMark(g, layout, ink);
                 break;
             case GaugeMode.OnOtherDevice:
+                DrawPair(g, layout, palette.Tertiary, filled: false);
+                break;
             case GaugeMode.MarkOnly:
-                DrawEarbudPair(g, layout, palette.Tertiary);
+                DrawPair(g, layout, palette.Tertiary, filled: true);
                 break;
             case GaugeMode.NotOnThisPc:
             default:
-                DrawEarbudPair(g, layout, palette.Disabled);
+                DrawPair(g, layout, palette.Disabled, filled: false);
                 break;
         }
 
@@ -222,30 +213,9 @@ internal static class GaugeRenderer
         }
     }
 
-    // The tick (E73E) or the cross (E711), 12 px at 100%, centred in the number's place; drawn as lines where no icon font is
-    // installed.
-    private static void DrawStoryGlyph(Graphics g, GaugeLayout layout, bool tick, Color colour)
-    {
-        if (DrawGlyph(g, tick ? FluentGlyphs.CheckMark : FluentGlyphs.Cancel, layout.NumberSlot, layout.Bolt.Height, colour))
-        {
-            return;
-        }
-
-        float size = layout.Bolt.Height;
-        float left = layout.NumberSlot.X + ((layout.NumberSlot.Width - size) / 2f);
-        float top = layout.NumberSlot.Y + ((layout.NumberSlot.Height - size) / 2f);
-        PointF At(float x, float y) => new(left + (x * size), top + (y * size));
-        using var pen = new Pen(colour, Math.Max(1f, size / 8f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-        if (tick)
-        {
-            g.DrawLines(pen, new PointF[] { At(0.12f, 0.54f), At(0.38f, 0.78f), At(0.88f, 0.24f) });
-        }
-        else
-        {
-            g.DrawLine(pen, At(0.2f, 0.2f), At(0.8f, 0.8f));
-            g.DrawLine(pen, At(0.8f, 0.2f), At(0.2f, 0.8f));
-        }
-    }
+    // The tick (the check icon) or the cross (the close icon), 12 px at 100%, centred in the number's place.
+    private static void DrawStoryGlyph(Graphics g, GaugeLayout layout, bool tick, Color colour) =>
+        IconPainter.Draw(g, tick ? Icon.Check : Icon.Close, IconStyle.Line, layout.NumberSlot, layout.Bolt.Height, colour);
 
     // The colour at a fraction of its own alpha.
     private static Color Fade(Color colour, double opacity) =>
@@ -273,8 +243,7 @@ internal static class GaugeRenderer
 
         if (!(content.Mode is (GaugeMode.Reading or GaugeMode.CaseAway) && content.Charging))
         {
-            using var pen = new Pen(placeholder, Math.Max(1f, layout.Dpi / 96f)) { LineJoin = LineJoin.Round };
-            g.DrawPolygon(pen, BoltPoints(layout));
+            IconPainter.Draw(g, Icon.Lightning, IconStyle.Line, layout.ChargingSlot, layout.Bolt.Height, placeholder);
         }
 
         return bitmap;
@@ -307,25 +276,18 @@ internal static class GaugeRenderer
         g.FillPath(brush, path);
     }
 
-    // The earbud pair: two heads and two stems, filled in the ink, on the design's 24 unit grid scaled to the ring box.
-    private static void DrawEarbudPair(Graphics g, GaugeLayout layout, Color ink)
-    {
-        (RectangleF[] shapes, float radius) = layout.EarbudShapes();
-        using var path = new GraphicsPath { FillMode = FillMode.Winding };
-        foreach (RectangleF shape in shapes)
-        {
-            AddRounded(path, shape, radius);
-        }
+    // The box the pair and the case are drawn in: 14 px at 100%, centred in the ring box.
+    internal static int MarkBoxPx(GaugeLayout layout) => GaugeLayout.Round(MarkAt96, layout.Dpi);
 
-        using var brush = new SolidBrush(ink);
-        g.FillPath(brush, path);
+    internal static Rectangle MarkBox(GaugeLayout layout)
+    {
+        int px = MarkBoxPx(layout);
+        return new Rectangle(IconPainter.BoxOrigin(layout.Mark, px), new Size(px, px));
     }
 
-    private static void AddRounded(GraphicsPath path, RectangleF rect, float radius)
-    {
-        using GraphicsPath one = RoundedRectangle(rect, radius);
-        path.AddPath(one, connect: false);
-    }
+    // The earbud pair (the AirPods icon), filled while the AirPods are on this PC and line otherwise, in the ring box.
+    private static void DrawPair(Graphics g, GaugeLayout layout, Color ink, bool filled) =>
+        IconPainter.Draw(g, Icon.AirPods, filled ? IconStyle.Filled : IconStyle.Line, layout.Mark, MarkBoxPx(layout), ink);
 
     // The track is the whole circle; the arc runs from 12 o'clock clockwise for the battery's share of it, with round caps.
     // GDI+ measures angles clockwise from 3 o'clock, so 12 o'clock is -90.
@@ -404,132 +366,17 @@ internal static class GaugeRenderer
         }
     }
 
-    // Where the case mark goes: the middle 14 units of the ring box's 24 unit grid (a design choice, so it sits inside the ring
-    // as the pair does).
-    internal static RectangleF CaseMarkRect(GaugeLayout layout)
-    {
-        float k = layout.Mark.Width / (float)GaugeLayout.MarkGrid;
-        return new RectangleF(layout.Mark.X + (5 * k), layout.Mark.Y + (5 * k), 14 * k, 14 * k);
-    }
+    // The case, in place of the earbud pair and the size of it: the AirPods case icon, line, in the ink it is given, never the accent.
+    private static void DrawCaseMark(Graphics g, GaugeLayout layout, Color ink) =>
+        IconPainter.Draw(g, Icon.AirPodsCase, IconStyle.Line, layout.Mark, MarkBoxPx(layout), ink);
 
-    // The case, our own shape, in place of the earbud mark and the size of it: a filled rounded box wider than it is tall,
-    // with a thin unpainted seam a little below the top for the lid. Drawn in the ink it is given, never the accent.
-    private static void DrawCaseMark(Graphics g, RectangleF mark, Color ink)
-    {
-        float w = mark.Width;
-        float h = mark.Height * 0.8f;
-        float top = mark.Y + ((mark.Height - h) / 2f);
-        float seam = Math.Max(1f, h * 0.1f);
-        float lidHeight = h * 0.3f;
-        var lid = new RectangleF(mark.X, top, w, lidHeight);
-        var box = new RectangleF(mark.X, top + lidHeight + seam, w, Math.Max(0f, h - lidHeight - seam));
-        float radius = h * 0.3f;
-        using var brush = new SolidBrush(ink);
-        using (GraphicsPath lidPath = TopRounded(lid, radius))
-        {
-            g.FillPath(brush, lidPath);
-        }
+    // The bolt (the lightning icon, filled) at 12 px at 100%, centred in its slot.
+    private static void DrawBolt(Graphics g, GaugeLayout layout, Color ink) =>
+        IconPainter.Draw(g, Icon.Lightning, IconStyle.Filled, layout.ChargingSlot, layout.Bolt.Height, ink);
 
-        using GraphicsPath boxPath = BottomRounded(box, radius);
-        g.FillPath(brush, boxPath);
-    }
-
-    private static GraphicsPath TopRounded(RectangleF r, float radius)
-    {
-        float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height * 2));
-        var path = new GraphicsPath();
-        if (d <= 0)
-        {
-            path.AddRectangle(r);
-            return path;
-        }
-
-        path.AddArc(r.X, r.Y, d, d, 180, 90);
-        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-        path.AddLine(r.Right, r.Bottom, r.X, r.Bottom);
-        path.CloseFigure();
-        return path;
-    }
-
-    private static GraphicsPath BottomRounded(RectangleF r, float radius)
-    {
-        float d = Math.Min(radius * 2, Math.Min(r.Width, r.Height * 2));
-        var path = new GraphicsPath();
-        if (d <= 0)
-        {
-            path.AddRectangle(r);
-            return path;
-        }
-
-        path.AddLine(r.X, r.Y, r.Right, r.Y);
-        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        return path;
-    }
-
-    // The bolt: the Fluent glyph E945 at 12, centred in its slot; the five-point shape where no icon font is installed.
-    private static void DrawBolt(Graphics g, GaugeLayout layout, Color ink)
-    {
-        if (!DrawGlyph(g, FluentGlyphs.Bolt, layout.ChargingSlot, layout.Bolt.Height, ink))
-        {
-            using var brush = new SolidBrush(ink);
-            g.FillPolygon(brush, BoltPoints(layout));
-        }
-    }
-
-    // One Segoe Fluent Icons glyph of the given pixel size centred in a rectangle; false when no icon font is installed.
-    private static bool DrawGlyph(Graphics g, char codePoint, Rectangle slot, int pixels, Color colour)
-    {
-        string? family = FluentGlyphs.Family;
-        if (family is null)
-        {
-            return false;
-        }
-
-        using var font = new Font(family, Math.Max(1, pixels), FontStyle.Regular, GraphicsUnit.Pixel);
-        using var brush = new SolidBrush(colour);
-        using var format = new StringFormat(StringFormat.GenericTypographic)
-        {
-            Alignment = StringAlignment.Center,
-            LineAlignment = StringAlignment.Center,
-            FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip,
-        };
-        g.DrawString(codePoint.ToString(), font, brush, slot, format);
-        return true;
-    }
-
-    // The bolt's corners, centred in its slot.
-    private static PointF[] BoltPoints(GaugeLayout layout)
-    {
-        float k = Math.Min(layout.Bolt.Width / BoltGridWidth, layout.Bolt.Height / BoltGridHeight);
-        float left = layout.ChargingSlot.X + ((layout.ChargingSlot.Width - (BoltGridWidth * k)) / 2f);
-        float top = (layout.Height - (BoltGridHeight * k)) / 2f;
-        var points = new PointF[BoltGrid.Length];
-        for (int i = 0; i < points.Length; i++)
-        {
-            points[i] = new PointF(left + (BoltGrid[i].X * k), top + (BoltGrid[i].Y * k));
-        }
-
-        return points;
-    }
-
-    // The phone, in the number slot: the Fluent glyph E8EA, centred; an outlined rounded rectangle on a 16 unit grid without the font.
-    private static void DrawPhone(Graphics g, GaugeLayout layout, Color ink)
-    {
-        if (DrawGlyph(g, FluentGlyphs.CellPhone, layout.NumberSlot, layout.PhoneSize, ink))
-        {
-            return;
-        }
-
-        float k = layout.PhoneSize / PhoneGrid;
-        float left = layout.NumberSlot.X + ((layout.NumberSlot.Width - layout.PhoneSize) / 2f);
-        float top = (layout.Height - layout.PhoneSize) / 2f;
-        var rect = new RectangleF(left + (PhoneX * k), top + (PhoneY * k), PhoneWidth * k, PhoneHeight * k);
-        using GraphicsPath path = RoundedRectangle(rect, PhoneCorner * k);
-        using var pen = new Pen(ink, PhoneStroke * k);
-        g.DrawPath(pen, path);
-    }
+    // The phone (the cellphone icon, line), centred in the number slot.
+    private static void DrawPhone(Graphics g, GaugeLayout layout, Color ink) =>
+        IconPainter.Draw(g, Icon.Cellphone, IconStyle.Line, layout.NumberSlot, layout.PhoneSize, ink);
 
     private static GraphicsPath RoundedRectangle(RectangleF bounds, float radius)
     {

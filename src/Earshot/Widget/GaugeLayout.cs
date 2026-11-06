@@ -22,8 +22,7 @@ public enum GaugePosition
 //   left padding = floor((width - content) / 2), content = ring + number + bolt + 2 gaps
 // The three pieces sit left to right in the chosen order with one gap between neighbours, vertically centred. The
 // design's table (R5 N33 B57 at 100%, R6 N41 B71 at 125%, R7 N49 B85 at 150% for ring, number, bolt) is what the rule gives.
-// The ring box holds the ring and, inside it, the earbud pair or the case mark, drawn on the design's 24 unit grid scaled
-// to the box. The number slot always fits "100", so the window never changes width; the bolt slot is always reserved,
+// The ring box holds the ring and, inside it, the AirPods icon or the case icon in a 14 px box (at 100%) centred in it. The number slot always fits "100", so the window never changes width; the bolt slot is always reserved,
 // whether or not a bolt is drawn; the digits are centred in their slot.
 internal readonly record struct GaugeLayout(
     int Dpi,
@@ -32,7 +31,7 @@ internal readonly record struct GaugeLayout(
     Rectangle RingBox,        // the square the ring is drawn in
     float RingRadius,         // of the ring's centre line
     float RingStroke,
-    Rectangle Mark,           // the mark's grid: the ring box, the 24 unit grid is scaled to it
+    Rectangle Mark,           // the ring box again: the pair or the case icon is drawn in a box centred in it
     Rectangle NumberSlot,     // where the digits go, centred
     Rectangle ChargingSlot,   // where the bolt goes, centred
     Size Bolt,                // the bolt's own box
@@ -48,10 +47,6 @@ internal readonly record struct GaugeLayout(
     public const int BoltSlotAt96 = 12;
     public const int GapAt96 = 4;
     public const float RingStrokeAt96 = 2.5f;
-
-    // The design's earbud pair on its 24 unit grid: the heads 5 by 5 at (6.5, 6) and (12.5, 6), the stems 2 by 8 at (9.5, 9) and
-    // (12.5, 9), corner radius 1.
-    public const int MarkGrid = 24;
 
     private const int TypeAt96 = 12;
     private const int PhoneAt96 = 16;
@@ -123,13 +118,4 @@ internal readonly record struct GaugeLayout(
     // The window's own rectangle centred on a taskbar's short axis, at x.
     public Rectangle BoundsAt(int x, Rectangle taskbar) =>
         new(x, taskbar.Top + ((taskbar.Height - Height) / 2), Width, Height);
-
-    // The earbud pair's four shapes (head, stem, head, stem) as rectangles on the ring box, with the corner radius.
-    public (RectangleF[] Shapes, float Radius) EarbudShapes()
-    {
-        float k = Mark.Width / (float)MarkGrid;
-        Rectangle mark = Mark;
-        RectangleF R(float gx, float gy, float gw, float gh) => new(mark.X + (gx * k), mark.Y + (gy * k), gw * k, gh * k);
-        return ([R(6.5f, 6f, 5f, 5f), R(9.5f, 9f, 2f, 8f), R(12.5f, 6f, 5f, 5f), R(12.5f, 9f, 2f, 8f)], 1f * k);
-    }
 }

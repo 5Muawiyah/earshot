@@ -5,10 +5,10 @@ internal enum GaugeSlotGlyph
 {
     None,
 
-    // E73E, 12 px, in the accent.
+    // The check icon, 12 px at 100%, in the accent.
     Tick,
 
-    // E711, 12 px, in caution.
+    // The close icon, 12 px at 100%, in caution.
     Cross,
 }
 

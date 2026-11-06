@@ -1,11 +1,15 @@
 using System.Drawing;
+using Earshot.Icons;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Widget;
 
 // The gauge drawn with GDI+ and sampled: the colour at a known point of each piece is the design's token, in light, dark and high
 // contrast, at 100%, 125% and 150% display scale, for every state of the design's table, the away case mark and all six orders.
+// The pair, the case, the bolt, the phone, the tick and the cross are MingCute icons (GaugeIconSiteTests checks each pixel of them);
+// here the pixel an icon covers most is sampled for its token.
 // Windows only (GDI+ draws the bitmap).
 [TestClass]
 public sealed class GaugeDesignPixelTests
@@ -88,7 +92,7 @@ public sealed class GaugeDesignPixelTests
 
         AssertColour(p.Track, OnRing(bitmap, layout, 300), 2, "The track beyond the arc");
         AssertColour(AccentFor(theme), OnRing(bitmap, layout, 90), 2, "The arc at 3 o'clock");
-        AssertColour(p.Ink, MarkPixel(bitmap, layout), 2, "The pair");
+        AssertMark(bitmap, layout, Icon.AirPods, IconStyle.Filled, p.Ink, "The pair");
         AssertInkIs(bitmap, layout.NumberSlot, p.Ink, "The value");
         AssertNoInk(bitmap, layout.ChargingSlot, "No bolt");
     }
@@ -119,7 +123,7 @@ public sealed class GaugeDesignPixelTests
         AssertColour(p.Track, OnRing(bitmap, layout, 90), 2, "Past 15% the track shows");
         AssertInkIs(bitmap, layout.NumberSlot, p.Caution, "The value");
         AssertInkIs(bitmap, layout.ChargingSlot, p.Ink, "A bolt, in ink, per charging");
-        AssertColour(p.Ink, MarkPixel(bitmap, layout), 2, "The pair stays ink");
+        AssertMark(bitmap, layout, Icon.AirPods, IconStyle.Filled, p.Ink, "The pair stays ink");
     }
 
     // No recent reading: the track only, the pair in tertiary, no value, no bolt.
@@ -136,7 +140,7 @@ public sealed class GaugeDesignPixelTests
             AssertColour(p.Track, OnRing(bitmap, layout, angle), 2, "The track at " + angle);
         }
 
-        AssertColour(p.Tertiary, MarkPixel(bitmap, layout), 2, "The pair");
+        AssertMark(bitmap, layout, Icon.AirPods, IconStyle.Filled, p.Tertiary, "The pair");
         AssertNoInk(bitmap, layout.NumberSlot, "No value");
         AssertNoInk(bitmap, layout.ChargingSlot, "No bolt");
     }
@@ -152,7 +156,7 @@ public sealed class GaugeDesignPixelTests
 
         Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)OnRing(bitmap, layout, 300).A, "No ring");
         Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)OnRing(bitmap, layout, 90).A, "No ring");
-        AssertColour(p.Disabled, MarkPixel(bitmap, layout), 2, "The pair");
+        AssertMark(bitmap, layout, Icon.AirPods, IconStyle.Line, p.Disabled, "The pair");
         AssertNoInk(bitmap, layout.NumberSlot, "No value");
         AssertNoInk(bitmap, layout.ChargingSlot, "No bolt");
     }
@@ -167,7 +171,7 @@ public sealed class GaugeDesignPixelTests
         using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.OnOtherDevice, null, false, false, ""), theme, dpi);
 
         Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)OnRing(bitmap, layout, 300).A, "No ring");
-        AssertColour(p.Tertiary, MarkPixel(bitmap, layout), 2, "The pair");
+        AssertMark(bitmap, layout, Icon.AirPods, IconStyle.Line, p.Tertiary, "The pair");
         AssertInkIs(bitmap, layout.NumberSlot, p.Tertiary, "The phone");
         AssertNoInk(bitmap, layout.ChargingSlot, "No bolt");
     }
@@ -185,7 +189,7 @@ public sealed class GaugeDesignPixelTests
         AssertColour(DesignPixels.Over(p.Tertiary, p.Track), arc, 3, "The arc, in tertiary over the track");
         AssertInkIs(bitmap, layout.NumberSlot, p.Tertiary, "The value");
         AssertInkIs(bitmap, layout.ChargingSlot, p.Tertiary, "The bolt, when the content asks for one");
-        AssertColour(p.Ink, MarkPixel(bitmap, layout), 2, "The pair stays ink on this PC");
+        AssertMark(bitmap, layout, Icon.AirPods, IconStyle.Filled, p.Ink, "The pair stays ink on this PC");
     }
 
     // The away case: the case mark in tertiary, the ring and the value at the case's value in tertiary, a bolt when it was charging;
@@ -200,35 +204,52 @@ public sealed class GaugeDesignPixelTests
 
         AssertColour(DesignPixels.Over(p.Tertiary, p.Track), OnRing(last, layout, 90), 3, "The arc");
         AssertColour(p.Track, OnRing(last, layout, 340), 2, "The track past 80%");
-        AssertColour(p.Tertiary, CaseMarkPixel(last, layout), 2, "The case mark");
+        AssertMark(last, layout, Icon.AirPodsCase, IconStyle.Line, p.Tertiary, "The case mark");
         AssertInkIs(last, layout.NumberSlot, p.Tertiary, "The value");
         AssertInkIs(last, layout.ChargingSlot, p.Tertiary, "The bolt: the case was charging");
 
         using Bitmap live = Draw(new GaugeContent(GaugeMode.CaseAway, 75, false, false, "") { CaseMark = true }, theme, dpi);
         AssertColour(AccentFor(theme), OnRing(live, layout, 90), 2, "A live case value fills in the accent");
-        AssertColour(p.Ink, CaseMarkPixel(live, layout), 2, "And its mark is ink");
+        AssertMark(live, layout, Icon.AirPodsCase, IconStyle.Line, p.Ink, "And its mark is ink");
         AssertInkIs(live, layout.NumberSlot, p.Ink, "And its value");
         AssertNoInk(live, layout.ChargingSlot, "No bolt when it is not charging");
     }
 
-    // The case mark replaces the earbud pair. The case mark (the middle 14 units of the 24 unit grid) covers all but a sliver of where
-    // the pair is, so the pair's absence shows in the case's own seam: the thin unpainted line a little below the lid. The pair's left
-    // head runs from grid y 6 to 11 and x 6.5 to 11.5, across the seam (grid y 9.76 to 10.88); at x 8 only that head could fill it.
+    // The case icon replaces the earbud pair in the same box. The pair's filled drawing covers pixels the case's line drawing leaves
+    // clear (the middle of the case is its hollow), so the pair's absence shows there: those pixels are clear under the case and
+    // inked under the pair.
     [TestMethod]
-    public void TheCaseMarkTakesThePlaceOfThePair()
+    [DataRow(96)]
+    [DataRow(120)]
+    [DataRow(144)]
+    [DataRow(192)]
+    public void TheCaseMarkTakesThePlaceOfThePair(int dpi)
     {
-        GaugeLayout layout = GaugeLayout.For(144);
-        using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.CaseAway, 80, false, false, "") { CaseMark = true, Tertiary = true }, DesignTheme.Light, 144);
-        Assert.IsGreaterThan(0, (int)CaseMarkPixel(bitmap, layout).A);
+        GaugeLayout layout = GaugeLayout.For(dpi);
+        Rectangle box = GaugeMarks.Box(layout);
+        using Bitmap away = Draw(new GaugeContent(GaugeMode.CaseAway, 80, false, false, "") { CaseMark = true, Tertiary = true }, DesignTheme.Light, dpi);
+        using Bitmap pair = Draw(new GaugeContent(GaugeMode.Reading, 80, false, false, ""), DesignTheme.Light, dpi);
+        ReadOnlySpan<byte> pairMask = IconRaster.Coverage(Icon.AirPods, IconStyle.Filled, box.Width).Span;
+        ReadOnlySpan<byte> caseMask = IconRaster.Coverage(Icon.AirPodsCase, IconStyle.Line, box.Width).Span;
+        int side = IconRaster.MaskSide(box.Width);
 
-        float k = layout.Mark.Width / (float)GaugeLayout.MarkGrid;
-        int seamX = (int)(layout.Mark.X + (8f * k));
-        int seamY = (int)(layout.Mark.Y + (10.32f * k));
-        Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)bitmap.GetPixel(seamX, seamY).A, "The pair is not drawn with the case mark: the seam is clear where the pair's head would fill it.");
+        int checkedPixels = 0;
+        for (int y = 0; y < side; y++)
+        {
+            for (int x = 0; x < side; x++)
+            {
+                if (pairMask[(y * side) + x] == 255 && caseMask[(y * side) + x] == 0)
+                {
+                    int px = box.X - IconRaster.Apron + x;
+                    int py = box.Y - IconRaster.Apron + y;
+                    Assert.IsLessThanOrEqualTo(GaugePalette.IdleAlpha + 1, (int)away.GetPixel(px, py).A, "The pair is not drawn with the case icon at " + px + "," + py);
+                    Assert.IsGreaterThan(GaugePalette.IdleAlpha + 1, (int)pair.GetPixel(px, py).A, "Sanity: the pair is there at " + px + "," + py);
+                    checkedPixels++;
+                }
+            }
+        }
 
-        // And the same point is filled when the pair is drawn instead.
-        using Bitmap pair = Draw(new GaugeContent(GaugeMode.Reading, 80, false, false, ""), DesignTheme.Light, 144);
-        Assert.IsGreaterThan(GaugePalette.IdleAlpha + 1, (int)pair.GetPixel(seamX, seamY).A, "Sanity: the pair's head is there.");
+        Assert.IsGreaterThan(4, checkedPixels, "The two drawings differ in solid pixels.");
     }
 
     // GDI+ anti-aliases an edge a little past the geometry it is given: probed on this machine (Windows 11, GDI+ with
@@ -275,19 +296,32 @@ public sealed class GaugeDesignPixelTests
             fringeColumn: third == GaugePiece.Ring ? layout.RingBox.Right : -1, fringeCap: FringeAlphaCap(theme == DesignTheme.HighContrast));
     }
 
-    // The earbud pair's four shapes are filled in ink at their grid places.
+    // Every pixel the filled AirPods icon covers wholly is in ink.
     [TestMethod]
     [DynamicData(nameof(ThemesAndDpis))]
-    public void TheEarbudPairIsFilledAtTheDesignsGridPlaces(DesignTheme theme, int dpi)
+    public void TheEarbudPairIsTheFilledAirPodsIconInInk(DesignTheme theme, int dpi)
     {
         GaugePalette p = Palette(theme);
         GaugeLayout layout = GaugeLayout.For(dpi);
+        Rectangle box = GaugeMarks.Box(layout);
         using Bitmap bitmap = Draw(new GaugeContent(GaugeMode.Reading, 60, false, false, ""), theme, dpi);
+        ReadOnlySpan<byte> mask = IconRaster.Coverage(Icon.AirPods, IconStyle.Filled, box.Width).Span;
+        int side = IconRaster.MaskSide(box.Width);
 
-        foreach (RectangleF shape in layout.EarbudShapes().Shapes)
+        int solid = 0;
+        for (int y = 0; y < side; y++)
         {
-            AssertColour(p.Ink, bitmap.GetPixel((int)(shape.X + (shape.Width / 2)), (int)(shape.Y + (shape.Height / 2))), 2, "A shape's middle " + shape);
+            for (int x = 0; x < side; x++)
+            {
+                if (mask[(y * side) + x] == 255)
+                {
+                    AssertColour(p.Ink, bitmap.GetPixel(box.X - IconRaster.Apron + x, box.Y - IconRaster.Apron + y), 2, "A solid pixel of the pair at " + x + "," + y);
+                    solid++;
+                }
+            }
         }
+
+        Assert.IsGreaterThan(20, solid, "The pair has solid pixels to check.");
     }
 
     // Hover fills the whole window with the subtle hover token, an idle window with alpha 1.
@@ -306,18 +340,9 @@ public sealed class GaugeDesignPixelTests
         Assert.AreEqual(0, hover.GetPixel(0, 0).A, "The corner is outside the 4 px radius.");
     }
 
-    private static Color MarkPixel(Bitmap bitmap, GaugeLayout layout)
-    {
-        RectangleF head = layout.EarbudShapes().Shapes[0];
-        return bitmap.GetPixel((int)(head.X + (head.Width / 2)), (int)(head.Y + (head.Height / 2)));
-    }
-
-    // A point on the case mark's box: its middle.
-    private static Color CaseMarkPixel(Bitmap bitmap, GaugeLayout layout)
-    {
-        RectangleF r = GaugeRenderer.CaseMarkRect(layout);
-        return bitmap.GetPixel((int)(r.X + (r.Width / 2)), (int)(r.Y + (r.Height * 0.75f)));
-    }
+    // The pair's or the case's icon is drawn in the token: the pixel its mask covers most has the token's colour, scaled by that coverage.
+    private static void AssertMark(Bitmap bitmap, GaugeLayout layout, Icon icon, IconStyle style, Color ink, string message) =>
+        GaugeMarks.AssertInk(bitmap, icon, style, GaugeMarks.Box(layout), ink, message);
 
     public static IEnumerable<object[]> ThemesAndDpis()
     {

@@ -45,25 +45,23 @@ public sealed class GaugeLayoutTests
         Assert.AreEqual(gap, l.ChargingSlot.X - l.NumberSlot.Right);
     }
 
-    // The design's earbud pair on the ring box's 24 unit grid: heads 5 by 5 at (6.5, 6) and (12.5, 6), stems 2 by 8 at (9.5, 9)
-    // and (12.5, 9), radius 1; at 150% every figure is 1.5 times.
+    // The pair's and the case's box is 14 px at 100% (rounded half away from zero at the other scales), centred in the ring box with
+    // whole pixels, and inside the ring.
     [TestMethod]
-    public void TheEarbudPairIsTheDesignsShapesScaledToTheRingBox()
+    [DataRow(96, 14)]
+    [DataRow(120, 18)]
+    [DataRow(144, 21)]
+    [DataRow(192, 28)]
+    public void TheMarkBoxIsFourteenPixelsAtOneHundredPercentCentredInTheRingBox(int dpi, int box)
     {
-        (RectangleF[] shapes, float radius) = GaugeLayout.For(96).EarbudShapes();
-        Rectangle box = GaugeLayout.For(96).RingBox;
-        Assert.AreEqual(new RectangleF(box.X + 6.5f, box.Y + 6f, 5f, 5f), shapes[0]);
-        Assert.AreEqual(new RectangleF(box.X + 9.5f, box.Y + 9f, 2f, 8f), shapes[1]);
-        Assert.AreEqual(new RectangleF(box.X + 12.5f, box.Y + 6f, 5f, 5f), shapes[2]);
-        Assert.AreEqual(new RectangleF(box.X + 12.5f, box.Y + 9f, 2f, 8f), shapes[3]);
-        Assert.AreEqual(1f, radius);
+        GaugeLayout l = GaugeLayout.For(dpi);
+        Rectangle mark = GaugeMarks.Box(l);
 
-        (RectangleF[] big, float bigRadius) = GaugeLayout.For(144).EarbudShapes();
-        Rectangle bigBox = GaugeLayout.For(144).RingBox;
-        Assert.AreEqual(bigBox.X + (6.5f * 1.5f), big[0].X, 0.0001f);
-        Assert.AreEqual(7.5f, big[0].Width, 0.0001f);
-        Assert.AreEqual(12f, big[1].Height, 0.0001f);
-        Assert.AreEqual(1.5f, bigRadius, 0.0001f);
+        Assert.AreEqual(box, GaugeMarks.BoxPx(l));
+        Assert.AreEqual(new Size(box, box), mark.Size);
+        Assert.AreEqual(l.RingBox.X + ((l.RingBox.Width - box) / 2), mark.X);
+        Assert.AreEqual(l.RingBox.Y + ((l.RingBox.Height - box) / 2), mark.Y);
+        Assert.IsTrue(l.RingBox.Contains(mark), "The mark lies in the ring box.");
     }
 
     // The window is 40 px in a 48 px taskbar, so its top offset is 4, and 5 and 6 at the larger scales.
