@@ -51,7 +51,7 @@ public sealed class TrayMenuIconTests
 
     private sealed record ItemInfo(int Index, string Text, bool Separator, bool Available, bool Enabled, CheckState Check, Rectangle Bounds, Color ForeColor);
 
-    private sealed record Shown(IReadOnlyList<ItemInfo> Items, IReadOnlyList<DrawnIcon> Log, Bitmap Painted, Bitmap Bare, Size ImageSize, IReadOnlyList<Size> ImageSizes, bool CheckMargin, bool ImageMargin, uint IconDpi);
+    private sealed record Shown(IReadOnlyList<ItemInfo> Items, IReadOnlyList<DrawnIcon> Log, Bitmap Painted, Bitmap Bare, Size ImageSize, IReadOnlyList<Size> ImageSizes, bool CheckMargin, bool ImageMargin, uint IconDpi, Rectangle Display);
 
     private static MenuState Base(DeviceSnapshot snapshot, bool block = true)
     {
@@ -216,7 +216,7 @@ public sealed class TrayMenuIconTests
             IconPainter.DrawnIconLog = null;
             List<Size> imageSizes = menu.Items.Where(i => i is ToolStripMenuItem { Image: not null } && Table.Any(t => ReferenceEquals(menu.Items[t.Index], i)))
                 .Select(i => i.Image!.Size).ToList();
-            shown = new Shown(items, log, painted, bare, strip.ImageScalingSize, imageSizes, strip.ShowCheckMargin, strip.ShowImageMargin, menu.IconDpi);
+            shown = new Shown(items, log, painted, bare, strip.ImageScalingSize, imageSizes, strip.ShowCheckMargin, strip.ShowImageMargin, menu.IconDpi, strip.DisplayRectangle);
             strip.Close();
         });
         Assert.IsNotNull(shown);
@@ -227,6 +227,15 @@ public sealed class TrayMenuIconTests
     // top to bottom, so the log holds the icons in the order of Table; this pairs them and puts each box in the strip's coordinates.
     private static List<(ItemInfo Item, DrawnIcon Drawn, Rectangle InStrip)> Pair(Shown shown)
     {
+        // A menu taller than the screen's working area scrolls, and a command outside the shown part is never painted, so its icon
+        // cannot be counted. A small screen (a hosted runner's) at a high dpi does that; the count is then not a finding either way.
+        List<ItemInfo> hidden = Table.Select(t => shown.Items[t.Index]).Where(i => i.Bounds.Top < shown.Display.Top || i.Bounds.Bottom > shown.Display.Bottom).ToList();
+        if (hidden.Count > 0)
+        {
+            Assert.Inconclusive(hidden.Count + " of the " + Table.Length + " commands lie outside the shown part of the menu " + shown.Display +
+                " on this screen, so their icons are not painted and cannot be counted.");
+        }
+
         Assert.AreEqual(Table.Length, shown.Log.Count, "The menu should draw one icon for each of its " + Table.Length + " commands and none else (a submenu entry or a separator drew one, or a command drew none).");
         var pairs = new List<(ItemInfo, DrawnIcon, Rectangle)>();
         for (int i = 0; i < Table.Length; i++)
