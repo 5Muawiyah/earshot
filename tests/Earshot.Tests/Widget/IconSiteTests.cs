@@ -18,10 +18,10 @@ public sealed class IconSiteTests
 {
     private static readonly DateTimeOffset Fixed = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
 
-    // The card is tried light at 100%, dark at 150% display scale and 150% text size, and light at 200%.
+    // The card is tried light at 100%, dark at 150% display scale and 150% text size, light at 200%, and in high contrast at 125%.
     private static readonly (DesignTheme Theme, int Dpi, double Text)[] Variants =
     [
-        (DesignTheme.Light, 96, 1.0), (DesignTheme.Dark, 144, 1.5), (DesignTheme.Light, 192, 1.0),
+        (DesignTheme.Light, 96, 1.0), (DesignTheme.Dark, 144, 1.5), (DesignTheme.Light, 192, 1.0), (DesignTheme.HighContrast, 120, 1.0),
     ];
 
     // Offset is where the page has been scrolled to, Visible the part of the bitmap the page shows in (an icon drawn outside it is
@@ -79,6 +79,9 @@ public sealed class IconSiteTests
             Run(variant, unasked, show, check, scrolled);
         }
     }
+
+    // The tick of a finished compact row and of a notice is in the accent, and in the text colour in high contrast (WidgetCard.Compact.cs).
+    private static Color TickInk(Scene s) => s.Colours.HighContrast ? s.Colours.Text : s.Colours.Accent;
 
     private static int Box(Scene s, int at96, bool textScaled = true) => TextFit.Grow(at96, s.Dpi, textScaled ? s.Text : 1.0);
 
@@ -408,13 +411,13 @@ public sealed class IconSiteTests
         Each(true, (c, dpi) => c.Render(CardKit.MainModel() with { Form = CardForm.Compact, Compact = CompactContents.LowBattery("Left", 20), Now = Fixed }, dpi), s =>
             Expect(s, Icon.Alert, IconStyle.Line, s.Colours.Caution, Box(s, 16), "WidgetCard.Compact.cs", CompactLayoutRects.Of(s).Glyph));
         Each(true, (c, dpi) => c.Render(CardKit.MainModel() with { Form = CardForm.Compact, Compact = CompactContents.FullyCharged(), Now = Fixed }, dpi), s =>
-            Expect(s, Icon.Check, IconStyle.Line, s.Colours.Accent, Box(s, 16), "WidgetCard.Compact.cs", CompactLayoutRects.Of(s).Glyph));
+            Expect(s, Icon.Check, IconStyle.Line, TickInk(s), Box(s, 16), "WidgetCard.Compact.cs", CompactLayoutRects.Of(s).Glyph));
     }
 
     [TestMethod]
     public void ABuiltCardRowTickIsTheCheckLineIconInTheAccent() => Each(true,
         (c, dpi) => c.Render(CardKit.MainModel() with { Form = CardForm.Compact, Compact = CompactContents.MovedTo("iPhone"), CompactState = CompactActionState.Done, Now = Fixed }, dpi),
-        s => Expect(s, Icon.Check, IconStyle.Line, s.Colours.Accent, Box(s, 16), "WidgetCard.Compact.cs", CompactLayoutRects.Of(s).Action));
+        s => Expect(s, Icon.Check, IconStyle.Line, TickInk(s), Box(s, 16), "WidgetCard.Compact.cs", CompactLayoutRects.Of(s).Action));
 
     [TestMethod]
     public void ANoticeOnTheStatusRowOfTheAskedCardHasItsIcon() => Each(false,
@@ -424,7 +427,7 @@ public sealed class IconSiteTests
     [TestMethod]
     public void ANoticeOnTheStripUnderASubPageHasItsIcon() => Each(false,
         (c, dpi) => c.Render(UpdatesPage(false) with { Notice = CompactContents.FullyCharged() }, dpi),
-        s => Expect(s, Icon.Check, IconStyle.Line, s.Colours.Accent, Box(s, 16), "WidgetCard.Notice.cs"));
+        s => Expect(s, Icon.Check, IconStyle.Line, TickInk(s), Box(s, 16), "WidgetCard.Notice.cs"));
 
     // ---- The settings page
 

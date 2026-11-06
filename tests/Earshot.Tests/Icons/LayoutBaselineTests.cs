@@ -30,9 +30,9 @@ namespace Earshot.Tests.Icons;
 // first. Every package after must leave the test green. The tray menu's check margin, image size and width are properties of the
 // strip, which the document does not read, so no difference is allowed.
 //
-// The text sections depend on the fonts of the PC (the type ramp's Segoe UI Variable instances and the icon fonts the 1.7.0 card
-// asked for): they are compared only where the same fonts are installed, and the test is inconclusive, after the pure layout
-// sections have been compared, where they are not.
+// The text sections depend on the fonts of the PC (the type ramp's Segoe UI Variable instances and Segoe UI): they are compared only
+// where the same fonts are installed, and the test is inconclusive, after the pure layout sections have been compared, where they
+// are not. The icon fonts are not among them: no text is drawn in one now, and the 1.7.0 text did not depend on them.
 [TestClass]
 public sealed class LayoutBaselineTests
 {
@@ -156,7 +156,7 @@ public sealed class LayoutBaselineTests
         using var fonts = new InstalledFontCollection();
         string[] present = fonts.Families
             .Select(f => f.Name)
-            .Where(n => n.StartsWith("Segoe UI Variable", StringComparison.Ordinal) || n is "Segoe Fluent Icons" or "Segoe MDL2 Assets" or "Segoe UI")
+            .Where(n => n.StartsWith("Segoe UI Variable", StringComparison.Ordinal) || n is "Segoe UI")
             .Order(StringComparer.Ordinal)
             .ToArray();
         return string.Join(", ", present);

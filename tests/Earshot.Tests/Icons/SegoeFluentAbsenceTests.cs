@@ -112,7 +112,7 @@ public sealed class SegoeFluentAbsenceTests
             "No type is named for the icon font's glyphs.");
     }
 
-    // (2) A render matrix: the surfaces this package owns (every gauge mode and story frame, the tray) and the card's main, settings
+    // (2) A render matrix: the surfaces this package owns (every gauge mode and story frame) and the card's main, settings
     // and updates pages draw their icons from the catalogue, and no text they draw is in an icon font or holds a private use code point.
     [TestMethod]
     public void TheGaugeMatrixDrawsCatalogueIconsOnly()

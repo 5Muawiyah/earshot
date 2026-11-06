@@ -60,7 +60,7 @@ internal static class SendToLayout
 }
 
 // The send-to picker: where the AirPods are now, and a row for each place to send them. A small borderless window in the
-// card's own style (the design tokens, the accent, the type ramp and the icon font), shown above the gauge and closed by a
+// card's own style (the design tokens, the accent, the type ramp and the icon set), shown above the gauge and closed by a
 // choice, Escape or a click anywhere else. It takes focus, so the keyboard works: Up and Down move among the rows, Enter and
 // Space press the one with the focus, Escape closes it.
 //

@@ -129,40 +129,52 @@ internal static partial class Program
         int width = labelWidth + (columns * cell) + pad;
         int height = header + (icons.Count * cell) + pad;
         var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        using Graphics g = Graphics.FromImage(bitmap);
-        g.Clear(IconSheetBackground(ink, highContrast));
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-        using var font = new Font("Segoe UI", 9f * dpi / 96f, FontStyle.Regular, GraphicsUnit.Pixel);
-        using var brush = new SolidBrush(ink);
-        using var rule = new Pen(Color.FromArgb(60, ink));
-
-        for (int style = 0; style < styles; style++)
+        bool done = false;
+        try
         {
-            for (int b = 0; b < IconSheetBoxes.Count; b++)
-            {
-                int x = labelWidth + (((style * IconSheetBoxes.Count) + b) * cell);
-                int box = ProbeWidgetIconsScaled(IconSheetBoxes[b].Px, dpi);
-                g.DrawString((style == 0 ? "L" : "F") + box.ToString(CultureInfo.InvariantCulture), font, brush, x + pad, pad);
-            }
-        }
+            using Graphics g = Graphics.FromImage(bitmap);
+            g.Clear(IconSheetBackground(ink, highContrast));
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            using var font = new Font("Segoe UI", 9f * dpi / 96f, FontStyle.Regular, GraphicsUnit.Pixel);
+            using var brush = new SolidBrush(ink);
+            using var rule = new Pen(Color.FromArgb(60, ink));
 
-        for (int row = 0; row < icons.Count; row++)
-        {
-            int y = header + (row * cell);
-            g.DrawLine(rule, 0, y, width, y);
-            g.DrawString(icons[row].ToString(), font, brush, pad, y + pad);
             for (int style = 0; style < styles; style++)
             {
                 for (int b = 0; b < IconSheetBoxes.Count; b++)
                 {
-                    var bounds = new Rectangle(labelWidth + (((style * IconSheetBoxes.Count) + b) * cell), y, cell, cell);
-                    IconPainter.Draw(g, icons[row], style == 0 ? IconStyle.Line : IconStyle.Filled, bounds,
-                        ProbeWidgetIconsScaled(IconSheetBoxes[b].Px, dpi), ink, IconSheetBoxes[b].Rule);
+                    int x = labelWidth + (((style * IconSheetBoxes.Count) + b) * cell);
+                    int box = ProbeWidgetIconsScaled(IconSheetBoxes[b].Px, dpi);
+                    g.DrawString((style == 0 ? "L" : "F") + box.ToString(CultureInfo.InvariantCulture), font, brush, x + pad, pad);
                 }
             }
-        }
 
-        return bitmap;
+            for (int row = 0; row < icons.Count; row++)
+            {
+                int y = header + (row * cell);
+                g.DrawLine(rule, 0, y, width, y);
+                g.DrawString(icons[row].ToString(), font, brush, pad, y + pad);
+                for (int style = 0; style < styles; style++)
+                {
+                    for (int b = 0; b < IconSheetBoxes.Count; b++)
+                    {
+                        var bounds = new Rectangle(labelWidth + (((style * IconSheetBoxes.Count) + b) * cell), y, cell, cell);
+                        IconPainter.Draw(g, icons[row], style == 0 ? IconStyle.Line : IconStyle.Filled, bounds,
+                            ProbeWidgetIconsScaled(IconSheetBoxes[b].Px, dpi), ink, IconSheetBoxes[b].Rule);
+                    }
+                }
+            }
+
+            done = true;
+            return bitmap;
+        }
+        finally
+        {
+            if (!done)
+            {
+                bitmap.Dispose();
+            }
+        }
     }
 
     // The tray's four states at the small icon size of the display, on a flat taskbar sample.
@@ -172,15 +184,27 @@ internal static partial class Program
         int pad = px / 2;
         GlyphState[] states = [GlyphState.Disconnected, GlyphState.Connected, GlyphState.Busy, GlyphState.Blocked];
         var bitmap = new Bitmap((states.Length * (px + pad)) + pad, px + (2 * pad), PixelFormat.Format32bppArgb);
-        using Graphics g = Graphics.FromImage(bitmap);
-        g.Clear(highContrast ? SystemColors.Window : ink.GetBrightness() >= 0.5f ? DarkTaskbarSample : LightTaskbarSample);
-        for (int i = 0; i < states.Length; i++)
+        bool done = false;
+        try
         {
-            using Bitmap glyph = TrayGlyph.ToBitmap(TrayGlyph.Coverage(px, states[i]), px, ink);
-            g.DrawImageUnscaled(glyph, pad + (i * (px + pad)), pad);
-        }
+            using Graphics g = Graphics.FromImage(bitmap);
+            g.Clear(highContrast ? SystemColors.Window : ink.GetBrightness() >= 0.5f ? DarkTaskbarSample : LightTaskbarSample);
+            for (int i = 0; i < states.Length; i++)
+            {
+                using Bitmap glyph = TrayGlyph.ToBitmap(TrayGlyph.Coverage(px, states[i]), px, ink);
+                g.DrawImageUnscaled(glyph, pad + (i * (px + pad)), pad);
+            }
 
-        return bitmap;
+            done = true;
+            return bitmap;
+        }
+        finally
+        {
+            if (!done)
+            {
+                bitmap.Dispose();
+            }
+        }
     }
 
     // Every gauge mode on a flat taskbar sample, five to a row.
@@ -196,16 +220,28 @@ internal static partial class Program
         int rows = (gauges.Count + perRow - 1) / perRow;
         var bitmap = new Bitmap(
             (perRow * (size.Width + pad)) + pad, (rows * (size.Height + pad)) + pad, PixelFormat.Format32bppArgb);
-        using Graphics g = Graphics.FromImage(bitmap);
-        g.Clear(highContrast ? SystemColors.Window : light ? LightTaskbarSample : DarkTaskbarSample);
-        g.CompositingMode = CompositingMode.SourceOver;
-        for (int i = 0; i < gauges.Count; i++)
+        bool done = false;
+        try
         {
-            using Bitmap gauge = GaugeRenderer.Render(gauges[i].Content, palette, GaugeLayout.For((int)dpi, gauges[i].Order), hover: false, fontFamily);
-            g.DrawImageUnscaled(gauge, pad + ((i % perRow) * (size.Width + pad)), pad + ((i / perRow) * (size.Height + pad)));
-        }
+            using Graphics g = Graphics.FromImage(bitmap);
+            g.Clear(highContrast ? SystemColors.Window : light ? LightTaskbarSample : DarkTaskbarSample);
+            g.CompositingMode = CompositingMode.SourceOver;
+            for (int i = 0; i < gauges.Count; i++)
+            {
+                using Bitmap gauge = GaugeRenderer.Render(gauges[i].Content, palette, GaugeLayout.For((int)dpi, gauges[i].Order), hover: false, fontFamily);
+                g.DrawImageUnscaled(gauge, pad + ((i % perRow) * (size.Width + pad)), pad + ((i / perRow) * (size.Height + pad)));
+            }
 
-        return bitmap;
+            done = true;
+            return bitmap;
+        }
+        finally
+        {
+            if (!done)
+            {
+                bitmap.Dispose();
+            }
+        }
     }
 
     // The tray menu's commands in a column, each with its icon at the menu's icon size (rule B) and its name.
@@ -216,19 +252,31 @@ internal static partial class Program
         int row = px + pad;
         int width = ProbeWidgetIconsScaled(260, dpi);
         var bitmap = new Bitmap(width, (IconMenuSample.Count * row) + pad, PixelFormat.Format32bppArgb);
-        using Graphics g = Graphics.FromImage(bitmap);
-        g.Clear(IconSheetBackground(ink, highContrast));
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-        using var font = new Font("Segoe UI", 9f * dpi / 96f, FontStyle.Regular, GraphicsUnit.Point);
-        using var brush = new SolidBrush(ink);
-        for (int i = 0; i < IconMenuSample.Count; i++)
+        bool done = false;
+        try
         {
-            int y = (pad / 2) + (i * row);
-            var iconBounds = new Rectangle(pad, y, px, row);
-            IconPainter.Draw(g, IconMenuSample[i].Icon, IconMenuSample[i].Style, iconBounds, px, ink, IconRule.B);
-            g.DrawString(IconMenuSample[i].Text, font, brush, pad + px + pad, y + ((row - font.Height) / 2f));
-        }
+            using Graphics g = Graphics.FromImage(bitmap);
+            g.Clear(IconSheetBackground(ink, highContrast));
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            using var font = new Font("Segoe UI", 9f * dpi / 96f, FontStyle.Regular, GraphicsUnit.Point);
+            using var brush = new SolidBrush(ink);
+            for (int i = 0; i < IconMenuSample.Count; i++)
+            {
+                int y = (pad / 2) + (i * row);
+                var iconBounds = new Rectangle(pad, y, px, row);
+                IconPainter.Draw(g, IconMenuSample[i].Icon, IconMenuSample[i].Style, iconBounds, px, ink, IconRule.B);
+                g.DrawString(IconMenuSample[i].Text, font, brush, pad + px + pad, y + ((row - font.Height) / 2f));
+            }
 
-        return bitmap;
+            done = true;
+            return bitmap;
+        }
+        finally
+        {
+            if (!done)
+            {
+                bitmap.Dispose();
+            }
+        }
     }
 }

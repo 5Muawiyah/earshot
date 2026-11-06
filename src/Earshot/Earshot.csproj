@@ -71,7 +71,7 @@
 
        Where each path comes from, read off a publish on the build machine rather than recalled:
          @(ResolvedRuntimePack) carries %(PackageDirectory), the restored folder of each runtime pack. A publish
-         printed dir=[C:\Users\muawi\.nuget\packages\microsoft.netcore.app.runtime.win-x64\10.0.12] for
+         printed dir=[%USERPROFILE%\.nuget\packages\microsoft.netcore.app.runtime.win-x64\10.0.12] for
          Microsoft.NETCore.App.Runtime.win-x64 and the matching folder for the Windows Desktop pack. The same
          item also holds Microsoft.Windows.SDK.NET.Ref and Microsoft.AspNetCore.App.Runtime.win-x64; the
          ASP.NET Core pack is resolved but never published, and Earshot.deps.json names only the four packages

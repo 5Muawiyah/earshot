@@ -29,8 +29,8 @@ internal sealed partial class WidgetCard
         && _model.ShownParts.NewestReadAt is null;
 
     // The same line as drawn beside its clock icon: the age alone ("4 min ago"), since the icon says what is aged. The
-    // full line is the tooltip, and what is drawn when no icon font is installed. A line that is not an age (a refresh
-    // under way, Windows' own figure) is the same short or long.
+    // full line is the tooltip. A line that is not an age (a refresh under way, Windows' own figure) is the same short or
+    // long.
     internal string ReadLineShort =>
         _model.Refresh?.ReadLine is { } refreshing ? refreshing
         : _model.ShownParts.WindowsPercent is int figure

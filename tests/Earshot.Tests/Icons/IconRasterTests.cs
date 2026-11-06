@@ -30,7 +30,7 @@ public sealed class IconRasterTests
     private static readonly int[] EdgeBoxes = [10, 16, 20, 24, 32, 48, 64, 128, 256];
     private static readonly IconRule[] BothRules = [IconRule.A, IconRule.B];
 
-    private static readonly int[] Boxes = [10, 12, 13, 14, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 40];
+    private static readonly int[] Boxes = [10, 12, 13, 14, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 36, 40, 48, 64];
 
     // The icons drawn on the whole 24 grid (rule B): the sub-page status icons at 20 px and the tray menu's icons at the menu's size.
     private static readonly Icon[] RuleBIcons =
@@ -41,7 +41,7 @@ public sealed class IconRasterTests
         Icon.Device, Icon.Settings, Icon.Tool, Icon.Bluetooth, Icon.BluetoothSearching, Icon.Download, Icon.Sync, Icon.Copy, Icon.Exit,
     ];
 
-    private static readonly int[] RuleBBoxes = [16, 20, 24, 25, 30, 32, 40];
+    private static readonly int[] RuleBBoxes = [16, 20, 24, 25, 30, 32, 40, 48, 64];
 
     private static IEnumerable<IconStyle> Styles(Icon icon) =>
         IconCatalogue.HasFilled(icon) ? [IconStyle.Line, IconStyle.Filled] : [IconStyle.Line];
