@@ -404,7 +404,7 @@ public sealed class LayoutBaselineTests
                             if (card.CurrentSettingsLayout is { } settings)
                             {
                                 lines.Add("settings frame " + Dump(settings.Frame));
-                                lines.AddRange(settings.Items.Select((item, i) => "settings item " + i + " " + Dump(item)));
+                                lines.AddRange(settings.Items.Select((item, i) => "settings row " + i + " " + Dump(item)));
                                 lines.AddRange(settings.Targets.Select((target, i) => "settings target " + i + " " + Dump(target)));
                                 lines.AddRange(settings.Surfaces.Select((surface, i) => "settings surface " + i + " " + Dump(surface)));
                             }
