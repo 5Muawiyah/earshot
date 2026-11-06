@@ -16,7 +16,7 @@ namespace Earshot.Tests.Phase5;
 //
 //   tray-menu.png  TrayMenu, built from a MenuState that MenuModel.Build made, shown on a private
 //                  desktop so nothing appears on screen, and rendered with DrawToBitmap.
-//   hero.png       the compact card and the tray glyph from EarbudGlyph, placed on a taskbar strip.
+//   hero.png       the compact card and the tray glyph from TrayGlyph, placed on a taskbar strip.
 //
 // Files are written only when EARSHOT_DOC_IMAGE_DIR names a folder.
 [TestClass]
@@ -82,9 +82,9 @@ public sealed class DocumentationSceneImageTests
             using Bitmap cardBitmap = Earshot.Tests.Widget.CardKit.Render(card);
 
             const int GlyphPx = 48;
-            byte[] coverage = EarbudGlyph.Coverage(GlyphPx, GlyphState.Connected);
+            byte[] coverage = TrayGlyph.Coverage(GlyphPx, GlyphState.Connected);
             Assert.IsTrue(coverage.Any(a => a != 0), "The connected glyph drew nothing.");
-            using Bitmap glyph = EarbudGlyph.ToBitmap(coverage, GlyphPx, Color.White);
+            using Bitmap glyph = TrayGlyph.ToBitmap(coverage, GlyphPx, Color.White);
 
             Save("hero.png", () => Hero(cardBitmap, glyph));
         });

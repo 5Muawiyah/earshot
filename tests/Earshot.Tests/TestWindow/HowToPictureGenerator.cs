@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using Earshot.Icons;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.TestWindow;
 
@@ -9,8 +10,8 @@ namespace Earshot.Tests.TestWindow;
 // (never a real screen capture: this repository is public, a capture would show the owner's other
 // apps and his AirPods' own name, and Windows will not let its permission box be captured at all).
 // Ink is a single mid-grey so the drawing reads on a light or a dark surface alike; the taskbar
-// icon uses Earshot's own real glyph (EarbudGlyph, from src\Earshot) so it looks right. Every word
-// drawn into a picture also appears in its how-to block's own steps (wording.json), never only
+// icon uses Earshot's own real glyph (TrayGlyph, from src\Earshot: MingCute's AirPods icon) so it looks right, and the moved-to
+// card's phone and take-back marks are drawn with the same icon painter. Every word drawn into a picture also appears in its how-to block's own steps (wording.json), never only
 // here. Re-run PictureGeneratorTests.RegeneratesTheCheckedInPngFiles (with
 // EARSHOT_REGENERATE_PICTURES=1 set) to refresh the checked-in files after changing anything below.
 internal static class HowToPictureGenerator
@@ -53,10 +54,10 @@ internal static class HowToPictureGenerator
         // The "show hidden icons" arrow.
         DrawCaret(g, 60, height - 24);
 
-        // Earshot's own real glyph, drawn at 32 px, ringed to show where to click.
-        using Bitmap glyph = EarbudGlyph.ToBitmap(EarbudGlyph.Coverage(32, GlyphState.Disconnected), 32, Ink);
+        // Earshot's own real glyph, drawn at 32 px, a pixel to a pixel, ringed to show where to click.
+        using Bitmap glyph = TrayGlyph.ToBitmap(TrayGlyph.Coverage(32, GlyphState.Disconnected), 32, Ink);
         int glyphX = 130, glyphY = height - 40;
-        g.DrawImage(glyph, glyphX, glyphY, 32, 32);
+        DrawPixelForPixel(g, glyph, glyphX, glyphY);
         using var ringPen = new Pen(Highlight, 3);
         g.DrawEllipse(ringPen, glyphX - 8, glyphY - 8, 48, 48);
 
@@ -72,9 +73,9 @@ internal static class HowToPictureGenerator
         using var bitmap = new Bitmap(width, height);
         using var g = BeginDraw(bitmap);
 
-        using Bitmap glyph = EarbudGlyph.ToBitmap(EarbudGlyph.Coverage(32, GlyphState.Disconnected), 32, Ink);
+        using Bitmap glyph = TrayGlyph.ToBitmap(TrayGlyph.Coverage(32, GlyphState.Disconnected), 32, Ink);
         int glyphX = width - 60, glyphY = height - 40;
-        g.DrawImage(glyph, glyphX, glyphY, 32, 32);
+        DrawPixelForPixel(g, glyph, glyphX, glyphY);
 
         // The menu opening above the icon: an outlined panel with a few blank rows (no baked-in
         // item text, so nothing here can drift out of step with the real menu).
@@ -179,8 +180,8 @@ internal static class HowToPictureGenerator
         g.DrawEllipse(pen, phone.Left + phone.Width / 2 - 4, phone.Bottom - 20, 8, 8);
         DrawNote(g, pen, phone.Left + 25, phone.Top + 55);
 
-        using Bitmap glyph = EarbudGlyph.ToBitmap(EarbudGlyph.Coverage(64, GlyphState.Connected), 64, Ink);
-        g.DrawImage(glyph, 150, 70, 64, 64);
+        using Bitmap glyph = TrayGlyph.ToBitmap(TrayGlyph.Coverage(64, GlyphState.Connected), 64, Ink);
+        DrawPixelForPixel(g, glyph, 150, 70);
 
         return ToPngBytes(bitmap);
     }
@@ -445,16 +446,37 @@ internal static class HowToPictureGenerator
         using var font = new Font(FontFamily.GenericSansSerif, 14f);
         using var ink = new SolidBrush(Ink);
 
-        // The small card: a phone mark, the words, and a round icon on the right, ringed, which is the one to press.
+        // The small card: a phone mark, the words, and a round icon on the right, ringed, which is the one to press. The phone is the
+        // icon set's phone and the round icon holds the set's computer, the take-back mark, both in the line style.
         var card = new Rectangle(16, 24, width - 32, 72);
         g.DrawRectangle(pen, card);
-        g.DrawRectangle(pen, new Rectangle(card.Left + 16, card.Top + 14, 24, 44));
+        IconPainter.Draw(g, Icon.Cellphone, IconStyle.Line, new Rectangle(card.Left + 16, card.Top + 14, 24, 44), 44, Ink);
         g.DrawString("Moved to", font, ink, card.Left + 56, card.Top + 22);
+        var takeBack = new Rectangle(card.Right - 60, card.Top + 14, 44, 44);
+        IconPainter.Draw(g, Icon.Computer, IconStyle.Line, takeBack, 26, Ink);
         using var ringPen = new Pen(Highlight, 3);
-        g.DrawEllipse(ringPen, card.Right - 60, card.Top + 14, 44, 44);
+        g.DrawEllipse(ringPen, takeBack);
         return ToPngBytes(bitmap);
     }
     private static readonly StringFormat CentreFormat = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+
+    // The glyph bitmap onto the picture a pixel to a pixel, with nothing resampled, so its edges are as sharp as its coverage and the
+    // picture's alpha is that coverage.
+    private static void DrawPixelForPixel(Graphics g, Bitmap glyph, int x, int y)
+    {
+        GraphicsState state = g.Save();
+        try
+        {
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
+            g.SmoothingMode = SmoothingMode.None;
+            g.DrawImage(glyph, new Rectangle(x, y, glyph.Width, glyph.Height), 0, 0, glyph.Width, glyph.Height, GraphicsUnit.Pixel);
+        }
+        finally
+        {
+            g.Restore(state);
+        }
+    }
 
     private static Graphics BeginDraw(Bitmap bitmap)
     {

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Reflection.Emit;
 using Earshot.Boot;
 using Earshot.Composition;
@@ -313,7 +313,7 @@ public sealed class WidgetAtRestTests
             typeof(DeviceSnapshotEventArgs), typeof(EarshotSettings), typeof(ICardPresenter), typeof(IDeviceMonitor),
             typeof(ILog), typeof(ISettingsStore), typeof(LogExtensions), typeof(LogLevel), typeof(StepOutcome),
             typeof(StepOutcomes),
-            typeof(IconsNs.EarbudGlyph), typeof(IconsNs.GlyphState), typeof(IconsNs.ThemeReader),
+            typeof(IconsNs.TrayGlyph), typeof(IconsNs.GlyphState), typeof(IconsNs.ThemeReader),
             typeof(IconsNs.IconPainter), typeof(IconsNs.IconStyle), typeof(IconsNs.IconRule), typeof(IconsNs.Catalogue.Icon),
             typeof(APPBARDATA), typeof(BITMAPINFO), typeof(BITMAPINFOHEADER), typeof(BLENDFUNCTION),
             typeof(ComActivation), typeof(Dwm), typeof(IPersistFile), typeof(IPropertyStore), typeof(IShellLinkW),

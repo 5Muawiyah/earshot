@@ -1,6 +1,8 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using Earshot.Icons;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.TestWindow;
 
@@ -113,5 +115,57 @@ public sealed class HowToPictureGeneratorTests
         }
 
         Assert.IsEmpty(tooLarge, string.Join(Environment.NewLine, tooLarge));
+    }
+
+    // The pictures that show Earshot's own icons show the MingCute ones: the tray glyph's coverage sits in the picture's alpha channel
+    // at the place the generator puts it (the taskbar picture's ring is left out of the comparison).
+    [TestMethod]
+    [DataRow("earshot-icon-taskbar", 130, 100, 32, false, true)]
+    [DataRow("earshot-icon-menu", 240, 180, 32, false, false)]
+    [DataRow("airpods-playing", 150, 70, 64, true, false)]
+    public void ThePicturesThatShowTheTrayIconShowTheMingCuteAirPods(string name, int x, int y, int px, bool connected, bool ringed)
+    {
+        using var stream = new MemoryStream(HowToPictureGenerator.Generators[name]());
+        using var bitmap = new Bitmap(stream);
+        byte[] coverage = TrayGlyph.Coverage(px, connected ? GlyphState.Connected : GlyphState.Disconnected);
+        Assert.IsTrue(coverage.Any(a => a != 0), "The glyph drew nothing.");
+        double centre = (px - 1) / 2.0;
+        int compared = 0;
+        for (int row = 0; row < px; row++)
+        {
+            for (int column = 0; column < px; column++)
+            {
+                if (ringed && Math.Sqrt(Math.Pow(column - centre, 2) + Math.Pow(row - centre, 2)) > 21)
+                {
+                    continue;
+                }
+
+                int alpha = bitmap.GetPixel(x + column, y + row).A;
+                Assert.IsTrue(Math.Abs(alpha - coverage[(row * px) + column]) <= 1, name + " pixel (" + column + "," + row + "): alpha " + alpha + " against coverage " + coverage[(row * px) + column]);
+                compared++;
+            }
+        }
+
+        Assert.IsTrue(compared > px * px / 2, "Too few pixels compared: " + compared);
+    }
+
+    [TestMethod]
+    public void TheMovedToCardPictureDrawsThePhoneAndTheTakeBackComputerFromTheIcons()
+    {
+        List<DrawnIcon> log = [];
+        IconPainter.DrawnIconLog = log;
+        try
+        {
+            Assert.IsGreaterThan(0, HowToPictureGenerator.Generators["moved-to-card"]().Length);
+        }
+        finally
+        {
+            IconPainter.DrawnIconLog = null;
+        }
+
+        CollectionAssert.AreEqual(
+            new[] { (Icon.Cellphone, IconStyle.Line), (Icon.Computer, IconStyle.Line) },
+            log.Select(d => (d.Icon, d.Style)).ToArray(),
+            "The picture should draw the phone mark and the take-back icon from the icon set, line style, and nothing else.");
     }
 }
