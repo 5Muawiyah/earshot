@@ -31,9 +31,13 @@ public sealed class StartupIdleAndCardMeasureTests
 
     public TestContext TestContext { get; set; } = null!;
 
+    // Every line printed, in order, for the tests of the guard.
+    private readonly List<string> _printed = [];
+
     private void Measure(string line)
     {
         string text = "MEASURE " + line;
+        _printed.Add(text);
         Console.WriteLine(text);
         TestContext.WriteLine(text);
     }
@@ -46,12 +50,103 @@ public sealed class StartupIdleAndCardMeasureTests
     {
         Measure("machine processors=" + Environment.ProcessorCount.ToString(CultureInfo.InvariantCulture) +
             " os=" + Environment.OSVersion.Version);
-        MeasureTrayStartAndIdle();
+        MeasureTrayStartAndIdle(Program.TrayInstanceName, info => Process.Start(info)!);
         MeasureCardOpen();
     }
 
-    private void MeasureTrayStartAndIdle()
+    // ---- The guard: a measurement never starts a second tray while another Earshot tray runs in this session
+
+    // A name of the test's own for the single-instance lock, so no test touches the lock of the tray the owner may be running.
+    private static string OwnLockName() => "Earshot.test-" + Guid.NewGuid().ToString("N");
+
+    [TestMethod]
+    public void AnotherTrayIsSeenWhileItsInstanceLockIsHeldAndNotAfter()
     {
+        string name = OwnLockName();
+        Assert.IsFalse(AnotherTrayRuns(name), "No lock, no tray.");
+        using (var held = new Mutex(initiallyOwned: true, name, Program.TrayInstanceOptions, out bool createdNew))
+        {
+            Assert.IsTrue(createdNew);
+            Assert.IsTrue(AnotherTrayRuns(name), "The lock a tray holds is seen from this process.");
+            Assert.IsTrue(AnotherTrayRuns(name), "Looking at the lock does not take it or release it.");
+            held.ReleaseMutex();
+        }
+
+        Assert.IsFalse(AnotherTrayRuns(name), "The lock is gone with the tray that held it.");
+    }
+
+    [TestMethod]
+    public void NoSecondTrayIsStartedWhileAnotherRunsAndTheLinesSayWhy()
+    {
+        string name = OwnLockName();
+        int launches = 0;
+        using var held = new Mutex(initiallyOwned: true, name, Program.TrayInstanceOptions, out _);
+        MeasureTrayStartAndIdle(name, _ =>
+        {
+            launches++;
+            throw new InvalidOperationException("A second tray was started.");
+        });
+
+        Assert.AreEqual(0, launches, "Earshot.exe would have found the lock, signalled the running tray and opened its card.");
+        const string Why = "not measured (another Earshot tray runs in this session)";
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "MEASURE start_ms=" + Why,
+                "MEASURE idle_cpu_ms=" + Why,
+                "MEASURE idle_threads=" + Why,
+                "MEASURE idle_context_switches=" + Why,
+                "MEASURE idle_timer_wakeups=" + Why,
+            },
+            _printed);
+        held.ReleaseMutex();
+    }
+
+    [TestMethod]
+    public void TheTrayIsStartedWhenNoOtherTrayRuns()
+    {
+        int launches = 0;
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
+            MeasureTrayStartAndIdle(OwnLockName(), _ =>
+            {
+                launches++;
+                throw new InvalidOperationException("stand-in for Process.Start: nothing is started");
+            }));
+        Assert.AreEqual(1, launches, "With no lock held the measurement goes on to start the tray.");
+        StringAssert.Contains(error.Message, "stand-in");
+        Assert.IsEmpty(_printed, "Nothing was reported as skipped.");
+    }
+
+    // True when an Earshot tray holds its single-instance lock in this user's session. The tray takes that lock as the first thing it
+    // does (Program.RunTray); a second Earshot.exe that finds it held signals the running tray and ends, and the signal opens the
+    // running tray's card on the owner's desktop. So a measurement that is about to start Earshot.exe looks first, and does not
+    // start it when the answer is yes. The name is a parameter so a test can use a lock of its own. The lock is only opened to see
+    // that it is there, and the handle is closed at once; it is not waited on, so nothing is taken from the tray that holds it.
+    // https://learn.microsoft.com/en-us/dotnet/api/system.threading.mutex.tryopenexisting
+    internal static bool AnotherTrayRuns(string instanceName)
+    {
+        if (Mutex.TryOpenExisting(instanceName, Program.TrayInstanceOptions, out Mutex? existing))
+        {
+            existing.Dispose();
+            return true;
+        }
+
+        return false;
+    }
+
+    private void MeasureTrayStartAndIdle(string instanceName, Func<ProcessStartInfo, Process> launch)
+    {
+        if (AnotherTrayRuns(instanceName))
+        {
+            const string Why = "not measured (another Earshot tray runs in this session)";
+            Measure("start_ms=" + Why);
+            Measure("idle_cpu_ms=" + Why);
+            Measure("idle_threads=" + Why);
+            Measure("idle_context_switches=" + Why);
+            Measure("idle_timer_wakeups=" + Why);
+            return;
+        }
+
         string exe = Path.Combine(AppContext.BaseDirectory, "Earshot.exe");
         string root = Path.Combine(Path.GetTempPath(), "earshot-measure-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -73,7 +168,7 @@ public sealed class StartupIdleAndCardMeasureTests
                 folder => Path.Combine(root, "unused", folder.ToString())).LogFile;
 
             var clock = Stopwatch.StartNew();
-            process = Process.Start(info)!;
+            process = launch(info);
             bool ready = false;
             while (clock.Elapsed < StartLimit && !process.HasExited)
             {
