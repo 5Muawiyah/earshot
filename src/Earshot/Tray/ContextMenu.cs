@@ -49,7 +49,7 @@ internal sealed class TrayMenu : IDisposable
     private readonly ToolStripMenuItem _copyDiagnostics = new();
     private readonly ToolStripMenuItem _exit = new();
 
-    // The icon of each top-level command (section 5 of the icon spec). A submenu's entries are values, not commands: none has one.
+    // The icon of each top-level command. A submenu's entries are values, not commands: none has one.
     private readonly Dictionary<ToolStripItem, Icon> _icons = [];
     private Bitmap? _placeholder;
     private int _iconPx;
