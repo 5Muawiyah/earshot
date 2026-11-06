@@ -339,7 +339,7 @@ public sealed class IconRasterTests
         return (top, bottom, left, right, ink);
     }
 
-    // Spec section 4: a bud keeps the pair's rows (the grid's 2 to 22 fills the height) and moves only sideways, and the two buds
+    // A bud keeps the pair's rows (the grid's 2 to 22 fills the height) and moves only sideways, and the two buds
     // together are the pair. A bud that drops or rises by its sideways shift, or is clipped, fails the rows, the ink or both.
     [TestMethod]
     public void ABudKeepsThePairsRowsAndHalfItsInkAtEverySize()

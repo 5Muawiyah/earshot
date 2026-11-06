@@ -155,7 +155,7 @@ public sealed class IconSiteTests
 
     // What is on the page, not what the mask says: the rows and columns in the box and its apron where the page differs from the same
     // page without its icons by more than a quarter in some channel. A bud has to be whole and in its place there: its top and bottom
-    // are the pair's art rows (the grid's 2 to 22 is the box's height, spec section 4) to within a pixel, and none of it is cut by the
+    // are the pair's art rows (the grid's 2 to 22 is the box's height) to within a pixel, and none of it is cut by the
     // edge of the mask, which is the apron's outer pixel.
     private static void AssertBudIsWholeAndInPlace(Scene s, DrawnIcon d)
     {
