@@ -21,7 +21,7 @@ namespace Earshot;
 internal static partial class Program
 {
     internal const string ProbeUsage =
-        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json] | probe service [--json] [--out <path>] | probe widget --out <folder> [--set design] | probe setup-values [--out <path>]";
+        "Usage: Earshot.exe probe [audio|topology|nodes|services|task|battery|all] [--json] [--out <path>] | probe icon --out <folder> [--json] | probe service [--json] [--out <path>] | probe widget --out <folder> [--set design|icons] | probe setup-values [--out <path>]";
 
     internal const string ProbeIconTarget = "icon";
 
@@ -115,9 +115,9 @@ internal static partial class Program
                     return false;
                 }
 
-                if (i + 1 >= args.Count || args[i + 1] != ProbeWidgetDesignSet)
+                if (i + 1 >= args.Count || (args[i + 1] != ProbeWidgetDesignSet && args[i + 1] != ProbeWidgetIconsSet))
                 {
-                    error = "--set needs the name of a set: " + ProbeWidgetDesignSet + ".";
+                    error = "--set needs the name of a set: " + ProbeWidgetDesignSet + " or " + ProbeWidgetIconsSet + ".";
                     return false;
                 }
 
