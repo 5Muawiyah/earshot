@@ -93,9 +93,7 @@ public sealed class PublishManifestTests
         // The icon artwork inside Earshot.exe is the Apache licensed work of its publisher, changed, and that licence asks that a copy
         // of it travel with every copy of the work: its text, byte for byte as the repository holds it, is in the release and
         // listed, so install copies and checks it.
-        string artwork = Path.Combine(output, ArtworkLicence);
-        Assert.IsTrue(File.Exists(artwork), ArtworkLicence + " is not in the release, so the artwork's licence does not travel with it.");
-        Assert.Contains(ArtworkLicence, listed, ArtworkLicence + " ships and " + FileManifest.FileName + " does not list it, so install would not copy it.");
+        string artwork = Path.Combine(output, @"licences\MingCute\LICENSE");
         byte[] artworkLicence = File.ReadAllBytes(artwork);
         CollectionAssert.AreEqual(
             File.ReadAllBytes(Path.Combine(RepositoryRoot(), "third_party", "MingCute", "LICENSE")), artworkLicence,
@@ -273,10 +271,6 @@ public sealed class PublishManifestTests
     // is in no deps file, and it is not third party.
     private static readonly string[] EarshotsOwnBinaries = ["Earshot.exe"];
 
-    // The licence text of the icon artwork, where the release carries it. Kept apart from the list below, which the notices test also
-    // reads: THIRD-PARTY-NOTICES.txt does not name this path until its entry for the artwork is written.
-    private const string ArtworkLicence = @"licences\MingCute\LICENSE";
-
     // Where each carried licence text lands in the release, and what THIRD-PARTY-NOTICES.txt says about it. The
     // paths are the ones the publish writes, so a folder renamed on one side and not the other fails.
     private static readonly string[] LicenceTextsTheReleaseCarries =
@@ -286,6 +280,7 @@ public sealed class PublishManifestTests
         @"licences\Microsoft.WindowsDesktop.App.Runtime.win-x64\LICENSE",
         @"licences\System.Speech\THIRD-PARTY-NOTICES.TXT",
         @"licences\Earshot\LICENSE",
+        @"licences\MingCute\LICENSE",
     ];
 
     // Every published .dll and .exe that is neither the application's own nor accounted for by an entry in the deps

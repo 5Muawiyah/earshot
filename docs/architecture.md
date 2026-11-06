@@ -886,8 +886,11 @@ a mouse press hides it. The dialogs use a button that draws the same visual just
 since a child control cannot paint outside itself, and a list view that keeps its own item rectangle
 hidden.
 
-**Icons and words.** The icons are Segoe Fluent Icons, from the system font and never bundled, and a
-Segoe MDL2 Assets glyph stands in on a PC without it. A settings row is an icon and one to three words,
+**Icons and words.** The icons are MingCute Icons (Apache License 2.0), their path data built into
+Earshot.exe and drawn by Earshot itself, with no icon font and no icon file shipped. They are line by
+default and filled for on, selected or current states. The earbud mark is MingCute's AirPods icon, the
+left and right buds each one bud cut from the pair, and the case mark is its case icon. The tray icon and
+the tray menu's commands use the same icons. The licence text is in the release at licences\MingCute\LICENSE. A settings row is an icon and one to three words,
 the old description is its tooltip, and the card says less where an icon will do (a pin and the place, a
 clock and the age, a download arrow and the version). Every icon-only control has a tooltip and an
 accessible name, and the card describes its current controls to assistive technology as children in the

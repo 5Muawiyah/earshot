@@ -5,14 +5,17 @@ carries software that was not written for Earshot and is not covered by
 Earshot's licence. Each piece is listed below with its publisher, the name of
 its licence and where its terms can be read. No licence text is reproduced in
 this file, except for entry 5, a file that is part of Earshot.exe itself and so has no
-licences folder of its own. Every file listed is shipped exactly as its publisher built it. The
-exact version of each package in a given release is recorded in
+licences folder of its own. Every file listed is shipped exactly as its publisher built it,
+except the icon artwork of entry 6, which is part of Earshot.exe in the changed form entry 6
+describes. The exact version of each package in a given release is recorded in
 Earshot.deps.json, beside Earshot.exe.
 
 The licence texts themselves travel with the release, in the licences folder
 beside Earshot.exe, one folder per package. Each is the file the publisher put
 in its own package, copied at publish time and never edited. Earshot's own
-licence is there too, at licences\Earshot\LICENSE. The entries below say which
+licence is there too, at licences\Earshot\LICENSE. The icon artwork's licence is
+at licences\MingCute\LICENSE, copied from third_party\MingCute\LICENSE in the
+source repository. The entries below say which
 file belongs to which package, and say so plainly where a package ships none.
 
 
@@ -130,3 +133,19 @@ file belongs to which package, and say so plainly where a package ships none.
    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
    THE SOFTWARE.
+
+
+6. MingCute Icons, the icon artwork
+
+   Component:  MingCute Icons 3.1.0, the SVG files listed in
+               third_party\MingCute\manifest.json in the source repository
+   Publisher:  MingCute Design
+   Copyright:  no copyright line is given; the licence file's notice is the
+               unfilled Apache template
+   Licence:    Apache License, Version 2.0
+   Source:     https://github.com/mingcute-design/mingcute-icons, commit
+               9dc7d3ad074fb16477096a6a8109a6467d0e2fe3
+   Shipped:    inside Earshot.exe, changed: each icon's path data is converted
+               to drawing instructions, and the AirPods icon is split into its
+               left and right buds. No SVG file ships. Licence text:
+               licences\MingCute\LICENSE. The repository has no NOTICE file.

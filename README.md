@@ -445,6 +445,10 @@ protect those two files at least as much as Microsoft's do.
 every release, names each third-party component, its publisher, its licence
 and where to read the terms.
 
+The icons are from [MingCute Icons](https://github.com/mingcute-design/mingcute-icons)
+by MingCute Design, under the Apache License 2.0. I changed them to draw them in
+Earshot, and the licence text travels with every release.
+
 ---
 
 <div align="center"><sub>MIT licensed. The live tests are run by hand on real AirPods; the verification table says which have been.</sub></div>
