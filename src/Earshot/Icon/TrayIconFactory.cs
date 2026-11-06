@@ -85,7 +85,7 @@ internal sealed class TrayIconFactory
     // A new icon; the caller disposes it.
     public static Icon Create(int px, GlyphState state, Color ink)
     {
-        byte[] png = EarbudGlyph.RenderPng(px, state, ink);
+        byte[] png = TrayGlyph.RenderPng(px, state, ink);
         return IcoWriter.Load(IcoWriter.SingleFramePng(png, px), px);
     }
 
@@ -117,6 +117,6 @@ internal sealed class TrayIconFactory
         int size = metric > 0
             ? metric
             : (int)Math.Round(16.0 * (dpi == 0 ? 96 : dpi) / 96.0, MidpointRounding.AwayFromZero);
-        return Math.Clamp(size, EarbudGlyph.MinSize, EarbudGlyph.MaxSize);
+        return Math.Clamp(size, TrayGlyph.MinSize, TrayGlyph.MaxSize);
     }
 }

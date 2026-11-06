@@ -1,16 +1,6 @@
 using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 
 namespace Earshot.Icons;
-
-// The four tray states. Errors never change the glyph; they go to the tooltip and the card.
-internal enum GlyphState
-{
-    Disconnected,   // outlined earbuds
-    Connected,      // solid earbuds
-    Busy,           // solid earbuds at reduced opacity (connecting, disconnecting, allowing)
-    Blocked         // outlined earbuds with one thin diagonal slash
-}
 
 // Draws the earbud glyph at any pixel size.
 //
@@ -167,41 +157,7 @@ internal static class EarbudGlyph
 
     // A 32 bpp ARGB bitmap with the ink colour in every pixel and the coverage as straight alpha.
     // The caller disposes it.
-    public static Bitmap ToBitmap(ReadOnlySpan<byte> alpha, int px, Color ink)
-    {
-        ValidateSize(px);
-        if (alpha.Length != px * px)
-        {
-            throw new ArgumentException("The alpha buffer must hold px * px bytes.", nameof(alpha));
-        }
-
-        var pixels = new byte[px * px * 4];
-        for (int i = 0; i < alpha.Length; i++)
-        {
-            int o = i * 4;
-            pixels[o] = ink.B;
-            pixels[o + 1] = ink.G;
-            pixels[o + 2] = ink.R;
-            pixels[o + 3] = alpha[i];
-        }
-
-        var bitmap = new Bitmap(px, px, PixelFormat.Format32bppArgb);
-        BitmapData data = bitmap.LockBits(new Rectangle(0, 0, px, px), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-        try
-        {
-            // 32 bpp rows need no padding, so each row is exactly px * 4 bytes.
-            for (int y = 0; y < px; y++)
-            {
-                Marshal.Copy(pixels, y * px * 4, data.Scan0 + (y * data.Stride), px * 4);
-            }
-        }
-        finally
-        {
-            bitmap.UnlockBits(data);
-        }
-
-        return bitmap;
-    }
+    public static Bitmap ToBitmap(ReadOnlySpan<byte> alpha, int px, Color ink) => TrayGlyph.ToBitmap(alpha, px, ink);
 
     // The glyph as PNG bytes.
     public static byte[] RenderPng(int px, GlyphState state, Color ink)

@@ -86,7 +86,7 @@ internal static partial class Program
         byte[] png;
         try
         {
-            png = EarbudGlyph.RenderPng(px, state, ink);
+            png = TrayGlyph.RenderPng(px, state, ink);
         }
         catch (Exception ex) when (ex is ExternalException or ArgumentException)
         {

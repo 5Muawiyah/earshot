@@ -17,7 +17,7 @@ public sealed class IcoWriterTests
     [DataRow(256)]
     public void TheIcoHeaderDescribesOnePngFrame(int px)
     {
-        byte[] png = EarbudGlyph.RenderPng(px, GlyphState.Connected, Color.White);
+        byte[] png = TrayGlyph.RenderPng(px, GlyphState.Connected, Color.White);
 
         byte[] ico = IcoWriter.SingleFramePng(png, px);
         ReadOnlySpan<byte> span = ico;
@@ -44,7 +44,7 @@ public sealed class IcoWriterTests
     [DataRow(32)]
     public void TheIcoLoadsAsAnIconOfThatSize(int px)
     {
-        byte[] ico = IcoWriter.SingleFramePng(EarbudGlyph.RenderPng(px, GlyphState.Disconnected, Color.White), px);
+        byte[] ico = IcoWriter.SingleFramePng(TrayGlyph.RenderPng(px, GlyphState.Disconnected, Color.White), px);
 
         using var stream = new MemoryStream(ico);
         using var icon = new Icon(stream, px, px);
@@ -58,7 +58,7 @@ public sealed class IcoWriterTests
     public void TheIconStaysUsableAfterItsStreamIsGone()
     {
         const int px = 24;
-        using Icon icon = IcoWriter.Load(IcoWriter.SingleFramePng(EarbudGlyph.RenderPng(px, GlyphState.Connected, Color.White), px), px);
+        using Icon icon = IcoWriter.Load(IcoWriter.SingleFramePng(TrayGlyph.RenderPng(px, GlyphState.Connected, Color.White), px), px);
         using Bitmap bitmap = icon.ToBitmap();
 
         Assert.AreEqual(px, bitmap.Width);
@@ -68,8 +68,8 @@ public sealed class IcoWriterTests
     public void TheIconKeepsStraightAlpha()
     {
         const int px = 32;
-        byte[] alpha = EarbudGlyph.Coverage(px, GlyphState.Disconnected);
-        using Icon icon = IcoWriter.Load(IcoWriter.SingleFramePng(EarbudGlyph.RenderPng(px, GlyphState.Disconnected, Color.White), px), px);
+        byte[] alpha = TrayGlyph.Coverage(px, GlyphState.Disconnected);
+        using Icon icon = IcoWriter.Load(IcoWriter.SingleFramePng(TrayGlyph.RenderPng(px, GlyphState.Disconnected, Color.White), px), px);
         using Bitmap bitmap = icon.ToBitmap();
 
         int partial = 0;
@@ -101,8 +101,8 @@ public sealed class IcoWriterTests
         // alpha an edge pixel of coverage a comes out at about 255 * a; premultiplied data would give about
         // 255 * a * a, which is visibly darker.
         const int px = 32;
-        byte[] alpha = EarbudGlyph.Coverage(px, GlyphState.Connected);
-        using Icon icon = IcoWriter.Load(IcoWriter.SingleFramePng(EarbudGlyph.RenderPng(px, GlyphState.Connected, Color.White), px), px);
+        byte[] alpha = TrayGlyph.Coverage(px, GlyphState.Connected);
+        using Icon icon = IcoWriter.Load(IcoWriter.SingleFramePng(TrayGlyph.RenderPng(px, GlyphState.Connected, Color.White), px), px);
         using var target = new Bitmap(px, px, PixelFormat.Format24bppRgb);
         using (Graphics g = Graphics.FromImage(target))
         {
@@ -132,7 +132,7 @@ public sealed class IcoWriterTests
     [TestMethod]
     public void OnlyPngDataAndIconSizesAreAccepted()
     {
-        byte[] png = EarbudGlyph.RenderPng(16, GlyphState.Connected, Color.White);
+        byte[] png = TrayGlyph.RenderPng(16, GlyphState.Connected, Color.White);
 
         Assert.ThrowsExactly<ArgumentException>(() => IcoWriter.SingleFramePng([0x42, 0x4D, 0, 0, 0, 0, 0, 0], 16));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => IcoWriter.SingleFramePng(png, 0));
