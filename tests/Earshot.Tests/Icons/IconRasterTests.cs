@@ -26,6 +26,10 @@ namespace Earshot.Tests.Icons;
 [TestClass]
 public sealed class IconRasterTests
 {
+    private static readonly int[] BudBoxes = [10, 12, 16, 20, 24, 32, 40, 48, 64, 96];
+    private static readonly int[] EdgeBoxes = [10, 16, 20, 24, 32, 48, 64, 128, 256];
+    private static readonly IconRule[] BothRules = [IconRule.A, IconRule.B];
+
     private static readonly int[] Boxes = [10, 12, 13, 14, 15, 16, 18, 20, 21, 24, 25, 28, 30, 32, 40];
 
     // The icons drawn on the whole 24 grid (rule B): the sub-page status icons at 20 px and the tray menu's icons at the menu's size.
@@ -46,8 +50,10 @@ public sealed class IconRasterTests
 
     private const int Reference = 32;
 
-    // The outline filled without smoothing into a bitmap 32 times the mask's size and averaged to pixels. The mapping from the
-    // grid to the box is the rule's, written out here.
+    // The outline filled without smoothing into a bitmap 32 times the mask's size and averaged to pixels. The placement is written
+    // from the spec's words, not from the product's formula: the rule's scale puts the grid on the box (rule A: units 2 to 22, rule B:
+    // 0 to 24) and the same row of the box is the same row of the grid for every icon, a bud included; only a bud's columns differ,
+    // for the middle of its own bounds is the middle of the box.
     private static float[] ReferenceCoverage(Icon icon, IconStyle style, int box, IconRule rule)
     {
         int side = box + 2;
@@ -55,18 +61,19 @@ public sealed class IconRasterTests
         float scale = rule == IconRule.A ? box / 20f : box / 24f;
         float origin = rule == IconRule.A ? 2f : 0f;
         IconOutline outline = IconCatalogue.Outline(icon, style);
-        float shift = 0f;
+        float offsetY = (1f - (origin * scale)) * Reference;
+        float offsetX = offsetY;
         if (icon is Icon.AirPodsLeft or Icon.AirPodsRight)
         {
             RectangleF b = outline.Bounds();
-            shift = 12f - (b.X + (b.Width / 2f));
+            float middleOfBounds = b.X + (b.Width / 2f);
+            offsetX = (1f + (box / 2f) - (middleOfBounds * scale)) * Reference;
         }
 
-        float offset = (((shift - origin) * scale) + 1f) * Reference;
         var mask = new float[side * side];
         using var bitmap = new Bitmap(big, big, PixelFormat.Format32bppArgb);
         using (Graphics g = Graphics.FromImage(bitmap))
-        using (GraphicsPath path = outline.ToPath(scale * Reference, offset, offset))
+        using (GraphicsPath path = outline.ToPath(scale * Reference, offsetX, offsetY))
         using (var brush = new SolidBrush(Color.Black))
         {
             g.Clear(Color.Transparent);
@@ -306,6 +313,87 @@ public sealed class IconRasterTests
                 Assert.AreEqual(17.0, middle, 0.6, bud + " " + style + ": the bud's middle is the box's middle");
             }
         }
+    }
+
+    // The rows and columns that hold ink (a pixel covered by more than half), and the sum of the coverage.
+    private static (int Top, int Bottom, int Left, int Right, long Ink) Extent(ReadOnlySpan<byte> mask, int side)
+    {
+        int top = int.MaxValue, bottom = -1, left = int.MaxValue, right = -1;
+        long ink = 0;
+        for (int y = 0; y < side; y++)
+        {
+            for (int x = 0; x < side; x++)
+            {
+                byte b = mask[(y * side) + x];
+                ink += b;
+                if (b > 127)
+                {
+                    top = Math.Min(top, y);
+                    bottom = Math.Max(bottom, y);
+                    left = Math.Min(left, x);
+                    right = Math.Max(right, x);
+                }
+            }
+        }
+
+        return (top, bottom, left, right, ink);
+    }
+
+    // Spec section 4: a bud keeps the pair's rows (the grid's 2 to 22 fills the height) and moves only sideways, and the two buds
+    // together are the pair. A bud that drops or rises by its sideways shift, or is clipped, fails the rows, the ink or both.
+    [TestMethod]
+    public void ABudKeepsThePairsRowsAndHalfItsInkAtEverySize()
+    {
+        foreach (IconRule rule in BothRules)
+        {
+            foreach (IconStyle style in Styles(Icon.AirPodsLeft))
+            {
+                foreach (int box in BudBoxes)
+                {
+                    int side = box + 2;
+                    string what = rule + " " + style + " " + box + " px: ";
+                    var pair = Extent(IconRaster.Coverage(Icon.AirPods, style, box, rule).Span, side);
+                    foreach (Icon bud in new[] { Icon.AirPodsLeft, Icon.AirPodsRight })
+                    {
+                        var e = Extent(IconRaster.Coverage(bud, style, box, rule).Span, side);
+                        Assert.AreEqual(pair.Top, e.Top, 1, what + bud + " starts on the pair's top row");
+                        Assert.AreEqual(pair.Bottom, e.Bottom, 1, what + bud + " ends on the pair's bottom row");
+                        Assert.AreEqual(pair.Ink / 2.0, e.Ink, pair.Ink * 0.02, what + bud + " has half the pair's ink");
+                    }
+                }
+            }
+        }
+    }
+
+    // Nothing is cut off by the mask: no icon's ink reaches the outermost row or column of its mask (a pixel outside the box), at any
+    // box size, line or filled, in the rule the icon is drawn in (the whole-grid icons in B, the rest in A). An outline that ran past
+    // the art area by more than the apron would be cut flat by the mask's edge; this finds it.
+    [TestMethod]
+    public void NoIconsInkTouchesTheMaskEdgeAtAnyBoxSize()
+    {
+        var failures = new ConcurrentBag<string>();
+        Parallel.ForEach(IconCatalogue.All, icon =>
+        {
+            foreach (IconStyle style in Styles(icon))
+            {
+                IconRule rule = RuleBIcons.Contains(icon) ? IconRule.B : IconRule.A;
+                foreach (int box in EdgeBoxes)
+                {
+                    int side = box + 2;
+                    ReadOnlySpan<byte> mask = IconRaster.Coverage(icon, style, box, rule).Span;
+                    for (int i = 0; i < side; i++)
+                    {
+                        if (mask[i] > 0 || mask[((side - 1) * side) + i] > 0 || mask[i * side] > 0 || mask[(i * side) + side - 1] > 0)
+                        {
+                            failures.Add(icon + " " + style + " " + rule + " " + box + " px: ink on the mask's edge");
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        Assert.IsEmpty(failures, string.Join(", ", failures.Order().Take(20)));
     }
 
     // ---- The turn

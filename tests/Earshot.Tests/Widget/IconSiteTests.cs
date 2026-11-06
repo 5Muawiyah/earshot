@@ -150,6 +150,39 @@ public sealed class IconSiteTests
         Assert.IsGreaterThan(0, inked, d.Icon + " at " + d.Box + " has no pixel.");
     }
 
+    // What is on the page, not what the mask says: the rows and columns in the box and its apron where the page differs from the same
+    // page without its icons by more than a quarter in some channel. A bud has to be whole and in its place there: its top and bottom
+    // are the pair's art rows (the grid's 2 to 22 is the box's height, spec section 4) to within a pixel, and none of it is cut by the
+    // edge of the mask, which is the apron's outer pixel.
+    private static void AssertBudIsWholeAndInPlace(Scene s, DrawnIcon d)
+    {
+        RectangleF art = IconCatalogue.Outline(Icon.AirPods, d.Style).Bounds();
+        double wantTop = d.Box.Y + s.Offset.Height + ((art.Y - 2.0) / 20.0 * d.BoxPx);
+        double wantBottom = d.Box.Y + s.Offset.Height + ((art.Bottom - 2.0) / 20.0 * d.BoxPx);
+        int left = d.Box.X + s.Offset.Width - IconRaster.Apron;
+        int top = d.Box.Y + s.Offset.Height - IconRaster.Apron;
+        int side = IconRaster.MaskSide(d.BoxPx);
+        int first = int.MaxValue, last = -1;
+        for (int y = 0; y < side; y++)
+        {
+            for (int x = 0; x < side; x++)
+            {
+                Color px = s.Bitmap.GetPixel(left + x, top + y);
+                Color bg = s.Background.GetPixel(left + x, top + y);
+                if (Math.Max(Math.Abs(px.R - bg.R), Math.Max(Math.Abs(px.G - bg.G), Math.Abs(px.B - bg.B))) > 64)
+                {
+                    first = Math.Min(first, y);
+                    last = Math.Max(last, y);
+                    Assert.IsTrue(x is > 0 && x < side - 1 && y is > 0 && y < side - 1, d.Icon + " " + d.Style + " at " + d.Box + ": ink on the edge of its mask at " + x + "," + y);
+                }
+            }
+        }
+
+        Assert.IsGreaterThan(-1, last, d.Icon + " " + d.Style + " at " + d.Box + ": nothing on the page");
+        Assert.AreEqual(wantTop, top + first, 1.0, d.Icon + " " + d.Style + " at " + d.Box + ": the bud starts on the pair's top row");
+        Assert.AreEqual(wantBottom, top + last + 1, 1.0, d.Icon + " " + d.Style + " at " + d.Box + ": the bud ends on the pair's bottom row");
+    }
+
     // ---- The main page
 
     [TestMethod]
@@ -258,15 +291,15 @@ public sealed class IconSiteTests
         Each(false, (c, dpi) => c.Render(MainModel(), dpi), s =>
         {
             WidgetCardLayout.Layout layout = s.Card!.CurrentMainLayout;
-            Expect(s, Icon.AirPodsLeft, IconStyle.Filled, s.Colours.Text, Math.Min(layout.Left.Glyph.Width, layout.Left.Glyph.Height), "WidgetCard.cs", layout.Left.Glyph);
-            Expect(s, Icon.AirPodsRight, IconStyle.Filled, s.Colours.Text, Math.Min(layout.Right.Glyph.Width, layout.Right.Glyph.Height), "WidgetCard.cs", layout.Right.Glyph);
+            AssertBudIsWholeAndInPlace(s, Expect(s, Icon.AirPodsLeft, IconStyle.Filled, s.Colours.Text, Math.Min(layout.Left.Glyph.Width, layout.Left.Glyph.Height), "WidgetCard.cs", layout.Left.Glyph));
+            AssertBudIsWholeAndInPlace(s, Expect(s, Icon.AirPodsRight, IconStyle.Filled, s.Colours.Text, Math.Min(layout.Right.Glyph.Width, layout.Right.Glyph.Height), "WidgetCard.cs", layout.Right.Glyph));
             Expect(s, Icon.AirPodsCase, IconStyle.Filled, s.Colours.Text, Math.Min(layout.Case.Glyph.Width, layout.Case.Glyph.Height), "WidgetCard.cs", layout.Case.Glyph);
         });
         Each(false, (c, dpi) => c.Render(MainModel(Heard(TimeSpan.FromMinutes(4))), dpi), s =>
         {
             WidgetCardLayout.Layout layout = s.Card!.CurrentMainLayout;
-            Expect(s, Icon.AirPodsLeft, IconStyle.Line, s.Colours.Text, Math.Min(layout.Left.Glyph.Width, layout.Left.Glyph.Height), "WidgetCard.cs", layout.Left.Glyph);
-            Expect(s, Icon.AirPodsRight, IconStyle.Line, s.Colours.Text, Math.Min(layout.Right.Glyph.Width, layout.Right.Glyph.Height), "WidgetCard.cs", layout.Right.Glyph);
+            AssertBudIsWholeAndInPlace(s, Expect(s, Icon.AirPodsLeft, IconStyle.Line, s.Colours.Text, Math.Min(layout.Left.Glyph.Width, layout.Left.Glyph.Height), "WidgetCard.cs", layout.Left.Glyph));
+            AssertBudIsWholeAndInPlace(s, Expect(s, Icon.AirPodsRight, IconStyle.Line, s.Colours.Text, Math.Min(layout.Right.Glyph.Width, layout.Right.Glyph.Height), "WidgetCard.cs", layout.Right.Glyph));
             Expect(s, Icon.AirPodsCase, IconStyle.Line, s.Colours.Text, Math.Min(layout.Case.Glyph.Width, layout.Case.Glyph.Height), "WidgetCard.cs", layout.Case.Glyph);
         });
         Each(false, (c, dpi) => c.Render(MainModel(Heard(TimeSpan.FromSeconds(5), AirPodsWhere.Elsewhere)), dpi), s =>

@@ -94,7 +94,8 @@ internal static class IconRaster
         float origin = key.Rule == IconRule.A ? IconOutline.ContentStart : 0f;
         IconOutline outline = IconCatalogue.Outline(key.Icon, key.Style);
 
-        // The art's grid unit u lands on sample (u + shift - origin) * scale * 8 + Apron * 8.
+        // The art's grid unit u lands on sample (u + shift - origin) * scale * 8 + Apron * 8 across, and (u - origin) * scale * 8 +
+        // Apron * 8 down: the shift is sideways only, so a bud keeps the pair's rows.
         float shift = 0f;
         if (IconCatalogue.IsBud(key.Icon))
         {
@@ -103,7 +104,8 @@ internal static class IconRaster
         }
 
         float sampleScale = scale * Samples;
-        float offset = ((shift - origin) * sampleScale) + (Apron * Samples);
+        float offsetX = ((shift - origin) * sampleScale) + (Apron * Samples);
+        float offsetY = (-origin * sampleScale) + (Apron * Samples);
         float centre = (Apron + (key.Box / 2f)) * Samples;
         float degrees = key.Step * (360f / RotationSteps);
 
@@ -111,7 +113,7 @@ internal static class IconRaster
         using (var bitmap = new Bitmap(big, big, PixelFormat.Format32bppArgb))
         {
             using (Graphics g = Graphics.FromImage(bitmap))
-            using (GraphicsPath path = outline.ToPath(sampleScale, offset, offset, degrees, centre, centre))
+            using (GraphicsPath path = outline.ToPath(sampleScale, offsetX, offsetY, degrees, centre, centre))
             using (var brush = new SolidBrush(Color.White))
             {
                 g.Clear(Color.Transparent);
