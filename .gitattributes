@@ -13,3 +13,7 @@
 *.png     binary
 *.ico     binary
 *.zip     binary
+
+# MingCute icon files are vendored byte for byte: no line-end change on checkout, or their hashes fail.
+third_party/MingCute/LICENSE -text
+third_party/MingCute/svg/** -text
