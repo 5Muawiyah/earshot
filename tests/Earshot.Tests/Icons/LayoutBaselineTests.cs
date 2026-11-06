@@ -16,6 +16,7 @@ using Earshot.Tray;
 using Earshot.Update;
 using Earshot.Widget;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Icon = Earshot.Icons.Catalogue.Icon;
 
 namespace Earshot.Tests.Icons;
 
@@ -442,7 +443,8 @@ public sealed class LayoutBaselineTests
     private static string Key(int dpi, double textScale) => "dpi " + dpi + " text " + textScale.ToString("0.00", CultureInfo.InvariantCulture);
 
     // A value as one line of text: numbers, rectangles, enums, strings, lists and the public properties of a record, in
-    // declaration order. A property of type char (the glyph a part draws) and a delegate (what a press does) are left out.
+    // declaration order. A property of type char or Icon (the glyph a part draws, a code point before the icons and a catalogue entry
+    // after them) and a delegate (what a press does) are left out.
     private static string Dump(object? value)
     {
         var sb = new StringBuilder();
@@ -512,7 +514,8 @@ public sealed class LayoutBaselineTests
         bool firstProperty = true;
         foreach (PropertyInfo property in value.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (property.GetIndexParameters().Length > 0 || property.PropertyType == typeof(char) || typeof(Delegate).IsAssignableFrom(property.PropertyType))
+            Type propertyType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
+            if (property.GetIndexParameters().Length > 0 || propertyType == typeof(char) || propertyType == typeof(Icon) || typeof(Delegate).IsAssignableFrom(propertyType))
             {
                 continue;
             }
