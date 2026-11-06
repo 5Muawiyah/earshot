@@ -436,18 +436,32 @@ public sealed class IconRasterTests
         Assert.AreNotEqual(Cx(none), Cx(one), 0.05, "the ink of the top half moves when the icon turns");
     }
 
+    // More distinct masks than the table holds (boxes 4 to 43, both rules, every step: 800 keys against a limit of 512), the count
+    // checked after each one: it never passes the limit and it falls at least once, so the table was emptied. Without the emptying
+    // in IconRaster.Coverage the count reaches 800 and this fails, whatever other tests have put in the table before it.
     [TestMethod]
     public void TheCacheKeepsAtMostItsLimitOfMasks()
     {
+        int distinct = 0, highest = 0, drops = 0, before = IconRaster.CachedMasks;
         for (int box = IconRaster.MinBox; box < IconRaster.MinBox + 40; box++)
         {
-            foreach (int step in new[] { 0, 3, 6 })
+            foreach (IconRule rule in BothRules)
             {
-                _ = IconRaster.Coverage(Icon.Check, IconStyle.Line, box, IconRule.A, step);
-                _ = IconRaster.Coverage(Icon.Check, IconStyle.Line, box, IconRule.B, step);
+                for (int step = 0; step < IconRaster.RotationSteps; step++)
+                {
+                    int was = IconRaster.CachedMasks;
+                    _ = IconRaster.Coverage(Icon.Check, IconStyle.Line, box, rule, step);
+                    int now = IconRaster.CachedMasks;
+                    distinct++;
+                    highest = Math.Max(highest, now);
+                    drops += now < was ? 1 : 0;
+                    Assert.IsLessThanOrEqualTo(IconRaster.CacheLimit, now, "after " + distinct + " distinct masks");
+                }
             }
         }
 
+        Assert.IsGreaterThan(IconRaster.CacheLimit, distinct, "the test inserts more than the table holds");
+        Assert.IsGreaterThanOrEqualTo(1, drops, "the table was emptied at least once (it held " + before + " before the test and reached " + highest + ")");
         Assert.IsLessThanOrEqualTo(IconRaster.CacheLimit, IconRaster.CachedMasks);
         Assert.Throws<ArgumentOutOfRangeException>(() => IconRaster.Coverage(Icon.Check, IconStyle.Line, 3));
         Assert.Throws<ArgumentOutOfRangeException>(() => IconRaster.Coverage(Icon.Check, IconStyle.Line, 257));
