@@ -13,7 +13,8 @@
       4. checks Earshot.files.json is there, that every file it lists is present with
          the SHA-256 it records, and that the folder holds nothing else. install reads
          the same manifest, so a release that fails here could not be installed;
-      5. zips the folder, with Earshot as the folder inside the zip;
+      5. zips the folder, with Earshot as the folder inside the zip, then opens the zip and checks that
+         licences\MingCute\LICENSE, the icon artwork's licence, is in it and is the pinned text;
       6. writes the zip's SHA-256 beside it as Earshot-<version>-win-x64.zip.sha256, in the
          sha256sum form (hex, two spaces, file name), UTF-8 without a byte order mark,
          which is what the in-app update reads from the release;
@@ -121,6 +122,43 @@ function Get-PeFacts {
         return [pscustomobject]@{ DependentLoadFlags = $flags; Imports = @($imports) }
     }
     finally { $stream.Dispose() }
+}
+
+# The icon artwork inside Earshot.exe is a changed copy of an Apache licensed work, and that licence asks that its text travel
+# with every copy. The licence file is published beside the application (licences\MingCute\LICENSE), so it is in the zip, and this
+# opens the zip that was just written and checks that the entry is there once and is the pinned text, so a zip without it, or with
+# another file in its place, is not a release. Returns the problem as text, or nothing when the zip is right. Entry names are
+# compared with / for \ so a zip written by an older .NET is read the same.
+# https://learn.microsoft.com/en-us/dotnet/api/system.io.compression.zipfile.openread
+function Get-ArtworkLicenceProblem {
+    param(
+        [string]$ZipPath,
+        [string]$Entry = 'Earshot/licences/MingCute/LICENSE',
+        [string]$Sha256 = 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30'
+    )
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        try {
+            $found = @($archive.Entries | Where-Object { ($_.FullName -replace '\\', '/') -eq $Entry })
+            if ($found.Count -ne 1) {
+                return ("The zip holds " + $found.Count + " entries named $Entry, not one, so the icon artwork's licence does not travel with the release.")
+            }
+            $stream = $found[0].Open()
+            try {
+                $sha = [System.Security.Cryptography.SHA256]::Create()
+                try { $actual = ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLowerInvariant() }
+                finally { $sha.Dispose() }
+            }
+            finally { $stream.Dispose() }
+            if ($actual -ne $Sha256.ToLowerInvariant()) {
+                return "$Entry in the zip has the SHA-256 $actual, not the pinned $Sha256."
+            }
+        }
+        finally { $archive.Dispose() }
+    }
+    catch { return ("The zip could not be read to check the icon artwork's licence: " + $_.Exception.Message) }
+    return $null
 }
 
 $project = Join-Path $Root 'src\Earshot\Earshot.csproj'
@@ -247,6 +285,12 @@ try {
 catch {
     if (Test-Path $zipPath) { Remove-Item -Force $zipPath -ErrorAction SilentlyContinue }
     Stop-Release ("The zip could not be written: " + $_.Exception.Message)
+}
+
+$licenceProblem = Get-ArtworkLicenceProblem -ZipPath $zipPath
+if ($licenceProblem) {
+    Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
+    Stop-Release $licenceProblem
 }
 
 $result.zip_bytes = (Get-Item $zipPath).Length

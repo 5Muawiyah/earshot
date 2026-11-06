@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using Earshot.Boot.Gate;
 using Earshot.Contracts;
+using Earshot.Tests.LiveTests;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Earshot.Tests.Phase4;
@@ -87,6 +89,18 @@ public sealed class PublishManifestTests
             Assert.Contains(licence, listed, licence + " ships and " + FileManifest.FileName + " does not list it, so install would not copy it.");
             Assert.IsTrue(new FileInfo(full).Length > 0, licence + " is empty.");
         }
+
+        // The icon artwork inside Earshot.exe is the Apache licensed work of its publisher, changed, and that licence asks that a copy
+        // of it travel with every copy of the work: its text, byte for byte as the repository holds it, is in the release and
+        // listed, so install copies and checks it.
+        string artwork = Path.Combine(output, ArtworkLicence);
+        Assert.IsTrue(File.Exists(artwork), ArtworkLicence + " is not in the release, so the artwork's licence does not travel with it.");
+        Assert.Contains(ArtworkLicence, listed, ArtworkLicence + " ships and " + FileManifest.FileName + " does not list it, so install would not copy it.");
+        byte[] artworkLicence = File.ReadAllBytes(artwork);
+        CollectionAssert.AreEqual(
+            File.ReadAllBytes(Path.Combine(RepositoryRoot(), "third_party", "MingCute", "LICENSE")), artworkLicence,
+            "The artwork's licence ships as the repository holds it.");
+        Assert.AreEqual(Earshot.Tests.Icons.VendoredFilesTests.LicenceSha256, Convert.ToHexStringLower(SHA256.HashData(artworkLicence)), "The published artwork licence is the pinned text.");
 
         // Not just a file of the right name: the .NET runtime's own LICENSE.TXT is the MIT text, and the permission
         // notice is the sentence MIT asks to be carried. The notices file is the one place that must not hold it.
@@ -173,12 +187,95 @@ public sealed class PublishManifestTests
             "A binary the notices name is still reported: " + string.Join(", ", named));
     }
 
+    // tools\build-release.ps1 opens the zip it has just written and refuses it unless the icon artwork's licence is in it, once, as the
+    // pinned text. The function that does it is read out of the script itself and run in Windows PowerShell 5.1 (the script's own
+    // host) on zips made here, so what is tested is the code that runs at release time, not a copy of it.
+    [TestMethod]
+    public void TheReleaseScriptRefusesAZipWhoseArtworkLicenceIsMissingChangedOrRepeated()
+    {
+        string host = WindowsPowerShellHost.Path51();
+        if (!File.Exists(host))
+        {
+            Assert.Inconclusive("Windows PowerShell 5.1 is not on this PC.");
+        }
+
+        using var temp = new TempFolder();
+        byte[] licence = File.ReadAllBytes(Path.Combine(RepositoryRoot(), "third_party", "MingCute", "LICENSE"));
+        byte[] changed = [.. licence];
+        changed[100] ^= 0x01;
+        byte[] other = [1, 2, 3];
+        string entry = "Earshot/licences/MingCute/LICENSE";
+
+        string good = MakeZip(temp.Path, "good.zip", ("Earshot/Earshot.exe", other), (entry, licence));
+        string oldNames = MakeZip(temp.Path, "backslashes.zip", ("Earshot\\Earshot.exe", other), ("Earshot\\licences\\MingCute\\LICENSE", licence));
+        string missing = MakeZip(temp.Path, "missing.zip", ("Earshot/Earshot.exe", other), ("Earshot/licences/Earshot/LICENSE", licence));
+        string wrong = MakeZip(temp.Path, "wrong.zip", ("Earshot/Earshot.exe", other), (entry, changed));
+        string twice = MakeZip(temp.Path, "twice.zip", (entry, licence), (entry, licence));
+
+        Assert.AreEqual("OK", CheckZip(host, temp.Path, good));
+        Assert.AreEqual("OK", CheckZip(host, temp.Path, oldNames), "Entry names written with backslashes are read the same.");
+
+        string absent = CheckZip(host, temp.Path, missing);
+        StringAssert.StartsWith(absent, "PROBLEM: The zip holds 0 entries named " + entry);
+        string altered = CheckZip(host, temp.Path, wrong);
+        StringAssert.StartsWith(altered, "PROBLEM: " + entry + " in the zip has the SHA-256 ");
+        StringAssert.Contains(altered, "not the pinned cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30");
+        StringAssert.StartsWith(CheckZip(host, temp.Path, twice), "PROBLEM: The zip holds 2 entries named " + entry);
+        StringAssert.StartsWith(CheckZip(host, temp.Path, Path.Combine(temp.Path, "not-there.zip")), "PROBLEM: The zip could not be read");
+
+        // The script itself calls it on the zip it has written, before the zip's hash is taken.
+        string script = File.ReadAllText(Path.Combine(RepositoryRoot(), "tools", "build-release.ps1"));
+        int check = script.IndexOf("Get-ArtworkLicenceProblem -ZipPath $zipPath", StringComparison.Ordinal);
+        int hash = script.IndexOf("$result.zip_sha256 = (Get-FileHash", StringComparison.Ordinal);
+        Assert.IsGreaterThan(0, check, "build-release.ps1 never checks the zip.");
+        Assert.IsLessThan(hash, check, "The check comes after the zip is written and before it is hashed.");
+    }
+
+    private static string MakeZip(string folder, string name, params (string Entry, byte[] Bytes)[] entries)
+    {
+        string path = Path.Combine(folder, name);
+        using ZipArchive archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        foreach ((string entry, byte[] bytes) in entries)
+        {
+            using Stream stream = archive.CreateEntry(entry).Open();
+            stream.Write(bytes);
+        }
+
+        return path;
+    }
+
+    private static string CheckZip(string host, string folder, string zip)
+    {
+        string driver = Path.Combine(folder, "check.ps1");
+        File.WriteAllText(driver, string.Join(
+            Environment.NewLine,
+            "$ErrorActionPreference = 'Stop'",
+            "$tree = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$null, [ref]$null)",
+            "$fn = $tree.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Get-ArtworkLicenceProblem' }, $true)",
+            "if ($null -eq $fn) { 'NOFUNCTION'; exit 3 }",
+            ". ([scriptblock]::Create($fn.Extent.Text))",
+            "$problem = Get-ArtworkLicenceProblem -ZipPath $args[1]",
+            "if ($problem) { 'PROBLEM: ' + $problem } else { 'OK' }"));
+        ProcessStartInfo info = WindowsPowerShellHost.CreateStartInfo(
+            host, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", driver, Path.Combine(RepositoryRoot(), "tools", "build-release.ps1"), zip]);
+        using Process process = Process.Start(info)!;
+        string output = process.StandardOutput.ReadToEnd();
+        string errors = process.StandardError.ReadToEnd();
+        Assert.IsTrue(process.WaitForExit(60_000), "The check did not finish.");
+        Assert.AreEqual(0, process.ExitCode, "The check failed to run: " + output + errors);
+        return output.Trim();
+    }
+
     private const string OrphanBinary = "Contoso.Native.dll";
     private static readonly string[] FixtureOwnBinaries = ["Fixture.exe", "Fixture.dll"];
 
     // The apphost. Earshot.dll is named by Earshot's own entry in the deps file; the exe the SDK builds around it
     // is in no deps file, and it is not third party.
     private static readonly string[] EarshotsOwnBinaries = ["Earshot.exe"];
+
+    // The licence text of the icon artwork, where the release carries it. Kept apart from the list below, which the notices test also
+    // reads: THIRD-PARTY-NOTICES.txt does not name this path until its entry for the artwork is written.
+    private const string ArtworkLicence = @"licences\MingCute\LICENSE";
 
     // Where each carried licence text lands in the release, and what THIRD-PARTY-NOTICES.txt says about it. The
     // paths are the ones the publish writes, so a folder renamed on one side and not the other fails.

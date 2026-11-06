@@ -108,6 +108,7 @@
       <EarshotLicenceText Condition="'$(SelfContained)' == 'true'" Include="$(EarshotDesktopRuntimePack)\LICENSE" RelativePath="licences\Microsoft.WindowsDesktop.App.Runtime.win-x64\LICENSE" />
       <EarshotLicenceText Include="$(PkgSystem_Speech)\THIRD-PARTY-NOTICES.TXT" RelativePath="licences\System.Speech\THIRD-PARTY-NOTICES.TXT" />
       <EarshotLicenceText Include="$(EarshotRepositoryRoot)\LICENSE" RelativePath="licences\Earshot\LICENSE" />
+      <EarshotLicenceText Include="$(EarshotRepositoryRoot)\third_party\MingCute\LICENSE" RelativePath="licences\MingCute\LICENSE" />
       <EarshotMissingLicenceText Include="@(EarshotLicenceText)" Condition="!Exists('%(Identity)')" />
     </ItemGroup>
     <Error Condition="'@(EarshotMissingLicenceText)' != ''" Text="The release may not ship without the licence text of what it carries, and these files were not where this publish looked for them: @(EarshotMissingLicenceText->'%(Identity)', '; '). Each is read from a restored package folder or from the repository root, so check that the package restored and that the publisher still ships the file under that name." />
